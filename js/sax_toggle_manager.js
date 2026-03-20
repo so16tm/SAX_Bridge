@@ -40,11 +40,32 @@ function saveConfig(node, config) {
 // Item helpers
 // ---------------------------------------------------------------------------
 
-// グループを title + pos でマッチする（pos なしの旧データは title のみ）
+// グループ存在確認用: pos OR title どちらかが一致すれば存在すると判断（Rescan の missing 判定に使用）
 function matchGroup(g, item) {
-    if (g.title !== item.title) return false;
-    if (item.pos == null) return true;
-    return Math.abs(g.pos[0] - item.pos[0]) <= 8 && Math.abs(g.pos[1] - item.pos[1]) <= 8;
+    if (item.pos == null) return g.title === item.title;
+    const posMatch = Math.abs(g.pos[0] - item.pos[0]) <= 8 && Math.abs(g.pos[1] - item.pos[1]) <= 8;
+    return posMatch || g.title === item.title;
+}
+
+// グループを exact → pos優先 → title優先 の順で特定する
+// - 移動された（title が同じ、pos が変わった）→ title でマッチして pos を更新
+// - 名称変更された（pos が同じ、title が変わった）→ pos でマッチして title を更新
+function findGroup(item) {
+    const groups = app.graph._groups ?? [];
+    if (item.pos == null) return groups.find(g => g.title === item.title) ?? null;
+    // 1. exact: pos と title 両方一致
+    const exact = groups.find(g =>
+        g.title === item.title &&
+        Math.abs(g.pos[0] - item.pos[0]) <= 8 && Math.abs(g.pos[1] - item.pos[1]) <= 8
+    );
+    if (exact) return exact;
+    // 2. pos-primary: 名称変更されたケース
+    const byPos = groups.find(g =>
+        Math.abs(g.pos[0] - item.pos[0]) <= 8 && Math.abs(g.pos[1] - item.pos[1]) <= 8
+    );
+    if (byPos) return byPos;
+    // 3. title-primary: 移動されたケース
+    return groups.find(g => g.title === item.title) ?? null;
 }
 
 function isSubgraphNode(n) { return n.subgraph != null; }
@@ -97,10 +118,8 @@ function getNodesInGroup(group) {
 function applyItem(item, value) {
     const mode = value ? MODE_ACTIVE : MODE_BYPASS;
     if (item.type === "group") {
-        for (const g of (app.graph._groups ?? []))
-            if (matchGroup(g, item))
-                for (const n of getNodesInGroup(g))
-                    n.mode = mode;
+        const g = findGroup(item);
+        if (g) for (const n of getNodesInGroup(g)) n.mode = mode;
     } else if (item.type === "node") {
         const n = app.graph.getNodeById(item.id);
         if (n) n.mode = mode;
@@ -113,8 +132,8 @@ function applyItem(item, value) {
 
 function getItemCurrentValue(item) {
     if (item.type === "group") {
-        for (const g of (app.graph._groups ?? [])) {
-            if (!matchGroup(g, item)) continue;
+        const g = findGroup(item);
+        if (g) {
             const nodes = getNodesInGroup(g);
             if (nodes.length > 0) return nodes[0].mode !== MODE_BYPASS;
         }
@@ -177,6 +196,57 @@ function inX(pos, x, w) { return pos[0] >= x && pos[0] <= x + w; }
 // ---------------------------------------------------------------------------
 // Back navigation — state & localStorage
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// グループ自動同期（移動・名称変更をインメモリ→config に遅延反映）
+// ---------------------------------------------------------------------------
+
+let _groupSyncTimer = null;
+let _groupSyncNode  = null;
+
+function syncGroupsToConfig(node) {
+    // ウィジェットの closed-over item は draw() で最新化済み
+    // getConfig の stale 値を上書きしてから saveConfig する
+    const cfg      = getConfig(node);
+    const toggleWs = (node.widgets ?? []).filter(w => w.type === "__sax_toggle");
+    let changed    = false;
+
+    for (let i = 0; i < Math.min(toggleWs.length, cfg.managed.length); i++) {
+        const liveItem = toggleWs[i].item;
+        const fi       = cfg.managed[i];
+        if (!liveItem || !fi || fi.type !== "group" || liveItem.type !== "group") continue;
+
+        const titleChanged = liveItem.title !== fi.title;
+        const posChanged   = fi.pos != null && liveItem.pos != null && (
+            Math.abs(liveItem.pos[0] - fi.pos[0]) > 8 ||
+            Math.abs(liveItem.pos[1] - fi.pos[1]) > 8
+        );
+        if (!titleChanged && !posChanged) continue;
+
+        const oldKey = itemKey(fi);
+        fi.title = liveItem.title;
+        if (fi.pos != null && liveItem.pos != null) fi.pos = [...liveItem.pos];
+        const newKey = itemKey(fi);
+        if (oldKey !== newKey) {
+            for (const s of Object.values(cfg.scenes)) {
+                if (oldKey in s) { s[newKey] = s[oldKey]; delete s[oldKey]; }
+            }
+        }
+        changed = true;
+    }
+    if (changed) saveConfig(node, cfg);
+}
+
+function scheduleGroupSync(node) {
+    if (_groupSyncTimer !== null) clearTimeout(_groupSyncTimer);
+    _groupSyncNode  = node;
+    _groupSyncTimer = setTimeout(() => {
+        _groupSyncTimer = null;
+        const n = _groupSyncNode;
+        _groupSyncNode = null;
+        if (n) syncGroupsToConfig(n);
+    }, 500);
+}
 
 const LS_BACK_POS = "sax_tm_back_pos";
 
@@ -275,7 +345,7 @@ function navigateToItem(item) {
                 n.pos[1] + (n.size?.[1] ?? 0) / 2
             );
         } else if (item.type === "group") {
-            const g = (app.graph._groups ?? []).find(g => g.title === item.title);
+            const g = findGroup(item);
             if (g) panCanvasTo(g.pos[0] + g.size[0] / 2, g.pos[1] + g.size[1] / 2);
         }
     } catch (e) {
@@ -365,6 +435,23 @@ function runRescan(node) {
         return false;
     });
     for (const item of config.managed) {
+        if (item.type === "group") {
+            const g = findGroup(item);
+            if (g) {
+                const oldKey = itemKey(item);
+                // 名称変更への追従: pos で特定された場合に title を更新
+                item.title = g.title;
+                // 移動への追従: title で特定された場合に pos を更新
+                if (item.pos != null) item.pos = [g.pos[0], g.pos[1]];
+                const newKey = itemKey(item);
+                // scene キーにグループ title が含まれるため、変化があればキーを移行する
+                if (oldKey !== newKey) {
+                    for (const s of Object.values(config.scenes)) {
+                        if (oldKey in s) { s[newKey] = s[oldKey]; delete s[oldKey]; }
+                    }
+                }
+            }
+        }
         if (item.type === "node") {
             const n = app.graph.getNodeById(item.id);
             if (n) item.title = n.title || n.type || `Node#${n.id}`;
@@ -736,8 +823,32 @@ function makeToggleWidget(node, item, index) {
             ctx.beginPath();
             ctx.rect(PAD + 38, y, labelEndX - (PAD + 38), H);
             ctx.clip();
+            // ライブタイトル取得（毎フレームグラフから直接参照することで名称変更に即追従）
+            let displayItem = item;
+            if (item.type === "node") {
+                const liveNode = app.graph.getNodeById(item.id);
+                if (liveNode) displayItem = { ...item, title: liveNode.title || liveNode.type || `Node#${liveNode.id}` };
+            } else if (item.type === "widget") {
+                const liveNode = app.graph.getNodeById(item.nodeId);
+                if (liveNode) displayItem = { ...item, nodeTitle: liveNode.title || liveNode.type || `Node#${liveNode.id}` };
+            } else if (item.type === "group") {
+                const liveGroup = findGroup(item);
+                if (liveGroup) {
+                    displayItem = { ...item, title: liveGroup.title };
+                    // 乖離を検出したら closed-over item を即時更新して次フレームの findGroup に備える
+                    const posChanged = item.pos != null && (
+                        Math.abs(liveGroup.pos[0] - item.pos[0]) > 8 ||
+                        Math.abs(liveGroup.pos[1] - item.pos[1]) > 8
+                    );
+                    if (liveGroup.title !== item.title || posChanged) {
+                        item.title = liveGroup.title;
+                        if (item.pos != null) item.pos = [liveGroup.pos[0], liveGroup.pos[1]];
+                        scheduleGroupSync(node);
+                    }
+                }
+            }
             // 同名アイテムが複数ある場合は位置ヒントを付加
-            let label = itemLabel(item);
+            let label = itemLabel(displayItem);
             if (item.pos != null && (item.type === "group" || item.type === "node")) {
                 const isDupe = config.managed.filter(
                     i => i.type === item.type && i.title === item.title
