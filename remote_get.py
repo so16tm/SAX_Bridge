@@ -9,7 +9,7 @@ ANY = _AnyType("*")
 MAX_SLOTS = 16
 
 
-class SAXRemoteGet:
+class SAX_Bridge_Remote_Get:
     """
     Remote Get Node — ピッカーで任意ノードの出力を直接参照する。
 
@@ -28,7 +28,7 @@ class SAXRemoteGet:
     RETURN_TYPES  = (ANY,) * MAX_SLOTS
     RETURN_NAMES  = tuple(f"out_{i}" for i in range(MAX_SLOTS))
     FUNCTION      = "passthrough"
-    CATEGORY      = "SAX/Bridge"
+    CATEGORY      = "SAX/Bridge/Control"
     OUTPUT_NODE   = False
 
     def passthrough(self, **kwargs):

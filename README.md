@@ -18,7 +18,7 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 | `SAX_Bridge_Noise_Image` | SAX Image Noise | SAX/Bridge/Noise |
 | `SAX_Bridge_Noise_Latent` | SAX Latent Noise | SAX/Bridge/Noise |
 | `SAX_Bridge_Toggle_Manager` | SAX Toggle Manager | SAX/Bridge/Control |
-| `SAXRemoteGet` | SAX Remote Get | SAX/Bridge/Control |
+| `SAX_Bridge_Remote_Get` | SAX Remote Get | SAX/Bridge/Control |
 
 ---
 
@@ -343,7 +343,7 @@ KSampler → VAE Decode → SAX Detailer
 
 ---
 
-### SAX Remote Get (`SAXRemoteGet`)
+### SAX Remote Get (`SAX_Bridge_Remote_Get`)
 
 ピッカーで任意ノードを選択し、その出力をそのまま下流ノードへ転送します。中継ノードを挟まずにワークフローを論理的に分割できます。
 

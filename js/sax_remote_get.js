@@ -2,7 +2,7 @@ import { app } from "../../scripts/app.js";
 import { panCanvasTo, showPicker } from "./sax_picker.js";
 
 const EXT_NAME  = "SAX.RemoteGet";
-const NODE_TYPE = "SAXRemoteGet";
+const NODE_TYPE = "SAX_Bridge_Remote_Get";
 const MAX_SLOTS = 16;
 
 // ---------------------------------------------------------------------------
