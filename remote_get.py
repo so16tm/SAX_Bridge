@@ -1,12 +1,12 @@
 class _AnyType(str):
     """任意の型と互換性を持つワイルドカード型。"""
-    def __eq__(self, other): return True
-    def __ne__(self, other): return False
-    def __hash__(self): return hash(str(self))
+    def __eq__(self, other: object) -> bool: return True
+    def __ne__(self, other: object) -> bool: return False
+    def __hash__(self) -> int: return hash(str(self))
 
 
 ANY = _AnyType("*")
-MAX_SLOTS = 16
+MAX_SLOTS = 32
 
 
 class SAX_Bridge_Remote_Get:
