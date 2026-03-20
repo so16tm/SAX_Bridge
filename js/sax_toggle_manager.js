@@ -1,4 +1,12 @@
 import { app } from "../../scripts/app.js";
+import {
+    panCanvasTo,
+    clearPickerHighlight,
+    showReturnButton,
+    hideReturnButton,
+    itemKey,
+    showPicker,
+} from "./sax_picker.js";
 
 const EXT_NAME   = "SAX.ToggleManager";
 const NODE_TYPE  = "SAX_Bridge_Toggle_Manager";
@@ -31,17 +39,6 @@ function saveConfig(node, config) {
 // ---------------------------------------------------------------------------
 // Item helpers
 // ---------------------------------------------------------------------------
-
-function itemKey(item) {
-    if (item.type === "group") {
-        // pos を持つ場合は位置で個別識別（同名グループの区別）
-        if (item.pos != null) return `g:${item.title}:${Math.round(item.pos[0])},${Math.round(item.pos[1])}`;
-        return `g:${item.title}`;  // 旧形式との後方互換
-    }
-    if (item.type === "node")   return `n:${item.id}`;
-    if (item.type === "widget") return `w:${item.nodeId}:${item.widgetName}`;
-    return "";
-}
 
 // グループを title + pos でマッチする（pos なしの旧データは title のみ）
 function matchGroup(g, item) {
@@ -193,7 +190,6 @@ const BACK_POS_STYLES = {
 };
 
 let _backBtn          = null;
-let _returnBtn        = null;  // ピッカー peek 用の「↩ Return to picker」ボタン
 let _managerNode      = null;  // 最後に作成／使用された Manager ノードへの参照
 let _sceneFlashUntil  = 0;     // シーン切り替えフラッシュの終了時刻 (ms)
 let _capturingBackKey = false; // Back キーキャプチャ中フラグ
@@ -265,49 +261,9 @@ function showBackButton() {
     _backBtn = btn;
 }
 
-function clearPickerHighlight() {
-    if (typeof app.canvas.deselectAllNodes === "function") {
-        app.canvas.deselectAllNodes();
-    } else if (app.canvas.selected_nodes) {
-        app.canvas.selected_nodes = {};
-    }
-    app.canvas.selected_group = null;
-    app.canvas.setDirty(true, true);
-}
-
-function showReturnButton(restoreOverlay) {
-    if (_returnBtn) _returnBtn.remove();
-    const btn = document.createElement("button");
-    btn.textContent = "↩ Return to picker";
-    btn.style.cssText =
-        "position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;" +
-        "padding:9px 22px;background:#1a2a3e;border:2px solid #4a8aCC;border-radius:6px;" +
-        "color:#7ac8ff;cursor:pointer;font-size:13px;font-family:sans-serif;font-weight:bold;" +
-        "box-shadow:0 2px 16px rgba(74,138,204,.4);";
-    btn.addEventListener("mouseenter", () => { btn.style.background = "#1e3350"; });
-    btn.addEventListener("mouseleave", () => { btn.style.background = "#1a2a3e"; });
-    btn.addEventListener("click", () => {
-        btn.remove();
-        _returnBtn = null;
-        restoreOverlay();
-    });
-    document.body.appendChild(btn);
-    _returnBtn = btn;
-}
-
 // ---------------------------------------------------------------------------
-// キャンバスナビゲーション
+// キャンバスナビゲーション（panCanvasTo は sax_picker.js から import）
 // ---------------------------------------------------------------------------
-
-// キャンバスの指定座標に移動する共通ヘルパー
-function panCanvasTo(cx, cy) {
-    const scale = app.canvas.ds.scale;
-    const cw    = app.canvas.canvas.width;
-    const ch    = app.canvas.canvas.height;
-    app.canvas.ds.offset[0] = -cx + cw * 0.5 / scale;
-    app.canvas.ds.offset[1] = -cy + ch * 0.5 / scale;
-    app.canvas.setDirty(true, true);
-}
 
 function navigateToItem(item) {
     try {
@@ -345,25 +301,35 @@ document.addEventListener("keydown", (e) => {
 // ---------------------------------------------------------------------------
 
 function runAdd(node) {
-    const config = getConfig(node);
-    showPicker(node, config, (newManaged) => {
-        const oldKeys = new Set(config.managed.map(itemKey));
-        const newKeys = new Set(newManaged.map(itemKey));
-        for (const item of config.managed)
-            if (!newKeys.has(itemKey(item))) {
-                const key = itemKey(item);
-                for (const s of Object.values(config.scenes)) delete s[key];
-            }
-        for (const item of newManaged)
-            if (!oldKeys.has(itemKey(item))) {
-                const val = getItemCurrentValue(item);
-                for (const s of Object.values(config.scenes)) s[itemKey(item)] = val;
-            }
-        config.managed = [
-            ...config.managed.filter(i => newKeys.has(itemKey(i))),
-            ...newManaged.filter(i => !oldKeys.has(itemKey(i))),
-        ];
-        saveConfig(node, config); rebuildUI(node);
+    const config    = getConfig(node);
+    const selection = new Map();
+    for (const item of config.managed) selection.set(itemKey(item), item);
+
+    showPicker({
+        title:         "Add / Remove Items",
+        sections:      ["groups", "subgraphs", "nodes"],
+        mode:          "multi",
+        selection,
+        excludeNodeId: node.id,
+        onConfirm:     (newManaged) => {
+            const oldKeys = new Set(config.managed.map(itemKey));
+            const newKeys = new Set(newManaged.map(itemKey));
+            for (const item of config.managed)
+                if (!newKeys.has(itemKey(item))) {
+                    const key = itemKey(item);
+                    for (const s of Object.values(config.scenes)) delete s[key];
+                }
+            for (const item of newManaged)
+                if (!oldKeys.has(itemKey(item))) {
+                    const val = getItemCurrentValue(item);
+                    for (const s of Object.values(config.scenes)) s[itemKey(item)] = val;
+                }
+            config.managed = [
+                ...config.managed.filter(i => newKeys.has(itemKey(i))),
+                ...newManaged.filter(i => !oldKeys.has(itemKey(i))),
+            ];
+            saveConfig(node, config); rebuildUI(node);
+        },
     });
 }
 
@@ -872,263 +838,7 @@ function rebuildUI(node) {
     app.graph.setDirtyCanvas(true, false);
 }
 
-// ---------------------------------------------------------------------------
-// Picker popup  (インクリメンタルサーチ + ノード種別折りたたみ)
-// ---------------------------------------------------------------------------
-
-function showPicker(node, config, onConfirm) {
-    const selection = new Map();
-    for (const item of config.managed) selection.set(itemKey(item), item);
-
-    // 折りたたみ状態（ノードセクションはデフォルト閉じ）
-    const collapsed = new Map();
-
-    const h = (tag, css = "", text = "") => {
-        const e = document.createElement(tag);
-        if (css)  e.style.cssText = css;
-        if (text) e.textContent   = text;
-        return e;
-    };
-
-    // ノードのカテゴリをグループキーとする（Add Node メニューと同じ階層）
-    function typeGroupKey(n) {
-        return n.category || n.constructor?.category || "Other";
-    }
-
-    // 折りたたみ可能なセクション
-    function makeSection(key, label, color, childEls, defaultCollapsed = false) {
-        const isCollapsed = collapsed.has(key) ? collapsed.get(key) : defaultCollapsed;
-        const sec    = h("div", "margin-bottom:4px;");
-        const header = h("div",
-            `display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 4px;background:#12122a;border-radius:4px;color:${color};font-weight:bold;font-size:12px;`);
-        const arrow  = h("span", "font-size:10px;flex-shrink:0;", isCollapsed ? "▶" : "▼");
-        header.appendChild(arrow);
-        header.appendChild(h("span", "flex:1;", label));
-
-        const body = h("div", `padding-left:6px;${isCollapsed ? "display:none;" : ""}`);
-        for (const c of childEls) body.appendChild(c);
-
-        header.addEventListener("click", () => {
-            const now = !(collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
-            collapsed.set(key, now);
-            arrow.textContent = now ? "▶" : "▼";
-            body.style.display = now ? "none" : "";
-        });
-
-        sec.appendChild(header);
-        sec.appendChild(body);
-        return sec;
-    }
-
-    function makeCheckRow(label, checked, indent, onChange, { onPeek, tooltip } = {}) {
-        const row = h("div",
-            `display:flex;align-items:center;gap:8px;padding:3px 0 3px ${indent ? "16px" : "2px"};`);
-        if (tooltip) row.title = tooltip;
-        const cb = document.createElement("input");
-        cb.type = "checkbox"; cb.checked = checked;
-        cb.style.cssText = "cursor:pointer;flex-shrink:0;accent-color:#4a9;";
-        cb.addEventListener("change", () => onChange(cb.checked));
-        const lbl = h("label", "cursor:pointer;user-select:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;");
-        lbl.textContent = label;
-        lbl.addEventListener("click", () => { cb.checked = !cb.checked; onChange(cb.checked); });
-        row.appendChild(cb);
-        row.appendChild(lbl);
-        if (onPeek) {
-            const peekBtn = h("button",
-                "padding:1px 6px;background:#1e1e32;border:1px solid #3a3a5a;border-radius:3px;" +
-                "color:#aaa;cursor:pointer;font-size:10px;flex-shrink:0;line-height:1.4;",
-                "📍");
-            peekBtn.title = "Peek location (hides this picker)";
-            peekBtn.addEventListener("mouseenter", () => { peekBtn.style.background = "#2a2a42"; });
-            peekBtn.addEventListener("mouseleave", () => { peekBtn.style.background = "#1e1e32"; });
-            peekBtn.addEventListener("click", (e) => { e.stopPropagation(); onPeek(); });
-            row.appendChild(peekBtn);
-        }
-        return row;
-    }
-
-    // メイン構造
-    const overlay = h("div",
-        "position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:10000;display:flex;align-items:center;justify-content:center;");
-    const dlg = h("div",
-        "background:#1a1a2e;border:1px solid #4a4a6a;border-radius:8px;padding:16px;width:440px;max-height:76vh;display:flex;flex-direction:column;color:#ccc;font:13px/1.5 sans-serif;gap:8px;");
-
-    dlg.appendChild(h("div", "font:bold 14px sans-serif;color:#fff;", "Add / Remove Items"));
-
-    // 検索バー
-    const searchWrap = h("div",
-        "display:flex;align-items:center;gap:6px;background:#0e0e20;border:1px solid #3a3a5a;border-radius:4px;padding:5px 10px;flex-shrink:0;");
-    searchWrap.appendChild(h("span", "color:#555;", "🔍"));
-    const searchInput = document.createElement("input");
-    searchInput.placeholder = "Search by group or node name…";
-    searchInput.style.cssText = "flex:1;background:none;border:none;outline:none;color:#ccc;font-size:12px;";
-    searchWrap.appendChild(searchInput);
-    dlg.appendChild(searchWrap);
-
-    const scroll = h("div", "overflow-y:auto;flex:1;");
-    dlg.appendChild(scroll);
-
-    // コンテンツ描画（検索クエリに応じて再描画）
-    const renderContent = (query = "") => {
-        const q = query.toLowerCase().trim();
-        scroll.innerHTML = "";
-
-        // ── グループ（名称昇順）──
-        const allGroups = app.graph._groups ?? [];
-        const groups    = allGroups
-            .filter(g => !q || g.title.toLowerCase().includes(q))
-            .sort((a, b) => a.title.localeCompare(b.title));
-
-        // 同名グループ数カウント（ラベルの位置ヒント表示用）
-        const groupTitleCount = new Map();
-        for (const g of allGroups) groupTitleCount.set(g.title, (groupTitleCount.get(g.title) ?? 0) + 1);
-
-        if (groups.length > 0 || (!q && allGroups.length > 0)) {
-            const rows = groups.map(g => {
-                const gPos    = [g.pos[0], g.pos[1]];
-                const key     = `g:${g.title}:${Math.round(gPos[0])},${Math.round(gPos[1])}`;
-                const isDupe  = (groupTitleCount.get(g.title) ?? 1) > 1;
-                const posHint = isDupe ? `  (${Math.round(gPos[0])}, ${Math.round(gPos[1])})` : "";
-                const label   = `▦  ${g.title}${posHint}`;
-                const tooltip = `pos: (${Math.round(gPos[0])}, ${Math.round(gPos[1])})  size: ${Math.round(g.size[0])}×${Math.round(g.size[1])}`;
-                const onPeek  = () => {
-                    overlay.style.display = "none";
-                    panCanvasTo(g.pos[0] + g.size[0] / 2, g.pos[1] + g.size[1] / 2);
-                    g.selected = true;
-                    app.canvas.selected_group = g;
-                    app.canvas.setDirty(true, true);
-                    showReturnButton(() => {
-                        overlay.style.display = "flex";
-                        g.selected = false;
-                        app.canvas.selected_group = null;
-                        app.canvas.setDirty(true, true);
-                    });
-                };
-                return makeCheckRow(label, selection.has(key), false, (now) => {
-                    if (now) selection.set(key, { type: "group", title: g.title, pos: gPos });
-                    else     selection.delete(key);
-                }, { onPeek, tooltip });
-            });
-            const label = `Groups (${groups.length}${groups.length < allGroups.length ? `/${allGroups.length}` : ""})`;
-            if (rows.length > 0)
-                scroll.appendChild(makeSection("__groups", label, "#8bc", rows, false));
-        }
-
-        // ── サブグラフ・ノードを分離 ──
-        const allCandidates = (app.graph._nodes ?? []).filter(n => {
-            if (n.id === node.id) return false;
-            if (!q) return true;
-            return (n.title || n.type || "").toLowerCase().includes(q) ||
-                   (n.type || "").toLowerCase().includes(q);
-        });
-        const allSubgraphs = allCandidates.filter(n =>  isSubgraphNode(n));
-        const allNodes     = allCandidates.filter(n => !isSubgraphNode(n));
-
-        // ノード peek/row 生成ヘルパー
-        const makeNodeRow = (n, titleCountMap) => {
-            const nodeTitle = n.title || n.type || `Node#${n.id}`;
-            const nKey      = `n:${n.id}`;
-            const isSub     = isSubgraphNode(n);
-            const isDupe    = (titleCountMap.get(nodeTitle) ?? 1) > 1;
-            const posHint   = isDupe ? `  (${Math.round(n.pos[0])}, ${Math.round(n.pos[1])})` : "";
-            const icon      = isSub ? "▣" : "◈";
-            const nTooltip  = `pos: (${Math.round(n.pos[0])}, ${Math.round(n.pos[1])})  id: ${n.id}`;
-            const nPeek     = () => {
-                overlay.style.display = "none";
-                panCanvasTo(n.pos[0] + (n.size?.[0] ?? 0) / 2, n.pos[1] + (n.size?.[1] ?? 0) / 2);
-                if (typeof app.canvas.selectNode === "function") {
-                    app.canvas.selectNode(n, false);
-                } else {
-                    app.canvas.selected_nodes = { [n.id]: n };
-                }
-                app.canvas.setDirty(true, true);
-                showReturnButton(() => {
-                    overlay.style.display = "flex";
-                    clearPickerHighlight();
-                });
-            };
-            const row = makeCheckRow(`${icon}  ${nodeTitle}${posHint}`, selection.has(nKey), false, (now) => {
-                if (now) selection.set(nKey, { type: "node", id: n.id, title: nodeTitle, pos: [n.pos[0], n.pos[1]], isSub });
-                else     selection.delete(nKey);
-            }, { onPeek: nPeek, tooltip: nTooltip });
-            return { row, nodeTitle };
-        };
-
-        // ── サブグラフ（名称昇順・フラットリスト）──
-        if (allSubgraphs.length > 0) {
-            allSubgraphs.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
-            const subTitleCount = new Map();
-            for (const n of allSubgraphs) {
-                const t = n.title || n.type || `Node#${n.id}`;
-                subTitleCount.set(t, (subTitleCount.get(t) ?? 0) + 1);
-            }
-            const rows = allSubgraphs.map(n => makeNodeRow(n, subTitleCount).row);
-            scroll.appendChild(makeSection("__subgraphs", `Subgraphs (${allSubgraphs.length})`, "#c8b", rows, false));
-        }
-
-        // ── ノード（種別ごとにグループ化、名称昇順）──
-        const nodeTitleCount = new Map();
-        for (const n of allNodes) {
-            const t = n.title || n.type || `Node#${n.id}`;
-            nodeTitleCount.set(t, (nodeTitleCount.get(t) ?? 0) + 1);
-        }
-
-        const typeMap = new Map();
-        for (const n of allNodes) {
-            const k = typeGroupKey(n);
-            if (!typeMap.has(k)) typeMap.set(k, []);
-            typeMap.get(k).push(n);
-        }
-
-        for (const [typeKey, typeNodes] of [...typeMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-            typeNodes.sort((a, b) => (a.title || a.type || "").localeCompare(b.title || b.type || ""));
-
-            const rows = [];
-            for (const n of typeNodes) {
-                const { row, nodeTitle } = makeNodeRow(n, nodeTitleCount);
-                rows.push(row);
-                for (const w of (n.widgets ?? []).filter(w => typeof w.value === "boolean")) {
-                    const wKey = `w:${n.id}:${w.name}`;
-                    rows.push(makeCheckRow(`⊞  ${w.name}`, selection.has(wKey), true, (now) => {
-                        if (now) selection.set(wKey,
-                            { type: "widget", nodeId: n.id, nodeTitle, widgetName: w.name });
-                        else selection.delete(wKey);
-                    }));
-                }
-            }
-            scroll.appendChild(makeSection(`__node_${typeKey}`, `${typeKey}  (${typeNodes.length})`, "#bc8", rows, true));
-        }
-
-        if (q && allCandidates.length === 0 && groups.length === 0) {
-            scroll.appendChild(h("div",
-                "color:#555;padding:20px;text-align:center;font-size:12px;", "No results"));
-        }
-    };
-
-    renderContent();
-    searchInput.addEventListener("input", () => renderContent(searchInput.value));
-
-    // ボタン行
-    const btnRow = h("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
-    const makeBtn = (text, bg, fn) => {
-        const b = h("button",
-            `padding:6px 14px;background:${bg};border:1px solid #555;border-radius:4px;color:#fff;cursor:pointer;font-size:12px;`);
-        b.textContent = text;
-        b.addEventListener("click", fn);
-        return b;
-    };
-    btnRow.appendChild(makeBtn("Cancel", "#2a2a3a", () => { clearPickerHighlight(); overlay.remove(); }));
-    btnRow.appendChild(makeBtn("Apply", "#1e5a32", () => {
-        clearPickerHighlight(); overlay.remove();
-        onConfirm([...selection.values()]);
-    }));
-    dlg.appendChild(btnRow);
-
-    overlay.appendChild(dlg);
-    overlay.addEventListener("click", e => { if (e.target === overlay) { clearPickerHighlight(); overlay.remove(); } });
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => searchInput.focus());
-}
+// showPicker は sax_picker.js から import — ここには定義不要
 
 // ---------------------------------------------------------------------------
 // Extension
