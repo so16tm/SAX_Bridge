@@ -30,9 +30,23 @@ def _get_impact_wildcards():
 
 
 # ---------------------------------------------------------------------------
-# LoRA 名キャッシュ
+# LoRA 名キャッシュ（フォルダ mtime による自動無効化）
 # ---------------------------------------------------------------------------
 _lora_name_cache = None
+_lora_cache_mtime = 0.0
+
+
+def _get_lora_folders_mtime() -> float:
+    """LoRA フォルダ群の最新更新時刻を返す"""
+    try:
+        mtimes = [
+            os.path.getmtime(p)
+            for p in folder_paths.get_folder_paths("loras")
+            if os.path.isdir(p)
+        ]
+        return max(mtimes) if mtimes else 0.0
+    except OSError:
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +133,7 @@ def _apply_loras(model, clip, loras):
                 f"LBW={lbw}, LOADER={loader}"
             )
 
-            if loader is not None and loader == "nunchaku":
+            if loader == "nunchaku":
                 if "NunchakuFluxLoraLoader" in nodes.NODE_CLASS_MAPPINGS:
                     cls = nodes.NODE_CLASS_MAPPINGS["NunchakuFluxLoraLoader"]
                     model = cls().load_lora(model, lora_name, model_weight)[0]
@@ -157,13 +171,15 @@ def _apply_loras(model, clip, loras):
 
 
 def _resolve_lora_name(name):
-    """LoRA 名を解決する（キャッシュを利用して高速化）"""
-    global _lora_name_cache
+    """LoRA 名を解決する（フォルダ更新時に自動で再スキャン）"""
+    global _lora_name_cache, _lora_cache_mtime
     if os.path.exists(name):
         return name
 
-    if _lora_name_cache is None:
+    current_mtime = _get_lora_folders_mtime()
+    if _lora_name_cache is None or current_mtime > _lora_cache_mtime:
         _lora_name_cache = folder_paths.get_filename_list("loras")
+        _lora_cache_mtime = current_mtime
 
     for x in _lora_name_cache:
         if x.endswith(name):
@@ -383,7 +399,7 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         if "loader_settings" in new_pipe:
             new_pipe["loader_settings"] = {
                 **new_pipe["loader_settings"],
-                "positive": clean_text,
+                target_type: clean_text,
             }
 
         return io.NodeOutput(new_pipe, conditioning, populated)

@@ -5,6 +5,7 @@ import nodes
 import comfy.model_management
 import comfy.model_sampling
 import comfy.sd
+import comfy.samplers
 import comfy.utils
 from comfy_api.latest import io
 
@@ -212,7 +213,7 @@ class SAX_Bridge_Pipe_Loader(io.ComfyNode):
             model.add_object_patch("model_sampling", model_sampling)
 
         # 6. Empty Latent
-        latent = torch.zeros([batch_size, 4, height // 8, width // 8])
+        latent = torch.zeros([batch_size, 4, height // 8, width // 8], device="cpu")
         latent_out = {"samples": latent}
 
         # 7. Create Pipe
