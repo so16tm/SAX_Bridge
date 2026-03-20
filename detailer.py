@@ -352,6 +352,10 @@ class SAX_Bridge_Detailer:
             "optional": {
                 "mask": ("MASK",),
                 "positive_prompt": ("STRING", {"multiline": True}),
+                "steps_override": ("INT", {"default": 0, "min": 0, "max": 200,
+                                           "tooltip": "0 = loader_settings の steps を継承。1 以上で上書き。"}),
+                "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
+                                           "tooltip": "0.0 = loader_settings の cfg を継承。0 より大きい値で上書き。"}),
             }
         }
 
@@ -362,11 +366,14 @@ class SAX_Bridge_Detailer:
 
     def do_detail_core(self, pipe, denoise, denoise_decay, cycle, noise_mask_feather, blend_feather,
                        crop_factor, context_blur_sigma, context_blur_radius,
-                       mask=None, positive_prompt=None):
+                       mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None or p["negative"] is None:
             return (pipe, p["images"])
+
+        steps_eff = steps_override if steps_override > 0 else p["steps"]
+        cfg_eff   = cfg_override   if cfg_override   > 0 else p["cfg"]
 
         positive = p["positive"]
         if positive_prompt and p["clip"] is not None:
@@ -374,7 +381,7 @@ class SAX_Bridge_Detailer:
 
         result_images = _run_detail_loop(
             p["model"], p["vae"], p["images"], positive, p["negative"], p["seed"],
-            p["steps"], p["cfg"], p["sampler_name"], p["scheduler_name"],
+            steps_eff, cfg_eff, p["sampler_name"], p["scheduler_name"],
             denoise, denoise_decay, cycle,
             noise_mask_feather, blend_feather, crop_factor,
             context_blur_sigma, context_blur_radius,
@@ -423,6 +430,10 @@ class SAX_Bridge_Detailer_Enhanced:
             "optional": {
                 "mask": ("MASK",),
                 "positive_prompt": ("STRING", {"multiline": True}),
+                "steps_override": ("INT", {"default": 0, "min": 0, "max": 200,
+                                           "tooltip": "0 = loader_settings の steps を継承。1 以上で上書き。"}),
+                "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
+                                           "tooltip": "0.0 = loader_settings の cfg を継承。0 より大きい値で上書き。"}),
             }
         }
 
@@ -435,11 +446,14 @@ class SAX_Bridge_Detailer_Enhanced:
                            crop_factor, latent_noise_intensity, noise_type,
                            shadow_enhance, shadow_decay, edge_weight, edge_blur_sigma,
                            context_blur_sigma, context_blur_radius,
-                           mask=None, positive_prompt=None):
+                           mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None or p["negative"] is None:
             return (pipe, p["images"])
+
+        steps_eff = steps_override if steps_override > 0 else p["steps"]
+        cfg_eff   = cfg_override   if cfg_override   > 0 else p["cfg"]
 
         positive = p["positive"]
         if positive_prompt and p["clip"] is not None:
@@ -447,7 +461,7 @@ class SAX_Bridge_Detailer_Enhanced:
 
         result_images = _run_detail_loop(
             p["model"], p["vae"], p["images"], positive, p["negative"], p["seed"],
-            p["steps"], p["cfg"], p["sampler_name"], p["scheduler_name"],
+            steps_eff, cfg_eff, p["sampler_name"], p["scheduler_name"],
             denoise, denoise_decay, cycle,
             noise_mask_feather, blend_feather, crop_factor,
             context_blur_sigma, context_blur_radius,
