@@ -8,6 +8,7 @@ from .pipe_cache import SAX_Bridge_Pipe_Cache
 from .output import SAX_Bridge_Output
 from .toggle_manager import SAX_Bridge_Toggle_Manager
 from .remote_get import SAX_Bridge_Remote_Get
+from .lora_loader import SAX_Bridge_Pipe_Lora_Loader
 
 # V3 API ノード
 from . import prompt as prompt_node
@@ -31,6 +32,9 @@ NODE_CLASS_MAPPINGS = {
     # Output 系列
     "SAX_Bridge_Output": SAX_Bridge_Output,
 
+    # LoRA 系列
+    "SAX_Bridge_Pipe_Lora_Loader": SAX_Bridge_Pipe_Lora_Loader,
+
     # Control 系列
     "SAX_Bridge_Toggle_Manager": SAX_Bridge_Toggle_Manager,
     "SAX_Bridge_Remote_Get": SAX_Bridge_Remote_Get,
@@ -47,6 +51,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Pipe_Upscaler": "SAX Upscaler",
     "SAX_Bridge_Pipe_Cache": "SAX Cache",
     "SAX_Bridge_Output": "SAX Output",
+    "SAX_Bridge_Pipe_Lora_Loader": "SAX Lora Loader",
     "SAX_Bridge_Toggle_Manager": "SAX Toggle Manager",
     "SAX_Bridge_Remote_Get": "SAX Remote Get",
     "SAX_Bridge_Prompt": "SAX Prompt",

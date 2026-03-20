@@ -17,6 +17,7 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
   - [SAX Output](#sax-output)
   - [SAX Image Noise](#sax-image-noise)
   - [SAX Latent Noise](#sax-latent-noise)
+  - [SAX Lora Loader](#sax-lora-loader)
   - [SAX Remote Get](#sax-remote-get)
   - [SAX Toggle Manager](#sax-toggle-manager)
 - [典型的なワークフロー](#典型的なワークフロー)
@@ -41,6 +42,7 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 | `SAX_Bridge_Output` | [SAX Output](#sax-output) | SAX/Bridge/Output |
 | `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) | SAX/Bridge/Noise |
 | `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) | SAX/Bridge/Noise |
+| `SAX_Bridge_Pipe_Lora_Loader` | [SAX Lora Loader](#sax-lora-loader) | SAX/Bridge/Pipe |
 | `SAX_Bridge_Remote_Get` | [SAX Remote Get](#sax-remote-get) | SAX/Bridge/Control |
 | `SAX_Bridge_Toggle_Manager` | [SAX Toggle Manager](#sax-toggle-manager) | SAX/Bridge/Control |
 
@@ -315,6 +317,36 @@ output/2026-03-20/001_20260320_153045_01.webp
 **入力**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
 
 **出力**: `LATENT`
+
+---
+
+### SAX Lora Loader
+
+`SAX_Bridge_Pipe_Lora_Loader` — Pipe 内の model / clip に複数の LoRA を一括適用するノードです。各 LoRA を個別に ON/OFF・強度調整・並び替えできます。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | 入力パイプ |
+| `enabled` | Boolean | `False` で LoRA を適用せずそのまま返す |
+| `loras_json` | String (hidden) | LoRA エントリの JSON 配列。ノード UI が自動管理 |
+
+**出力**: `PIPE`（model / clip を上書き）
+
+#### UI 操作
+
+| 操作 | 動作 |
+|------|------|
+| LoRA 名エリアをクリック | LoRA 選択ピッカーを開く |
+| 強度ボックスをドラッグ（上下） | 強度を連続調整（1px = 0.01） |
+| 強度ボックスをクリック | 数値直接入力ポップアップ |
+| pill クリック | LoRA の ON/OFF 切り替え |
+| ▲ / ▼ クリック | LoRA の並び替え |
+| ✕ クリック | LoRA を削除 |
+| `+ Add LoRA` クリック | LoRA エントリを追加（最大 10 本） |
+
+> **クリップ強度**: モデル強度と常に連動（1スライダー制御）。
 
 ---
 
