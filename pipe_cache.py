@@ -154,5 +154,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Pipe_Cache": "SAX Pipe Cache",
+    "SAX_Bridge_Pipe_Cache": "SAX Cache",
 }

@@ -205,5 +205,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Pipe_Upscaler": "SAX Pipe Upscaler",
+    "SAX_Bridge_Pipe_Upscaler": "SAX Upscaler",
 }

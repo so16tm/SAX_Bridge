@@ -12,8 +12,8 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
   - [SAX Prompt Concat](#sax-prompt-concat)
   - [SAX Detailer](#sax-detailer)
   - [SAX Enhanced Detailer](#sax-enhanced-detailer)
-  - [SAX Pipe Upscaler](#sax-pipe-upscaler)
-  - [SAX Pipe Cache](#sax-pipe-cache)
+  - [SAX Upscaler](#sax-upscaler)
+  - [SAX Cache](#sax-cache)
   - [SAX Output](#sax-output)
   - [SAX Image Noise](#sax-image-noise)
   - [SAX Latent Noise](#sax-latent-noise)
@@ -36,8 +36,8 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 | `SAX_Bridge_Prompt_Concat` | [SAX Prompt Concat](#sax-prompt-concat) | SAX/Bridge/Prompt |
 | `SAX_Bridge_Detailer` | [SAX Detailer](#sax-detailer) | SAX/Bridge/Detailer |
 | `SAX_Bridge_Detailer_Enhanced` | [SAX Enhanced Detailer](#sax-enhanced-detailer) | SAX/Bridge/Detailer |
-| `SAX_Bridge_Pipe_Upscaler` | [SAX Pipe Upscaler](#sax-pipe-upscaler) | SAX/Bridge/Upscaler |
-| `SAX_Bridge_Pipe_Cache` | [SAX Pipe Cache](#sax-pipe-cache) | SAX/Bridge/Cache |
+| `SAX_Bridge_Pipe_Upscaler` | [SAX Upscaler](#sax-upscaler) | SAX/Bridge/Upscaler |
+| `SAX_Bridge_Pipe_Cache` | [SAX Cache](#sax-cache) | SAX/Bridge/Cache |
 | `SAX_Bridge_Output` | [SAX Output](#sax-output) | SAX/Bridge/Output |
 | `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) | SAX/Bridge/Noise |
 | `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) | SAX/Bridge/Noise |
@@ -163,7 +163,7 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 ---
 
-### SAX Pipe Upscaler
+### SAX Upscaler
 
 `SAX_Bridge_Pipe_Upscaler` — Pipe 内の画像をアップスケールし、オプションで軽量 i2i を適用するノードです。
 
@@ -191,7 +191,7 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 ---
 
-### SAX Pipe Cache
+### SAX Cache
 
 `SAX_Bridge_Pipe_Cache` — Pipe 内のモデルに DeepCache / TGate をワンタッチ適用し、後段の KSampler・Detailer 全体を高速化するノードです。
 
@@ -454,7 +454,7 @@ SAX Prompt
   ↓ PIPE
 KSampler → VAE Decode
   ↓ IMAGE → PIPE に格納
-SAX Pipe Upscaler（全体リサイズ、オプションで i2i）
+SAX Upscaler（全体リサイズ、オプションで i2i）
   ↓ PIPE
 SAX Detailer（マスク領域の精細化）
   ↓ IMAGE
@@ -466,7 +466,7 @@ SAX Output
 ```
 SAX Loader
   ↓ PIPE
-SAX Pipe Cache（DeepCache / TGate 適用）
+SAX Cache（DeepCache / TGate 適用）
   ↓ PIPE（キャッシュ適用済みモデル）
 SAX Prompt
   ↓ PIPE
