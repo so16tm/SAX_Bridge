@@ -345,17 +345,17 @@ class SAX_Bridge_Detailer:
                 "blend_feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
                 "crop_factor": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 10.0, "step": 0.1}),
                 "context_blur_sigma": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 64.0, "step": 0.5,
-                                                  "tooltip": "マスク境界付近のコンテキスト領域をぼかしてテキスト崩れを抑制する。0=無効"}),
+                                                  "tooltip": "Blurs the context area near the mask boundary to suppress text artifacts. 0=disabled."}),
                 "context_blur_radius": ("INT", {"default": 48, "min": 0, "max": 256, "step": 4,
-                                                "tooltip": "ぼかし対象をマスク境界から何px外側のリングに限定するか。0=全コンテキスト"}),
+                                                "tooltip": "Limits the blur target to a ring N px outside the mask boundary. 0=entire context."}),
             },
             "optional": {
                 "mask": ("MASK",),
                 "positive_prompt": ("STRING", {"multiline": True}),
                 "steps_override": ("INT", {"default": 0, "min": 0, "max": 200,
-                                           "tooltip": "0 = loader_settings の steps を継承。1 以上で上書き。"}),
+                                           "tooltip": "0 = inherit steps from loader_settings. Values ≥1 override it."}),
                 "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
-                                           "tooltip": "0.0 = loader_settings の cfg を継承。0 より大きい値で上書き。"}),
+                                           "tooltip": "0.0 = inherit CFG from loader_settings. Values > 0 override it."}),
             }
         }
 
@@ -423,17 +423,17 @@ class SAX_Bridge_Detailer_Enhanced:
                 "edge_blur_sigma": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.1}),
                 # Context Blur
                 "context_blur_sigma": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 64.0, "step": 0.5,
-                                                  "tooltip": "マスク境界付近のコンテキスト領域をぼかしてテキスト崩れを抑制する。0=無効"}),
+                                                  "tooltip": "Blurs the context area near the mask boundary to suppress text artifacts. 0=disabled."}),
                 "context_blur_radius": ("INT", {"default": 48, "min": 0, "max": 256, "step": 4,
-                                                "tooltip": "ぼかし対象をマスク境界から何px外側のリングに限定するか。0=全コンテキスト"}),
+                                                "tooltip": "Limits the blur target to a ring N px outside the mask boundary. 0=entire context."}),
             },
             "optional": {
                 "mask": ("MASK",),
                 "positive_prompt": ("STRING", {"multiline": True}),
                 "steps_override": ("INT", {"default": 0, "min": 0, "max": 200,
-                                           "tooltip": "0 = loader_settings の steps を継承。1 以上で上書き。"}),
+                                           "tooltip": "0 = inherit steps from loader_settings. Values ≥1 override it."}),
                 "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
-                                           "tooltip": "0.0 = loader_settings の cfg を継承。0 より大きい値で上書き。"}),
+                                           "tooltip": "0.0 = inherit CFG from loader_settings. Values > 0 override it."}),
             }
         }
 

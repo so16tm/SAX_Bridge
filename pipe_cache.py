@@ -18,7 +18,7 @@ def _get_sax_cache():
         return SAX_Cache_DeepCache, SAX_Cache_TGate
     except ImportError as e:
         raise RuntimeError(
-            f"[CSB] SAX_Cache が見つかりません。SAX_Cache カスタムノードがインストールされているか確認してください。 ({e})"
+            f"[SAX_Bridge] SAX_Cache not found. Make sure the SAX_Cache custom node is installed. ({e})"
         )
 
 
@@ -46,7 +46,7 @@ class SAX_Bridge_Pipe_Cache:
                     "BOOLEAN",
                     {
                         "default": True,
-                        "tooltip": "False にするとキャッシュを適用せずそのまま返す。",
+                        "tooltip": "When False, returns the pipe as-is without applying any cache.",
                     },
                 ),
                 # --- DeepCache ---
@@ -56,7 +56,7 @@ class SAX_Bridge_Pipe_Cache:
                         "default": 3,
                         "min": 1,
                         "max": 10,
-                        "tooltip": "1=DeepCache無効。N ステップに 1 回だけ深層計算し残りをキャッシュで代替する。",
+                        "tooltip": "1=DeepCache disabled. Runs full computation once every N steps; remaining steps use the cache.",
                     },
                 ),
                 "deepcache_start_percent": (
@@ -66,7 +66,7 @@ class SAX_Bridge_Pipe_Cache:
                         "min": 0.0,
                         "max": 1.0,
                         "step": 0.01,
-                        "tooltip": "DeepCache を開始するデノイジング進行割合。序盤は品質維持のため通常計算を行う。",
+                        "tooltip": "Denoising progress ratio at which DeepCache kicks in. Early steps run normally to preserve quality.",
                     },
                 ),
             },
@@ -76,7 +76,7 @@ class SAX_Bridge_Pipe_Cache:
                     "BOOLEAN",
                     {
                         "default": False,
-                        "tooltip": "True にすると TGate (cross-attention キャッシュ) も適用する。",
+                        "tooltip": "When True, also applies TGate (cross-attention caching).",
                     },
                 ),
                 "tgate_gate_step": (
@@ -86,7 +86,7 @@ class SAX_Bridge_Pipe_Cache:
                         "min": 0.0,
                         "max": 1.0,
                         "step": 0.01,
-                        "tooltip": "キャッシュ開始の境界パーセント。0.5 = 50% 以降でキャッシュを使用。",
+                        "tooltip": "Cache start boundary as a percentage. 0.5 = cache is used from 50% onward.",
                     },
                 ),
             },
@@ -97,7 +97,7 @@ class SAX_Bridge_Pipe_Cache:
     FUNCTION = "apply"
     CATEGORY = "SAX/Bridge/Cache"
     DESCRIPTION = (
-        "Pipe 内のモデルに DeepCache / TGate を適用して後段の全処理（KSampler・Detailer）を高速化する。"
+        "Applies DeepCache / TGate to the model in the pipe, accelerating all downstream processing (KSampler, Detailer)."
     )
 
     def apply(
@@ -114,7 +114,7 @@ class SAX_Bridge_Pipe_Cache:
 
         model = pipe.get("model")
         if model is None:
-            raise ValueError("[CSB] Pipe に model が含まれていません。")
+            raise ValueError("[SAX_Bridge] Pipe does not contain a model.")
 
         SAX_Cache_DeepCache, SAX_Cache_TGate = _get_sax_cache()
 
@@ -129,7 +129,7 @@ class SAX_Bridge_Pipe_Cache:
                 cfg_skip_multiplier=1,
             )
             logger.info(
-                f"[CSB] Cache Pipe: DeepCache 適用 (interval={deepcache_interval}, "
+                f"[SAX_Bridge] Cache Pipe: DeepCache applied (interval={deepcache_interval}, "
                 f"start={deepcache_start_percent:.0%})"
             )
 
@@ -142,7 +142,7 @@ class SAX_Bridge_Pipe_Cache:
                 start_percent=0.0,
                 end_percent=1.0,
             )
-            logger.info(f"[CSB] Cache Pipe: TGate 適用 (gate_step={tgate_gate_step:.0%})")
+            logger.info(f"[SAX_Bridge] Cache Pipe: TGate applied (gate_step={tgate_gate_step:.0%})")
 
         new_pipe = pipe.copy()
         new_pipe["model"] = model

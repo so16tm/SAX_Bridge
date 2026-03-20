@@ -209,21 +209,21 @@ class SAX_Bridge_Output:
                     "BOOLEAN",
                     {
                         "default": True,
-                        "tooltip": "True で保存実行。False でプレビューのみ（シャープ化・グレースケールは適用される）。",
+                        "tooltip": "True to save. False for preview only (sharpening and grayscale are still applied).",
                     },
                 ),
                 "output_dir": (
                     "STRING",
                     {
                         "default": "{date:%Y-%m-%d}",
-                        "tooltip": "保存先ディレクトリ。テンプレート変数使用可。空欄 = ComfyUI/output/。相対パスは output/ 基準。絶対パスも可。",
+                        "tooltip": "Output directory. Template variables supported. Leave empty for ComfyUI/output/. Relative paths are based on output/. Absolute paths also accepted.",
                     },
                 ),
                 "filename_template": (
                     "STRING",
                     {
                         "default": "{datetime:%Y%m%d_%H%M%S}",
-                        "tooltip": "ファイル名テンプレート。{変数} または {変数:フォーマット} 形式。{date} {time} {datetime} {seed} {model} {steps} {cfg} が使用可能。",
+                        "tooltip": "Filename template. Use {var} or {var:format} syntax. Available: {date} {time} {datetime} {seed} {model} {steps} {cfg}.",
                     },
                 ),
                 "filename_index": (
@@ -233,7 +233,7 @@ class SAX_Bridge_Output:
                         "min": 0,
                         "max": 999999,
                         "step": 1,
-                        "tooltip": "インデックス開始値。保存ごとにカウントアップする。次回セッションではこの値を手動で更新する。",
+                        "tooltip": "Starting index value. Increments with each save. Update manually at the next session.",
                     },
                 ),
                 "index_digits": (
@@ -242,13 +242,13 @@ class SAX_Bridge_Output:
                         "default": 3,
                         "min": 1,
                         "max": 6,
-                        "tooltip": "インデックスのゼロパディング桁数。3 = 001, 4 = 0001。",
+                        "tooltip": "Zero-padding digit count for the index. 3 = 001, 4 = 0001.",
                     },
                 ),
                 "index_position": (
                     ["prefix", "suffix"],
                     {
-                        "tooltip": "インデックスをファイル名の先頭（prefix）または末尾（suffix）に付加する。",
+                        "tooltip": "Attach the index to the beginning (prefix) or end (suffix) of the filename.",
                     },
                 ),
                 "format": (["webp", "png"],),
@@ -258,7 +258,7 @@ class SAX_Bridge_Output:
                         "default": 90,
                         "min": 1,
                         "max": 100,
-                        "tooltip": "WebP 品質 (1-100)。lossless=True の場合は無効。",
+                        "tooltip": "WebP quality (1–100). Ignored when lossless=True.",
                     },
                 ),
                 "webp_lossless": ("BOOLEAN", {"default": False}),
@@ -269,7 +269,7 @@ class SAX_Bridge_Output:
                         "min": 0.0,
                         "max": 2.0,
                         "step": 0.05,
-                        "tooltip": "Unsharp Mask シャープ強度。0.0 = 無効。",
+                        "tooltip": "Unsharp Mask sharpening strength. 0.0 = disabled.",
                     },
                 ),
                 "sharpen_sigma": (
@@ -279,7 +279,7 @@ class SAX_Bridge_Output:
                         "min": 0.1,
                         "max": 5.0,
                         "step": 0.1,
-                        "tooltip": "シャープカーネル幅。小さいほどエッジ・細部に作用。",
+                        "tooltip": "Sharpening kernel width. Smaller values affect finer edges and details.",
                     },
                 ),
                 "grayscale": ("BOOLEAN", {"default": False}),
@@ -287,16 +287,16 @@ class SAX_Bridge_Output:
             "optional": {
                 "pipe": (
                     "PIPE_LINE",
-                    {"tooltip": "image 未接続時の画像ソース兼メタデータ（seed・steps・CFG・モデル名等）供給元。"},
+                    {"tooltip": "Image source and metadata supplier (seed, steps, CFG, model name, etc.) when image is not connected."},
                 ),
                 "image": (
                     "IMAGE",
-                    {"tooltip": "処理対象画像。未接続の場合は pipe.images を使用。"},
+                    {"tooltip": "Target image to process. Falls back to pipe.images if not connected."},
                 ),
                 "prompt_text": (
                     "STRING",
                     {
-                        "tooltip": "メタデータに埋め込むプロンプトテキスト。SAX Prompt の POPULATED_TEXT を接続推奨。",
+                        "tooltip": "Prompt text to embed in metadata. Recommended: connect SAX Prompt's POPULATED_TEXT.",
                         "forceInput": True,
                     },
                 ),
@@ -309,8 +309,8 @@ class SAX_Bridge_Output:
     CATEGORY = "SAX/Bridge/Output"
     OUTPUT_NODE = True
     DESCRIPTION = (
-        "シャープ化・グレースケール変換・WebP/PNG 保存・メタデータ埋め込みを集約した最終出力ノード。"
-        "save=False で試行錯誤中の保存をスキップできる。"
+        "Final output node combining sharpening, grayscale conversion, WebP/PNG saving, and metadata embedding. "
+        "Set save=False to skip saving during experimentation."
     )
 
     def process(
@@ -338,7 +338,7 @@ class SAX_Bridge_Output:
             src = pipe["images"]
         else:
             raise ValueError(
-                "[CSB] Output: 画像が見つかりません。image または pipe.images を接続してください。"
+                "[SAX_Bridge] Output: no image found. Connect image or pipe.images."
             )
 
         # --- 1. シャープ化 ---
@@ -373,7 +373,7 @@ class SAX_Bridge_Output:
                     counter += 1
 
                 _save_image(img_np, filepath, format, webp_quality, webp_lossless, metadata_str, grayscale)
-                logger.info(f"[CSB] Output: 保存完了 → {filepath}")
+                logger.info(f"[SAX_Bridge] Output: saved → {filepath}")
 
         next_index = filename_index + 1 if save else filename_index
         return {"ui": {"filename_index": [next_index]}, "result": (result,)}

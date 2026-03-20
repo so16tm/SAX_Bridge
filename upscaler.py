@@ -67,10 +67,10 @@ class SAX_Bridge_Pipe_Upscaler:
                 "pipe": ("PIPE_LINE",),
                 "upscale_model_name": (
                     ["None"] + folder_paths.get_filename_list("upscale_models"),
-                    {"tooltip": "使用するアップスケールモデル。None = ピクセル補間のみ。"},
+                    {"tooltip": "Upscale model to use. None = pixel interpolation only."},
                 ),
                 "method": (["lanczos", "bilinear", "bicubic", "nearest-exact"],
-                           {"tooltip": "ピクセル補間メソッド。upscale_model_name 選択時はモデルによるアップスケールを優先し、このメソッドは最終リサイズ調整にのみ使用する。"}),
+                           {"tooltip": "Pixel interpolation method. When upscale_model_name is set, model-based upscaling takes priority; this method is used only for final resize adjustment."}),
                 "scale_by": (
                     "FLOAT",
                     {
@@ -78,7 +78,7 @@ class SAX_Bridge_Pipe_Upscaler:
                         "min": 0.25,
                         "max": 8.0,
                         "step": 0.05,
-                        "tooltip": "元解像度に対する拡大倍率。esrgan モデルが 4x の場合、scale_by=2 で 4x 後に 1/2 縮小する。",
+                        "tooltip": "Scale factor relative to original resolution. For a 4x ESRGAN model, scale_by=2 upscales 4x then downscales to 1/2.",
                     },
                 ),
                 "denoise": (
@@ -88,7 +88,7 @@ class SAX_Bridge_Pipe_Upscaler:
                         "min": 0.0,
                         "max": 1.0,
                         "step": 0.01,
-                        "tooltip": "0=アップスケールのみ / 0より大きい値でアップスケール後に軽量 i2i を実行する。",
+                        "tooltip": "0=upscale only / Values > 0 run a lightweight img2img pass after upscaling.",
                     },
                 ),
                 "steps_override": (
@@ -97,7 +97,7 @@ class SAX_Bridge_Pipe_Upscaler:
                         "default": 0,
                         "min": 0,
                         "max": 200,
-                        "tooltip": "i2i 時の steps。0 = loader_settings の steps を継承。",
+                        "tooltip": "Steps for img2img pass. 0 = inherit from loader_settings.",
                     },
                 ),
                 "cfg_override": (
@@ -107,7 +107,7 @@ class SAX_Bridge_Pipe_Upscaler:
                         "min": 0.0,
                         "max": 100.0,
                         "step": 0.5,
-                        "tooltip": "i2i 時の cfg。0.0 = loader_settings の cfg を継承。0 より大きい値で上書き。",
+                        "tooltip": "CFG for img2img pass. 0.0 = inherit from loader_settings. Values > 0 override it.",
                     },
                 ),
             },
@@ -118,8 +118,8 @@ class SAX_Bridge_Pipe_Upscaler:
     FUNCTION = "upscale"
     CATEGORY = "SAX/Bridge/Upscaler"
     DESCRIPTION = (
-        "Pipe 内の画像をアップスケールする。"
-        "ESRGAN モデルを使用すると高品質な拡大が可能で、後段 Detailer の denoise を下げられる。"
+        "Upscales images in the pipe. "
+        "Using an ESRGAN model enables high-quality enlargement and allows lower denoise in downstream Detailer nodes."
     )
 
     def upscale(
@@ -134,7 +134,7 @@ class SAX_Bridge_Pipe_Upscaler:
     ):
         images = pipe.get("images")
         if images is None:
-            raise ValueError("[CSB] Pipe に images が含まれていません。SAX Loader → KSampler → VAEDecode を先に実行してください。")
+            raise ValueError("[SAX_Bridge] Pipe does not contain images. Run SAX Loader → KSampler → VAEDecode first.")
 
         b, h, w, c = images.shape
         target_h = max(8, int(h * scale_by))
@@ -145,16 +145,16 @@ class SAX_Bridge_Pipe_Upscaler:
 
         # --- 1. アップスケール ---
         if upscale_model_name != "None":
-            logger.info(f"[CSB] Upscaler: ESRGAN モード / model={upscale_model_name} / {w}x{h} -> {target_w}x{target_h}")
+            logger.info(f"[SAX_Bridge] Upscaler: ESRGAN mode / model={upscale_model_name} / {w}x{h} -> {target_w}x{target_h}")
             from comfy_extras.nodes_upscale_model import UpscaleModelLoader
             upscale_model = UpscaleModelLoader().load_model(upscale_model_name)[0]
             upscaled = _esrgan_upscale(upscale_model, images, target_h, target_w, method)
-            logger.info(f"[CSB] Upscaler: ESRGAN 完了 / 出力サイズ {upscaled.shape[2]}x{upscaled.shape[1]}")
+            logger.info(f"[SAX_Bridge] Upscaler: ESRGAN done / output size {upscaled.shape[2]}x{upscaled.shape[1]}")
         elif target_h == h and target_w == w:
-            logger.info(f"[CSB] Upscaler: サイズ変化なし / スキップ")
+            logger.info("[SAX_Bridge] Upscaler: no size change / skipping")
             upscaled = images
         else:
-            logger.info(f"[CSB] Upscaler: ピクセル補間 ({method}) / {w}x{h} -> {target_w}x{target_h}")
+            logger.info(f"[SAX_Bridge] Upscaler: pixel interpolation ({method}) / {w}x{h} -> {target_w}x{target_h}")
             upscaled = _pixel_upscale(images, target_h, target_w, method)
 
         upscaled = torch.clamp(upscaled, 0.0, 1.0)
@@ -165,8 +165,8 @@ class SAX_Bridge_Pipe_Upscaler:
             if p["model"] is None or p["vae"] is None \
                     or p["positive"] is None or p["negative"] is None:
                 logger.warning(
-                    "[CSB] Upscaler: i2i に必要な pipe 要素 (model/vae/positive/negative) が不足しています。"
-                    "アップスケールのみ実行します。"
+                    "[SAX_Bridge] Upscaler: pipe is missing required elements for img2img (model/vae/positive/negative). "
+                    "Upscaling only."
                 )
             else:
                 steps_eff = steps_override if steps_override > 0 else p["steps"]
@@ -191,7 +191,7 @@ class SAX_Bridge_Pipe_Upscaler:
                 upscaled = torch.clamp(upscaled, 0.0, 1.0)
 
                 logger.info(
-                    f"[CSB] Upscaler i2i: {w}x{h} -> {target_w}x{target_h}, "
+                    f"[SAX_Bridge] Upscaler i2i: {w}x{h} -> {target_w}x{target_h}, "
                     f"steps={steps_eff}, cfg={cfg_eff}, denoise={denoise}"
                 )
 

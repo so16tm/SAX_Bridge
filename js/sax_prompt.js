@@ -77,7 +77,7 @@ app.registerExtension({
         }
 
         if (tbox && tbox.inputEl) {
-            tbox.inputEl.placeholder = "Wildcard Prompt (LoRA・BREAK 構文対応)";
+            tbox.inputEl.placeholder = "Wildcard Prompt (LoRA / BREAK syntax supported)";
         }
     },
 });

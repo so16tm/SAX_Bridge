@@ -352,7 +352,7 @@ function resetAllSources(node) {
 function showAddSourcePicker(remoteNode) {
     const existingIds = new Set([remoteNode.id, ...getSources(remoteNode).map(s => s.sourceId)]);
     showPicker({
-        title:      "ソースノードを選択",
+        title:      "Select source node",
         sections:   ["subgraphs", "nodes"],
         mode:       "single",
         filterNode: n => !existingIds.has(n.id) && (n.outputs ?? []).length > 0,
@@ -479,7 +479,7 @@ function makeSourceWidget(node) {
                 canAdd ? "#2a6a2a" : "#3a3a3a");
             ctx.fillStyle = canAdd ? "#7d7" : "#555";
             ctx.textAlign = "center";
-            ctx.fillText(noSrc ? "ソースを選択…" : "＋ ソース追加", addX + addW / 2, btnMidY);
+            ctx.fillText(noSrc ? "Select source…" : "+ Add source", addX + addW / 2, btnMidY);
         },
 
         mouse(event, pos, mouseNode) {

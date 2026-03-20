@@ -24,8 +24,8 @@ def _get_impact_wildcards():
         return impact.wildcards
     except ImportError:
         raise RuntimeError(
-            "[CSB] ComfyUI-Impact-Pack がインストールされていません。"
-            "Wildcard ノードを使用するには Impact Pack が必要です。"
+            "[SAX_Bridge] ComfyUI-Impact-Pack is not installed. "
+            "Impact Pack is required to use Wildcard nodes."
         )
 
 
@@ -128,7 +128,7 @@ def _apply_loras(model, clip, loras):
 
         if path is not None:
             logging.info(
-                f"[CSB] LOAD LORA: {lora_name}: "
+                f"[SAX_Bridge] LOAD LORA: {lora_name}: "
                 f"model={model_weight}, clip={clip_weight}, "
                 f"LBW={lbw}, LOADER={loader}"
             )
@@ -139,7 +139,7 @@ def _apply_loras(model, clip, loras):
                     model = cls().load_lora(model, lora_name, model_weight)[0]
                 else:
                     logging.warning(
-                        "[CSB] 'NunchakuFluxLoraLoader' not found. "
+                        "[SAX_Bridge] 'NunchakuFluxLoraLoader' not found. "
                         "LOADER=nunchaku is ignored."
                     )
             else:
@@ -158,14 +158,14 @@ def _apply_loras(model, clip, loras):
                         )
                     else:
                         logging.warning(
-                            "[CSB] 'Inspire Pack' is not installed. "
+                            "[SAX_Bridge] 'Inspire Pack' is not installed. "
                             "LBW= attribute is ignored."
                         )
                         model, clip = default_lora()
                 else:
                     model, clip = default_lora()
         else:
-            logging.warning(f"[CSB] LORA NOT FOUND: {orig_lora_name}")
+            logging.warning(f"[SAX_Bridge] LORA NOT FOUND: {orig_lora_name}")
 
     return model, clip
 
@@ -221,7 +221,7 @@ class SAX_Bridge_Prompt:
                     {
                         "multiline": True,
                         "dynamicPrompts": False,
-                        "tooltip": "ワイルドカード構文を使ってプロンプトを入力してください。LoRA構文・BREAK構文もサポートしています。",
+                        "tooltip": "Enter your prompt using wildcard syntax. LoRA syntax and BREAK syntax are also supported.",
                     },
                 ),
                 "seed": (
@@ -255,9 +255,9 @@ class SAX_Bridge_Prompt:
         clip = pipe.get("clip")
 
         if model is None:
-            raise ValueError("[CSB] Pipe に model が含まれていません。")
+            raise ValueError("[SAX_Bridge] Pipe does not contain a model.")
         if clip is None:
-            raise ValueError("[CSB] Pipe に clip が含まれていません。")
+            raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
 
         # --- 2. ワイルドカード展開 ---
         actual_seed = seed if seed != -1 else pipe.get("seed", 0)
@@ -321,7 +321,7 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         return io.Schema(
             node_id="SAX_Bridge_Prompt_Concat",
             display_name="SAX Prompt Concat",
-            description="複数テキストを連結し、Prompt/LoRA を展開して CLIP エンコードする",
+            description="Concatenates multiple text inputs, expands Wildcards/LoRA tags, and encodes them with CLIP.",
             category="SAX/Bridge/Prompt",
             inputs=[
                 PipeLine.Input("pipe"),
@@ -378,9 +378,9 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         clip = pipe.get("clip")
 
         if model is None:
-            raise ValueError("[CSB] Pipe に model が含まれていません。")
+            raise ValueError("[SAX_Bridge] Pipe does not contain a model.")
         if clip is None:
-            raise ValueError("[CSB] Pipe に clip が含まれていません。")
+            raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
 
         # 展開・エンコード処理
         actual_seed = seed if seed != -1 else pipe.get("seed", 0)
