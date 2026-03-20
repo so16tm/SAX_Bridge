@@ -6,6 +6,7 @@ from .noise import SAX_Bridge_Noise_Image, SAX_Bridge_Noise_Latent
 from .upscaler import SAX_Bridge_Pipe_Upscaler
 from .pipe_cache import SAX_Bridge_Pipe_Cache
 from .output import SAX_Bridge_Output
+from .toggle_manager import SAX_Bridge_Toggle_Manager
 
 # V3 API ノード
 from . import prompt as prompt_node
@@ -29,6 +30,9 @@ NODE_CLASS_MAPPINGS = {
     # Output 系列
     "SAX_Bridge_Output": SAX_Bridge_Output,
 
+    # Control 系列
+    "SAX_Bridge_Toggle_Manager": SAX_Bridge_Toggle_Manager,
+
     # Prompt 系列 (Class Implementations)
     "SAX_Bridge_Prompt": prompt_node.SAX_Bridge_Prompt,
 }
@@ -41,6 +45,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Pipe_Upscaler": "SAX Pipe Upscaler",
     "SAX_Bridge_Pipe_Cache": "SAX Pipe Cache",
     "SAX_Bridge_Output": "SAX Output",
+    "SAX_Bridge_Toggle_Manager": "SAX Toggle Manager",
     "SAX_Bridge_Prompt": "SAX Prompt",
 }
 
