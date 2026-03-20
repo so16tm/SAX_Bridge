@@ -227,10 +227,11 @@ class SAX_Bridge_Prompt:
                 "seed": (
                     "INT",
                     {
-                        "default": 0,
-                        "min": 0,
+                        "default": -1,
+                        "min": -1,
                         "max": 0xFFFFFFFFFFFFFFFF,
-                        "tooltip": "ワイルドカード処理に使用するランダムシード。",
+                        "control_after_generate": True,
+                        "tooltip": "Random seed for wildcard processing. -1 for inheritance from pipe seed.",
                     },
                 ),
                 "select_to_add_lora": (
@@ -259,7 +260,8 @@ class SAX_Bridge_Prompt:
             raise ValueError("[CSB] Pipe に clip が含まれていません。")
 
         # --- 2. ワイルドカード展開 ---
-        populated = wildcards.process(wildcard_text, seed)
+        actual_seed = seed if seed != -1 else pipe.get("seed", 0)
+        populated = wildcards.process(wildcard_text, actual_seed)
 
         # --- 3. LoRA タグ解析・除去 ---
         loras = wildcards.extract_lora_values(populated)
@@ -331,9 +333,11 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
                 ),
                 io.Int.Input(
                     "seed",
-                    default=0,
-                    min=0,
+                    default=-1,
+                    min=-1,
                     max=0xFFFFFFFFFFFFFFFF,
+                    control_after_generate=True,
+                    tooltip="Random seed for wildcard processing. -1 for inheritance from pipe seed.",
                 ),
                 io.Autogrow.Input("texts", template=autogrow_template),
             ],
@@ -379,7 +383,8 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
             raise ValueError("[CSB] Pipe に clip が含まれていません。")
 
         # 展開・エンコード処理
-        populated = wildcards.process(wildcard_text, seed)
+        actual_seed = seed if seed != -1 else pipe.get("seed", 0)
+        populated = wildcards.process(wildcard_text, actual_seed)
         loras = wildcards.extract_lora_values(populated)
         clean_text = wildcards.remove_lora_tags(populated)
 
