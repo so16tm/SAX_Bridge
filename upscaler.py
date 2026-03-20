@@ -27,7 +27,7 @@ def _pixel_upscale(images: torch.Tensor, target_h: int, target_w: int, method: s
     return upscaled.permute(0, 2, 3, 1)  # (B, H, W, C)
 
 
-def _esrgan_upscale(upscale_model, images: torch.Tensor, target_h: int, target_w: int) -> torch.Tensor:
+def _esrgan_upscale(upscale_model, images: torch.Tensor, target_h: int, target_w: int, method: str) -> torch.Tensor:
     """
     ESRGAN 系モデルでアップスケールし、target サイズに縮小する。
     images: (B, H, W, C) float32
@@ -37,7 +37,7 @@ def _esrgan_upscale(upscale_model, images: torch.Tensor, target_h: int, target_w
 
     if upscaled.shape[1] != target_h or upscaled.shape[2] != target_w:
         bchw = upscaled.permute(0, 3, 1, 2)
-        bchw = comfy.utils.common_upscale(bchw, target_w, target_h, "lanczos", "disabled")
+        bchw = comfy.utils.common_upscale(bchw, target_w, target_h, method, "disabled")
         upscaled = bchw.permute(0, 2, 3, 1)
 
     return upscaled
@@ -148,7 +148,7 @@ class SAX_Bridge_Pipe_Upscaler:
             logger.info(f"[CSB] Upscaler: ESRGAN モード / model={upscale_model_name} / {w}x{h} -> {target_w}x{target_h}")
             from comfy_extras.nodes_upscale_model import UpscaleModelLoader
             upscale_model = UpscaleModelLoader().load_model(upscale_model_name)[0]
-            upscaled = _esrgan_upscale(upscale_model, images, target_h, target_w)
+            upscaled = _esrgan_upscale(upscale_model, images, target_h, target_w, method)
             logger.info(f"[CSB] Upscaler: ESRGAN 完了 / 出力サイズ {upscaled.shape[2]}x{upscaled.shape[1]}")
         elif target_h == h and target_w == w:
             logger.info(f"[CSB] Upscaler: サイズ変化なし / スキップ")
