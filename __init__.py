@@ -7,6 +7,7 @@ from .upscaler import SAX_Bridge_Pipe_Upscaler
 from .pipe_cache import SAX_Bridge_Pipe_Cache
 from .output import SAX_Bridge_Output
 from .toggle_manager import SAX_Bridge_Toggle_Manager
+from .remote_get import SAXRemoteGet
 
 # V3 API ノード
 from . import prompt as prompt_node
@@ -32,6 +33,7 @@ NODE_CLASS_MAPPINGS = {
 
     # Control 系列
     "SAX_Bridge_Toggle_Manager": SAX_Bridge_Toggle_Manager,
+    "SAXRemoteGet": SAXRemoteGet,
 
     # Prompt 系列 (Class Implementations)
     "SAX_Bridge_Prompt": prompt_node.SAX_Bridge_Prompt,
@@ -46,6 +48,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Pipe_Cache": "SAX Pipe Cache",
     "SAX_Bridge_Output": "SAX Output",
     "SAX_Bridge_Toggle_Manager": "SAX Toggle Manager",
+    "SAXRemoteGet": "SAX Remote Get",
     "SAX_Bridge_Prompt": "SAX Prompt",
 }
 
