@@ -174,14 +174,16 @@ function saveEntries(node, entries) {
 // ---------------------------------------------------------------------------
 
 function buildUI(node) {
-    // loras_json ウィジェットを非表示化
-    const jsonW = node.widgets?.find(w => w.name === WIDGET_JSON);
-    if (jsonW && !jsonW._saxHidden) {
-        jsonW._saxHidden  = true;
-        jsonW.computeSize = () => [0, -4];
-        jsonW.draw        = () => {};
-        jsonW.mouse       = () => false;
-        if (jsonW.element) jsonW.element.style.display = "none";
+    // loras_json / enabled ウィジェットを非表示化
+    for (const name of [WIDGET_JSON, "enabled"]) {
+        const w = node.widgets?.find(w => w.name === name);
+        if (w && !w._saxHidden) {
+            w._saxHidden  = true;
+            w.computeSize = () => [0, -4];
+            w.draw        = () => {};
+            w.mouse       = () => false;
+            if (w.element) w.element.style.display = "none";
+        }
     }
 
     // 既存のカスタム UI ウィジェットを除去して再構築
@@ -201,9 +203,11 @@ function buildUI(node) {
         hasMoveUpDown: true,
         hasDelete:     true,
         hasParam:      true,
+        enabledWidget: { name: "enabled" },
 
         param: {
             key:       "strength",
+            label:     "Strength",
             get:       (item)    => item.strength ?? 1.0,
             set:       (item, v) => { item.strength = Math.round(v * 100) / 100; },
             min:       -2.0,

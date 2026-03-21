@@ -18,7 +18,7 @@
 import { app } from "../../scripts/app.js";
 
 export const PAD   = 8;
-export const ROW_H = 30;
+export const ROW_H = 24;
 
 // ---------------------------------------------------------------------------
 // Drawing helpers
@@ -124,7 +124,7 @@ export function rowLayout(W, {
     let lx = PAD;
     if (hasToggle) {
         layout.pill = { x: lx, w: 26 };
-        lx += 26 + 6;   // pill 幅 + ギャップ
+        lx += 26 + 4;   // pill 幅 + ギャップ
     }
     layout.contentX = lx;
 
@@ -169,81 +169,153 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
     // 既存ポップアップを除去
     document.querySelectorAll(".__sax_param_popup").forEach(e => e.remove());
 
+    const step     = cfg.step ?? 0.01;
+    const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
+
     const overlay = document.createElement("div");
     overlay.className = "__sax_param_popup";
     overlay.style.cssText = "position:fixed;inset:0;z-index:10010;";
 
     const box = document.createElement("div");
     box.style.cssText =
-        "position:absolute;background:#1a1a2e;border:1px solid #4a8acc;border-radius:6px;" +
-        "padding:8px 10px;display:flex;flex-direction:column;gap:6px;" +
-        "font:12px sans-serif;color:#ccc;box-shadow:0 2px 12px rgba(0,0,0,.6);min-width:130px;";
+        "position:absolute;background:#1a1a2e;border:1px solid #4a8acc;border-radius:8px;" +
+        "padding:12px 14px;display:flex;flex-direction:column;gap:8px;" +
+        "font:13px sans-serif;color:#ccc;box-shadow:0 4px 20px rgba(0,0,0,.7);min-width:200px;";
 
-    const step     = cfg.step ?? 0.01;
-    const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
+    // ラベル（cfg.label があれば表示）
+    if (cfg.label) {
+        const lbl = document.createElement("div");
+        lbl.style.cssText = "font-size:11px;color:#556;text-transform:uppercase;letter-spacing:.06em;";
+        lbl.textContent = cfg.label;
+        box.appendChild(lbl);
+    }
+
+    // ±ボタン + 入力欄 行
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;align-items:stretch;gap:4px;";
+
+    const btnStyle =
+        "width:44px;background:#1e2a3e;border:1px solid #3a5a8a;border-radius:5px;" +
+        "color:#7ac8ff;font-size:24px;cursor:pointer;display:flex;align-items:center;" +
+        "justify-content:center;user-select:none;flex-shrink:0;padding:0;line-height:1;";
+
+    const minusBtn = document.createElement("button");
+    minusBtn.style.cssText = btnStyle;
+    minusBtn.textContent = "−";
+
+    const plusBtn = document.createElement("button");
+    plusBtn.style.cssText = btnStyle;
+    plusBtn.textContent = "+";
 
     const input = document.createElement("input");
-    input.type  = "number";
-    input.min   = cfg.min ?? -Infinity;
-    input.max   = cfg.max ??  Infinity;
-    input.step  = step;
-    input.value = currentVal.toFixed(decimals);
+    input.type      = "text";
+    input.inputMode = "decimal";
+    input.value     = currentVal.toFixed(decimals);
     input.style.cssText =
-        "background:#0e0e20;border:1px solid #3a3a5a;border-radius:3px;" +
-        "color:#ccc;padding:4px 6px;font-size:12px;outline:none;width:100%;box-sizing:border-box;";
+        "flex:1;background:#0e0e20;border:1px solid #3a3a5a;border-radius:5px;" +
+        "color:#fff;padding:8px;font-size:20px;font-weight:bold;outline:none;" +
+        "text-align:center;min-width:0;";
 
+    btnRow.appendChild(minusBtn);
+    btnRow.appendChild(input);
+    btnRow.appendChild(plusBtn);
+    box.appendChild(btnRow);
+
+    // ヒント
     const hint = document.createElement("div");
-    hint.style.cssText = "font-size:10px;color:#555;text-align:center;";
-    hint.textContent   = `${cfg.min ?? "-∞"} – ${cfg.max ?? "+∞"}  (Enter)`;
-
-    box.appendChild(input);
+    hint.style.cssText = "font-size:10px;color:#445;text-align:center;";
+    hint.textContent   = `${cfg.min ?? "−∞"} – ${cfg.max ?? "+∞"}  ·  Enter to confirm`;
     box.appendChild(hint);
 
-    // append 前に概算位置を設定（pointerup 直後に同フレームの pointerdown で即閉じしないよう）
-    const approxW = 140, approxH = 60;
+    // append 前に概算位置を設定（二重クリック時の即閉じ防止）
+    const approxW = 220, approxH = 110;
     box.style.left = `${Math.max(4, Math.min(screenX - approxW / 2, window.innerWidth  - approxW - 4))}px`;
     box.style.top  = `${Math.max(4, Math.min(screenY - approxH - 6, window.innerHeight - approxH - 4))}px`;
 
     overlay.appendChild(box);
     document.body.appendChild(overlay);
-
-    // DOM 挿入直後にフォーカス（ユーザーインタラクションコンテキスト内で呼ぶ必要がある）
     input.focus();
+    input.select();
 
     // レイアウト確定後に正確な位置へ調整
     requestAnimationFrame(() => {
-        const bw   = box.offsetWidth;
-        const bh   = box.offsetHeight;
+        const bw = box.offsetWidth;
+        const bh = box.offsetHeight;
         let left = screenX - bw / 2;
         let top  = screenY - bh - 6;
         left = Math.max(4, Math.min(left, window.innerWidth  - bw - 4));
         top  = Math.max(4, Math.min(top,  window.innerHeight - bh - 4));
         box.style.left = `${left}px`;
         box.style.top  = `${top}px`;
-        input.select();
     });
 
+    // 値変更
+    const applyDelta = (d) => {
+        let val = parseFloat(input.value);
+        if (isNaN(val)) val = currentVal;
+        val += d;
+        if (cfg.min != null) val = Math.max(cfg.min, val);
+        if (cfg.max != null) val = Math.min(cfg.max, val);
+        val = Math.round(val / step) * step;
+        input.value = parseFloat(val.toFixed(decimals)).toFixed(decimals);
+        input.select();
+    };
+
+    // 長押し auto-repeat
+    let _holdTimer = null, _holdInterval = null;
+    const stopHold = () => {
+        clearTimeout(_holdTimer);
+        clearInterval(_holdInterval);
+        _holdTimer = _holdInterval = null;
+        window.removeEventListener("pointerup",     stopHold, { capture: true });
+        window.removeEventListener("pointercancel", stopHold, { capture: true });
+    };
+    const startHold = (d) => {
+        stopHold();
+        applyDelta(d);
+        _holdTimer = setTimeout(() => {
+            _holdInterval = setInterval(() => applyDelta(d), 100);
+        }, 400);
+        window.addEventListener("pointerup",     stopHold, { capture: true });
+        window.addEventListener("pointercancel", stopHold, { capture: true });
+    };
+
+    minusBtn.addEventListener("pointerdown", e => { e.preventDefault(); startHold(-step); });
+    plusBtn.addEventListener( "pointerdown", e => { e.preventDefault(); startHold(+step); });
+
+    // confirm / cancel
+    const close = () => { stopHold(); overlay.remove(); };
     const commit = () => {
+        stopHold();
         const raw = parseFloat(input.value);
         if (!isNaN(raw)) {
-            const clamped = Math.max(cfg.min ?? -Infinity, Math.min(cfg.max ?? Infinity, raw));
-            onCommit(clamped);
+            let val = raw;
+            if (cfg.min != null) val = Math.max(cfg.min, val);
+            if (cfg.max != null) val = Math.min(cfg.max, val);
+            onCommit(parseFloat(val.toFixed(decimals)));
         }
         overlay.remove();
     };
 
     input.addEventListener("keydown", e => {
-        if (e.key === "Enter")  { e.preventDefault(); commit(); }
-        if (e.key === "Escape") { overlay.remove(); }
+        if (e.key === "Enter")                              { e.preventDefault(); commit(); }
+        if (e.key === "Escape")                             { close(); }
+        if (e.key === "ArrowLeft"  || e.key === "ArrowDown")  { e.preventDefault(); applyDelta(-step); }
+        if (e.key === "ArrowRight" || e.key === "ArrowUp")    { e.preventDefault(); applyDelta(+step); }
     });
 
-    // 開いた直後（同フレーム内）の pointerdown では閉じない
-    // — pointerup で表示直後に二重クリックの 2nd pointerdown が来ても即閉じしないよう
+    // ホイールで値増減
+    overlay.addEventListener("wheel", e => {
+        e.preventDefault();
+        applyDelta((e.deltaY < 0 ? 1 : -1) * step);
+    }, { passive: false });
+
+    // 開いた直後の pointerdown では閉じない（二重クリック対策）
     let closeEnabled = false;
     requestAnimationFrame(() => { closeEnabled = true; });
     overlay.addEventListener("pointerdown", e => {
         if (!closeEnabled) return;
-        if (e.target === overlay) overlay.remove();
+        if (e.target === overlay) close();
     });
 }
 
@@ -298,9 +370,12 @@ export function makeItemListWidget(node, spec) {
         param         = {},
         content,
         addButton     = null,
+        enabledWidget = null,   // { name: string } — 指定時はヘッダー行に pill として表示
     } = spec;
 
-    const ADD_H = addButton ? ROW_H : 0;
+    const ADD_H    = addButton ? ROW_H : 0;
+    // enabledWidget または param.label があればヘッダー行を表示する
+    const HEADER_H = (enabledWidget || (hasParam && param.label)) ? 20 : 0;
 
     // ドラッグ状態（クロージャで保持）
     let _dragIndex   = -1;   // draw() でのアクティブ表示に使用
@@ -315,7 +390,7 @@ export function makeItemListWidget(node, spec) {
 
         computeSize(W) {
             const items = getItems();
-            return [W, items.length * ROW_H + ADD_H];
+            return [W, HEADER_H + items.length * ROW_H + ADD_H];
         },
 
         draw(ctx, node, W, y) {
@@ -323,8 +398,24 @@ export function makeItemListWidget(node, spec) {
             const items  = getItems();
             const layout = rowLayout(W, { hasToggle, hasParam, hasMoveUpDown, hasDelete });
 
+            // ヘッダー行（enabledWidget pill + param.label）
+            if (HEADER_H > 0) {
+                const headerMidY = y + HEADER_H / 2;
+                if (enabledWidget) {
+                    const ew = node.widgets?.find(w => w.name === enabledWidget.name);
+                    drawPill(ctx, PAD, headerMidY, ew ? !!ew.value : true);
+                }
+                if (hasParam && param.label) {
+                    txt(ctx, param.label,
+                        layout.param.x + layout.param.w / 2,
+                        headerMidY,
+                        "#557", "center", 10);
+                }
+            }
+
+            const itemsY = y + HEADER_H;
             items.forEach((item, i) => {
-                const rowY = y + i * ROW_H;
+                const rowY = itemsY + i * ROW_H;
                 const midY = rowY + ROW_H / 2;
                 const on   = hasToggle ? (item.on ?? true) : true;
 
@@ -368,7 +459,7 @@ export function makeItemListWidget(node, spec) {
 
             // Add ボタン
             if (addButton) {
-                const btnY  = y + items.length * ROW_H;
+                const btnY  = itemsY + items.length * ROW_H;
                 const canAdd = items.length < maxItems;
                 rrect(ctx, PAD, btnY + 3, W - PAD * 2, ADD_H - 6, 3,
                     canAdd ? "#1a2a1a" : "#1a1a1a",
@@ -385,7 +476,24 @@ export function makeItemListWidget(node, spec) {
             const W      = node.size[0];
             const layout = rowLayout(W, { hasToggle, hasParam, hasMoveUpDown, hasDelete });
 
-            const localY   = pos[1] - this._y;
+            const rawY   = pos[1] - this._y;
+            const localY = rawY - HEADER_H;
+
+            // ── ヘッダー行クリック（enabledWidget トグル） ──
+            if (rawY < HEADER_H) {
+                if (enabledWidget && inX(pos, PAD, 30)) {
+                    const ew = node.widgets?.find(w => w.name === enabledWidget.name);
+                    if (ew) {
+                        ew.value = !ew.value;
+                        ew.callback?.(ew.value);
+                    }
+                    app.graph.setDirtyCanvas(true, false);
+                    return true;
+                }
+                return false;
+            }
+
+            if (localY < 0) return false;
             const rowIndex = Math.floor(localY / ROW_H);
 
             // ── Add ボタン ──
@@ -479,7 +587,7 @@ export function makeItemListWidget(node, spec) {
                             e.clientX,
                             e.clientY,
                             param.get(item),
-                            { min: param.min, max: param.max, step: param.step },
+                            { min: param.min, max: param.max, step: param.step, label: param.label },
                             (v) => {
                                 param.set(item, v);
                                 saveItems(items);
