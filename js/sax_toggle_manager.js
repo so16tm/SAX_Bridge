@@ -573,7 +573,7 @@ function showSceneManager(node) {
 
             const lbl = h("span",
                 `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` +
-                `color:${isCurrent ? "var(--fg-color,#fff)" : "var(--input-text,#ddd)"};` +
+                `color:${isCurrent ? "#fff" : "var(--input-text,#ddd)"};` +
                 `${isCurrent ? "font-weight:bold;" : ""}`);
             lbl.textContent = name;
             row.appendChild(lbl);

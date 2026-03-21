@@ -255,33 +255,26 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
     const step     = cfg.step ?? 0.01;
     const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
 
-    const overlay = document.createElement("div");
+    const overlay = h("div", "position:fixed;inset:0;z-index:10010;");
     overlay.className = "__sax_param_popup";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:10010;";
 
-    const box = document.createElement("div");
-    box.style.cssText =
+    const box = h("div",
         "position:absolute;background:var(--comfy-menu-bg,#171718);" +
-        "border:1px solid var(--content-bg,#4e4e4e);border-radius:6px;" +
-        "padding:12px 14px;display:flex;flex-direction:column;gap:8px;" +
-        "font:13px sans-serif;color:var(--input-text,#ddd);" +
-        "box-shadow:0 4px 20px rgba(0,0,0,.7);min-width:200px;";
+        "border:1px solid var(--border-color,#4e4e4e);border-radius:8px;" +
+        "padding:16px;display:flex;flex-direction:column;gap:8px;" +
+        "font:13px/1.5 sans-serif;color:var(--input-text,#ddd);" +
+        "box-shadow:0 4px 20px rgba(0,0,0,.7);min-width:200px;");
 
-    // ラベル（cfg.label があれば表示）
+    // ラベル — showDialog のタイトル行と同じスタイル
     if (cfg.label) {
-        const lbl = document.createElement("div");
-        lbl.style.cssText =
-            "font-size:11px;color:var(--input-text,#ddd);" +
-            "text-transform:uppercase;letter-spacing:.06em;";
-        lbl.textContent = cfg.label;
-        box.appendChild(lbl);
+        box.appendChild(h("div",
+            "font:bold 14px sans-serif;color:var(--input-text,#ddd);flex-shrink:0;",
+            cfg.label));
     }
 
     // ±ボタン + 入力欄 行
-    const btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;align-items:stretch;gap:4px;";
+    const btnRow = h("div", "display:flex;align-items:stretch;gap:4px;");
 
-    // ± ボタンは行カプセルと同じスタイル（暗い背景 + コンテンツグレー枠）
     const btnStyle =
         "width:44px;background:var(--comfy-input-bg,#222);" +
         "border:1px solid var(--content-bg,#4e4e4e);border-radius:4px;" +
@@ -289,23 +282,16 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
         "display:flex;align-items:center;justify-content:center;" +
         "user-select:none;flex-shrink:0;padding:0;line-height:1;";
 
-    const minusBtn = document.createElement("button");
-    minusBtn.style.cssText = btnStyle;
-    minusBtn.textContent = "−";
+    const minusBtn = h("button", btnStyle, "−");
+    const plusBtn  = h("button", btnStyle, "+");
 
-    const plusBtn = document.createElement("button");
-    plusBtn.style.cssText = btnStyle;
-    plusBtn.textContent = "+";
-
-    // 入力欄も行スタイルに揃える（暗い背景 + コンテンツグレー枠）
-    const input = document.createElement("input");
+    const input = h("input",
+        "flex:1;background:var(--comfy-input-bg,#222);border:1px solid var(--content-bg,#4e4e4e);" +
+        "border-radius:4px;color:var(--input-text,#ddd);padding:8px;" +
+        "font-size:20px;font-weight:bold;outline:none;text-align:center;min-width:0;");
     input.type      = "text";
     input.inputMode = "decimal";
     input.value     = currentVal.toFixed(decimals);
-    input.style.cssText =
-        "flex:1;background:var(--comfy-input-bg,#222);border:1px solid var(--content-bg,#4e4e4e);" +
-        "border-radius:4px;color:var(--input-text,#ddd);padding:8px;" +
-        "font-size:20px;font-weight:bold;outline:none;text-align:center;min-width:0;";
 
     btnRow.appendChild(minusBtn);
     btnRow.appendChild(input);
@@ -313,10 +299,9 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
     box.appendChild(btnRow);
 
     // ヒント
-    const hint = document.createElement("div");
-    hint.style.cssText = "font-size:10px;color:var(--border-color,#4e4e4e);text-align:center;";
-    hint.textContent   = `${cfg.min ?? "−∞"} – ${cfg.max ?? "+∞"}  ·  Enter to confirm`;
-    box.appendChild(hint);
+    box.appendChild(h("div",
+        "font-size:10px;color:var(--border-color,#4e4e4e);text-align:center;",
+        `${cfg.min ?? "−∞"} – ${cfg.max ?? "+∞"}  ·  Enter to confirm`));
 
     // append 前に概算位置を設定（二重クリック時の即閉じ防止）
     const approxW = 220, approxH = 110;
@@ -447,7 +432,7 @@ export function showDialog({ title, width = 480, maxHeight = "76vh", gap = 8, cl
         `border-radius:8px;padding:16px;width:${width}px;max-height:${maxHeight};` +
         `display:flex;flex-direction:column;color:var(--input-text,#ddd);font:13px/1.5 sans-serif;gap:${gap}px;`);
 
-    dlg.appendChild(h("div", "font:bold 14px sans-serif;color:var(--fg-color,#fff);flex-shrink:0;", title));
+    dlg.appendChild(h("div", "font:bold 14px sans-serif;color:var(--input-text,#ddd);flex-shrink:0;", title));
 
     const close = () => overlay.remove();
     build(dlg, close);
