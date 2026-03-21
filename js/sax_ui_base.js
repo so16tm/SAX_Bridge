@@ -445,6 +445,177 @@ export function showDialog({ title, width = 480, maxHeight = "76vh", gap = 8, cl
 }
 
 // ---------------------------------------------------------------------------
+// showItemEditDialog — 汎用アイテム編集ダイアログ
+// ---------------------------------------------------------------------------
+
+/**
+ * 複数フィールドを一括編集するモーダルダイアログを表示する。
+ *
+ * @param {{
+ *   title:      string,
+ *   width?:     number,
+ *   className?: string,   // 重複除去用クラス名
+ *   fields:     Array<{
+ *     type:       "text" | "number" | "select" | "custom",
+ *     key?:       string,      // text / number / select で使用
+ *     label?:     string,
+ *     // number
+ *     min?:       number,
+ *     max?:       number,
+ *     step?:      number,
+ *     decimals?:  number,
+ *     // select
+ *     options?:   Array<{ value: string, label: string, color?: string }>,
+ *     // custom — build(container, editData, close) で HTML を構築
+ *     build?:     (container: HTMLElement, data: object, close: () => void) => void,
+ *   }>,
+ *   data:       object,           // 編集対象の初期値（コピーして使用）
+ *   onCommit:   (data: object) => void,
+ * }} opts
+ */
+export function showItemEditDialog({ title, width = 380, className, fields, data, onCommit }) {
+    const cls = className || "__sax_item_edit_dlg";
+    document.querySelectorAll(`.${cls}`).forEach(e => e.remove());
+
+    const ed = { ...data };
+
+    const LABEL = (
+        "font-size:10px;color:var(--border-color,#4e4e4e);" +
+        "text-transform:uppercase;letter-spacing:0.05em;" +
+        "min-width:110px;flex-shrink:0;align-self:center;"
+    );
+    const INPUT = (
+        "flex:1;background:var(--comfy-input-bg,#222);" +
+        "border:1px solid var(--content-bg,#4e4e4e);border-radius:4px;" +
+        "color:var(--input-text,#ddd);padding:6px;font-size:13px;" +
+        "outline:none;text-align:center;min-width:0;"
+    );
+    const BTN_SM = (
+        "width:34px;height:30px;flex-shrink:0;" +
+        "background:var(--comfy-input-bg,#222);" +
+        "border:1px solid var(--content-bg,#4e4e4e);border-radius:4px;" +
+        "color:var(--input-text,#ddd);font-size:18px;cursor:pointer;" +
+        "display:flex;align-items:center;justify-content:center;padding:0;"
+    );
+
+    let firstInput = null;
+    let okBtn      = null;  // keydown ハンドラから参照（代入後に発火）
+
+    showDialog({
+        title, width, gap: 10, className: cls,
+        build(dlg, close) {
+            for (const f of fields) {
+                const row = h("div", "display:flex;align-items:center;gap:6px;");
+                if (f.label) row.appendChild(h("div", LABEL, f.label));
+
+                if (f.type === "text") {
+                    const inp = h("input", INPUT.replace("text-align:center;", "text-align:left;") + "padding:6px 8px;");
+                    inp.type  = "text";
+                    inp.value = ed[f.key] ?? "";
+                    inp.addEventListener("input",   () => { ed[f.key] = inp.value; });
+                    inp.addEventListener("keydown", (e) => {
+                        if (e.key === "Enter")  okBtn?.click();
+                        if (e.key === "Escape") close();
+                    });
+                    row.appendChild(inp);
+                    if (!firstInput) firstInput = inp;
+
+                } else if (f.type === "select") {
+                    const group = h("div", "display:flex;gap:6px;flex:1;");
+                    const btns  = [];
+                    const refresh = () => {
+                        btns.forEach(({ btn, opt }) => {
+                            const active = ed[f.key] === opt.value;
+                            const color  = opt.color || "var(--primary-background,#0b8ce9)";
+                            btn.style.background  = active ? color : "var(--comfy-input-bg,#222)";
+                            btn.style.borderColor = active ? color : "var(--content-bg,#4e4e4e)";
+                            btn.style.color       = active ? "#fff" : "var(--input-text,#ddd)";
+                            btn.style.fontWeight  = active ? "bold" : "normal";
+                        });
+                    };
+                    for (const opt of (f.options ?? [])) {
+                        const btn = h("button",
+                            "flex:1;padding:6px;border-radius:4px;cursor:pointer;font-size:12px;border:1px solid;",
+                            opt.label);
+                        btn.addEventListener("click", () => { ed[f.key] = opt.value; refresh(); });
+                        group.appendChild(btn);
+                        btns.push({ btn, opt });
+                    }
+                    row.appendChild(group);
+                    refresh();
+
+                } else if (f.type === "number") {
+                    const dec  = f.decimals ?? 2;
+                    const step = f.step ?? 0.01;
+                    const minus = h("button", BTN_SM, "−");
+                    const plus  = h("button", BTN_SM, "+");
+                    const inp   = h("input", INPUT);
+                    inp.type      = "text";
+                    inp.inputMode = dec > 0 ? "decimal" : "numeric";
+                    inp.value     = Number(ed[f.key] ?? 0).toFixed(dec);
+
+                    const set = (v) => {
+                        if (f.min != null) v = Math.max(f.min, v);
+                        if (f.max != null) v = Math.min(f.max, v);
+                        v = dec === 0 ? Math.round(v) : Math.round(v / step) * step;
+                        ed[f.key]  = v;
+                        inp.value  = v.toFixed(dec);
+                    };
+                    inp.addEventListener("change", () => {
+                        const v = parseFloat(inp.value);
+                        set(isNaN(v) ? (ed[f.key] ?? 0) : v);
+                    });
+
+                    // 長押し auto-repeat
+                    let _ht = null, _hi = null;
+                    const stopHold = () => {
+                        clearTimeout(_ht); clearInterval(_hi); _ht = _hi = null;
+                        window.removeEventListener("pointerup",     stopHold, { capture: true });
+                        window.removeEventListener("pointercancel", stopHold, { capture: true });
+                    };
+                    const startHold = (d) => {
+                        stopHold();
+                        set((ed[f.key] ?? 0) + d);
+                        _ht = setTimeout(() => { _hi = setInterval(() => set((ed[f.key] ?? 0) + d), 100); }, 400);
+                        window.addEventListener("pointerup",     stopHold, { capture: true });
+                        window.addEventListener("pointercancel", stopHold, { capture: true });
+                    };
+                    minus.addEventListener("pointerdown", e => { e.preventDefault(); startHold(-step); });
+                    plus.addEventListener( "pointerdown", e => { e.preventDefault(); startHold(+step); });
+
+                    row.appendChild(minus);
+                    row.appendChild(inp);
+                    row.appendChild(plus);
+
+                } else if (f.type === "custom") {
+                    f.build?.(row, ed, close);
+                }
+
+                dlg.appendChild(row);
+            }
+
+            // OK / Cancel
+            const foot = h("div", "display:flex;gap:8px;justify-content:flex-end;margin-top:2px;");
+            const cancelBtn = h("button",
+                "padding:7px 20px;border-radius:4px;border:1px solid var(--border-color,#4e4e4e);" +
+                "background:var(--comfy-input-bg,#222);color:var(--input-text,#ddd);cursor:pointer;",
+                "Cancel");
+            okBtn = h("button",
+                "padding:7px 20px;border-radius:4px;border:none;" +
+                "background:var(--primary-background,#0b8ce9);color:#fff;cursor:pointer;font-weight:bold;",
+                "OK");
+            cancelBtn.addEventListener("click", close);
+            okBtn.addEventListener("click", () => { onCommit(ed); close(); });
+            foot.appendChild(cancelBtn);
+            foot.appendChild(okBtn);
+            dlg.appendChild(foot);
+
+            requestAnimationFrame(() => { firstInput?.focus(); firstInput?.select?.(); });
+        },
+    });
+}
+
+// ---------------------------------------------------------------------------
 // makeItemListWidget — アイテムリスト共通ウィジェットファクトリ
 // ---------------------------------------------------------------------------
 
@@ -535,7 +706,7 @@ export function makeItemListWidget(node, spec) {
                     txt(ctx, param.label,
                         layout.param.x + layout.param.w / 2,
                         headerMidY,
-                        t.inputText, "center", 10);
+                        t.border, "center", 9);
                 }
             }
 
@@ -710,17 +881,22 @@ export function makeItemListWidget(node, spec) {
 
                     // ドラッグなし（クリック）かつ有効な pointerup → ポップアップ表示
                     if (!wasDragged && e?.type === "pointerup") {
-                        showParamPopup(
-                            e.clientX,
-                            e.clientY,
-                            param.get(item),
-                            { min: param.min, max: param.max, step: param.step, label: param.label },
-                            (v) => {
-                                param.set(item, v);
-                                saveItems(items);
-                                app.graph.setDirtyCanvas(true, false);
-                            }
-                        );
+                        if (param.onPopup) {
+                            // カスタムポップアップ（統合ダイアログ等）
+                            param.onPopup(item, rowIndex, node);
+                        } else {
+                            showParamPopup(
+                                e.clientX,
+                                e.clientY,
+                                param.get(item),
+                                { min: param.min, max: param.max, step: param.step, label: param.label },
+                                (v) => {
+                                    param.set(item, v);
+                                    saveItems(items);
+                                    app.graph.setDirtyCanvas(true, false);
+                                }
+                            );
+                        }
                     }
                 };
 

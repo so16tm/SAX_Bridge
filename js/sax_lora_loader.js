@@ -2,7 +2,7 @@
  * sax_lora_loader.js — SAX Lora Loader ノードの Canvas カスタム UI
  *
  * loras_json ウィジェットを非表示にして makeItemListWidget ベースの UI に置き換える。
- * 各行: [pill] [LoRA name (click→picker)] [strength] [▲▼] [✕]
+ * 各行: [pill] [LoRA name (click→統合ダイアログ)] [strength drag] [▲▼] [✕]
  */
 
 import { app } from "../../scripts/app.js";
@@ -11,10 +11,15 @@ import {
     txt,
     h,
     showDialog,
+    showItemEditDialog,
     makeItemListWidget,
     getComfyTheme,
     SAX_COLORS,
 } from "./sax_ui_base.js";
+
+// LoRA 表示名（パス・拡張子なし）— モジュールスコープで共有
+const displayName = (full) =>
+    full.replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "");
 
 const EXT_NAME   = "SAX.LoraLoader";
 const NODE_TYPE  = "SAX_Bridge_Loader_Lora";
@@ -53,10 +58,6 @@ function showLoraPicker(currentName, onSelect) {
 
     // 折りたたみ状態（セクションキー → collapsed boolean）
     const collapsed = new Map();
-
-    // ---- LoRA 表示名（パス・拡張子なし） ----
-    const displayName = (full) =>
-        full.replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "");
 
     // ---- LoRA 行（ノードピッカーの makeSelectRow と同じ構造） ----
     function makeLoraRow(fullName, isCurrent, close) {
@@ -292,6 +293,53 @@ function saveEntries(node, entries) {
 }
 
 // ---------------------------------------------------------------------------
+// 統合編集ダイアログ
+// ---------------------------------------------------------------------------
+
+function showLoraEditDialog(node, items, rowIndex) {
+    const item = items[rowIndex];
+    showItemEditDialog({
+        title:     "Edit LoRA Entry",
+        className: "__sax_lora_edit_dlg",
+        fields: [
+            {
+                type: "custom", label: "LoRA",
+                build(row, ed) {
+                    const nameEl = h("span",
+                        "flex:1;font-size:11px;color:var(--input-text,#ddd);" +
+                        "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;align-self:center;",
+                        ed.lora ? displayName(ed.lora) : "— not selected —");
+                    const btn = h("button",
+                        "padding:4px 14px;border-radius:4px;flex-shrink:0;" +
+                        "border:1px solid var(--content-bg,#4e4e4e);" +
+                        "background:var(--comfy-input-bg,#222);color:var(--input-text,#ddd);" +
+                        "cursor:pointer;font-size:11px;white-space:nowrap;",
+                        "Select…");
+                    btn.addEventListener("click", () => {
+                        showLoraPicker(ed.lora ?? "", (name) => {
+                            ed.lora = name;
+                            nameEl.textContent = displayName(name);
+                        });
+                    });
+                    row.appendChild(nameEl);
+                    row.appendChild(btn);
+                },
+            },
+            {
+                type: "number", key: "strength", label: "Strength",
+                min: -2, max: 2, step: 0.01, decimals: 2,
+            },
+        ],
+        data: { lora: item.lora ?? "", strength: item.strength ?? 1.0 },
+        onCommit(ed) {
+            Object.assign(item, ed);
+            saveEntries(node, items);
+            app.graph.setDirtyCanvas(true, false);
+        },
+    });
+}
+
+// ---------------------------------------------------------------------------
 // UI 構築
 // ---------------------------------------------------------------------------
 
@@ -337,6 +385,11 @@ function buildUI(node) {
             step:       0.01,
             dragScale:  0.01,
             format:     (v)      => v.toFixed(2),
+            // クリック（非ドラッグ）→ 統合編集ダイアログ
+            onPopup(item, index, node) {
+                const entries = getEntries(node);
+                showLoraEditDialog(node, entries, index);
+            },
         },
 
         content: {
@@ -344,12 +397,8 @@ function buildUI(node) {
             draw(ctx, item, x, y, w, h, on) {
                 const t       = getComfyTheme();
                 const name    = item.lora || "";
-                const display = name
-                    ? name.replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "")
-                    : "— click to select —";
-                const color   = !name
-                    ? t.contentBg    // プレースホルダー（暗い行の中で薄く）
-                    : t.inputText;   // 選択済み（ON/OFF を問わずライトグレー、明暗は pill で表現）
+                const display = name ? displayName(name) : "— click to edit —";
+                const color   = !name ? t.contentBg : t.inputText;
                 ctx.save();
                 ctx.beginPath();
                 ctx.rect(x + 2, y, w - 4, h);
@@ -357,15 +406,10 @@ function buildUI(node) {
                 txt(ctx, display, x + 4, y + h / 2, color, "left", 11);
                 ctx.restore();
             },
-            // クリックで LoRA ピッカーを表示
+            // クリックで統合編集ダイアログを表示
             onClick(item, index, node) {
-                showLoraPicker(item.lora ?? "", (name) => {
-                    item.lora = name;
-                    const entries = getEntries(node);
-                    entries[index] = item;
-                    saveEntries(node, entries);
-                    app.graph.setDirtyCanvas(true, false);
-                });
+                const entries = getEntries(node);
+                showLoraEditDialog(node, entries, index);
             },
         },
 

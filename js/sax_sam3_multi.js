@@ -18,7 +18,7 @@ import {
     PAD, ROW_H,
     rrect, txt, inX,
     drawPill, drawMoveArrows, drawDeleteBtn, drawParamBox,
-    showDialog, h,
+    showItemEditDialog,
     getComfyTheme,
 } from "./sax_ui_base.js";
 
@@ -86,168 +86,31 @@ function drawModeBadge(ctx, x, midY, w, mode) {
 // ── 統合編集ダイアログ ────────────────────────────────────────────────────────
 function showEditDialog(node, items, rowIndex) {
     const item = items[rowIndex];
-    document.querySelectorAll(".__sax_sam3_edit_dlg").forEach(e => e.remove());
-
-    // ローカルコピーで編集（Cancelで破棄）
-    const ed = {
-        prompt:          item.prompt          ?? "",
-        mode:            item.mode            ?? "positive",
-        threshold:       item.threshold       ?? 0.2,
-        presence_weight: item.presence_weight ?? 0.5,
-        mask_grow:       item.mask_grow       ?? 0,
-    };
-
-    const labelStyle =
-        "font-size:10px;color:var(--border-color,#4e4e4e);" +
-        "text-transform:uppercase;letter-spacing:0.05em;" +
-        "min-width:110px;flex-shrink:0;align-self:center;";
-
-    const inputStyle =
-        "flex:1;background:var(--comfy-input-bg,#222);" +
-        "border:1px solid var(--content-bg,#4e4e4e);border-radius:4px;" +
-        "color:var(--input-text,#ddd);padding:6px;font-size:13px;" +
-        "outline:none;text-align:center;min-width:0;";
-
-    const btnSmStyle =
-        "width:34px;height:30px;flex-shrink:0;" +
-        "background:var(--comfy-input-bg,#222);" +
-        "border:1px solid var(--content-bg,#4e4e4e);border-radius:4px;" +
-        "color:var(--input-text,#ddd);font-size:18px;cursor:pointer;" +
-        "display:flex;align-items:center;justify-content:center;padding:0;";
-
-    // 数値行ファクトリ
-    function numRow(label, key, min, max, step, dec) {
-        const row = h("div", "display:flex;align-items:center;gap:6px;");
-        row.appendChild(h("div", labelStyle, label));
-
-        const minus = h("button", btnSmStyle, "−");
-        const plus  = h("button", btnSmStyle, "+");
-        const inp   = h("input", inputStyle);
-        inp.type = "text";
-        inp.inputMode = dec > 0 ? "decimal" : "numeric";
-        inp.value = Number(ed[key]).toFixed(dec);
-
-        const set = (v) => {
-            v = Math.max(min, Math.min(max, v));
-            if (dec === 0) v = Math.round(v);
-            else           v = Math.round(v / step) * step;
-            ed[key]   = v;
-            inp.value = v.toFixed(dec);
-        };
-
-        inp.addEventListener("change", () => {
-            const v = parseFloat(inp.value);
-            set(isNaN(v) ? ed[key] : v);
-        });
-
-        // 長押し auto-repeat
-        let _ht = null, _hi = null;
-        const stopHold = () => {
-            clearTimeout(_ht); clearInterval(_hi);
-            _ht = _hi = null;
-            window.removeEventListener("pointerup",     stopHold, { capture: true });
-            window.removeEventListener("pointercancel", stopHold, { capture: true });
-        };
-        const startHold = (d) => {
-            stopHold();
-            set(ed[key] + d);
-            _ht = setTimeout(() => { _hi = setInterval(() => set(ed[key] + d), 100); }, 400);
-            window.addEventListener("pointerup",     stopHold, { capture: true });
-            window.addEventListener("pointercancel", stopHold, { capture: true });
-        };
-        minus.addEventListener("pointerdown", e => { e.preventDefault(); startHold(-step); });
-        plus.addEventListener( "pointerdown", e => { e.preventDefault(); startHold(+step); });
-
-        row.appendChild(minus);
-        row.appendChild(inp);
-        row.appendChild(plus);
-        return row;
-    }
-
-    showDialog({
+    showItemEditDialog({
         title:     "Edit Segment",
-        width:     380,
-        gap:       10,
         className: "__sax_sam3_edit_dlg",
-        build(dlg, close) {
-            // Prompt
-            const promptRow = h("div", "display:flex;align-items:center;gap:6px;");
-            promptRow.appendChild(h("div", labelStyle, "Prompt"));
-            const promptInp = h("input",
-                "flex:1;background:var(--comfy-input-bg,#222);" +
-                "border:1px solid var(--content-bg,#4e4e4e);border-radius:4px;" +
-                "color:var(--input-text,#ddd);padding:6px;font-size:13px;outline:none;min-width:0;");
-            promptInp.type  = "text";
-            promptInp.value = ed.prompt;
-            promptInp.addEventListener("input", () => { ed.prompt = promptInp.value; });
-            promptRow.appendChild(promptInp);
-            dlg.appendChild(promptRow);
-
-            // Mode
-            const modeRow = h("div", "display:flex;align-items:center;gap:6px;");
-            modeRow.appendChild(h("div", labelStyle, "Mode"));
-            const modeGroup = h("div", "display:flex;gap:6px;flex:1;");
-            let posBtn, negBtn;
-
-            const refreshMode = () => {
-                [["positive", posBtn], ["negative", negBtn]].forEach(([val, btn]) => {
-                    const active = ed.mode === val;
-                    const color  = val === "positive" ? "#3a8" : "#a33";
-                    btn.style.background   = active ? color : "var(--comfy-input-bg,#222)";
-                    btn.style.borderColor  = active ? color : "var(--content-bg,#4e4e4e)";
-                    btn.style.color        = active ? "#fff" : "var(--input-text,#ddd)";
-                    btn.style.fontWeight   = active ? "bold" : "normal";
-                });
-            };
-
-            const makeModeBtn = (label, val) => {
-                const btn = h("button",
-                    "flex:1;padding:6px;border-radius:4px;cursor:pointer;font-size:12px;" +
-                    "border:1px solid;transition:background 0.1s;",
-                    label);
-                btn.addEventListener("click", () => { ed.mode = val; refreshMode(); });
-                return btn;
-            };
-            posBtn = makeModeBtn("＋ Positive", "positive");
-            negBtn = makeModeBtn("－ Negative", "negative");
-            modeGroup.appendChild(posBtn);
-            modeGroup.appendChild(negBtn);
-            modeRow.appendChild(modeGroup);
-            dlg.appendChild(modeRow);
-            refreshMode();
-
-            // Numeric rows
-            dlg.appendChild(numRow("Threshold",        "threshold",       0,    1,   0.01, 2));
-            dlg.appendChild(numRow("Presence Weight",  "presence_weight", 0,    1,   0.05, 2));
-            dlg.appendChild(numRow("Mask Grow",        "mask_grow",       -512, 512, 1,    0));
-
-            // OK / Cancel
-            const footRow = h("div", "display:flex;gap:8px;justify-content:flex-end;margin-top:2px;");
-            const cancelBtn = h("button",
-                "padding:7px 20px;border-radius:4px;border:1px solid var(--border-color,#4e4e4e);" +
-                "background:var(--comfy-input-bg,#222);color:var(--input-text,#ddd);cursor:pointer;",
-                "Cancel");
-            const okBtn = h("button",
-                "padding:7px 20px;border-radius:4px;border:none;" +
-                "background:var(--primary-background,#0b8ce9);color:#fff;cursor:pointer;font-weight:bold;",
-                "OK");
-            cancelBtn.addEventListener("click", close);
-            okBtn.addEventListener("click", () => {
-                ed.prompt = promptInp.value.trim();
-                Object.assign(item, ed);
-                saveItems(node, items);
-                app.graph.setDirtyCanvas(true, false);
-                close();
-            });
-            promptInp.addEventListener("keydown", e => {
-                if (e.key === "Enter")  okBtn.click();
-                if (e.key === "Escape") close();
-            });
-            footRow.appendChild(cancelBtn);
-            footRow.appendChild(okBtn);
-            dlg.appendChild(footRow);
-
-            requestAnimationFrame(() => { promptInp.focus(); promptInp.select(); });
+        fields: [
+            { type: "text",   key: "prompt",          label: "Prompt" },
+            { type: "select", key: "mode",             label: "Mode",
+              options: [
+                  { value: "positive", label: "＋ Positive", color: "#3a8" },
+                  { value: "negative", label: "－ Negative", color: "#a33" },
+              ]},
+            { type: "number", key: "threshold",       label: "Threshold",       min: 0,    max: 1,   step: 0.01, decimals: 2 },
+            { type: "number", key: "presence_weight", label: "Presence Weight", min: 0,    max: 1,   step: 0.05, decimals: 2 },
+            { type: "number", key: "mask_grow",       label: "Mask Grow",       min: -512, max: 512, step: 1,    decimals: 0 },
+        ],
+        data: {
+            prompt:          item.prompt          ?? "",
+            mode:            item.mode            ?? "positive",
+            threshold:       item.threshold       ?? 0.2,
+            presence_weight: item.presence_weight ?? 0.5,
+            mask_grow:       item.mask_grow       ?? 0,
+        },
+        onCommit(ed) {
+            Object.assign(item, ed);
+            saveItems(node, items);
+            app.graph.setDirtyCanvas(true, false);
         },
     });
 }
