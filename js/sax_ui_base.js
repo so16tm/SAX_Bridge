@@ -17,12 +17,40 @@
  * DOM UI ヘルパー:
  *   h(tag, css, text)
  *   showDialog({ title, width, maxHeight, gap, className, build })
+ *
+ * SAX 共通配色:
+ *   SAX_COLORS.group / subgraph / node / widget  — アイテム種別テキスト色
+ *   SAX_COLORS.primaryBg / primaryHoverBg / primaryText  — プライマリアクション
  */
 
 import { app } from "../../scripts/app.js";
 
 export const PAD   = 8;
 export const ROW_H = 24;
+
+// ---------------------------------------------------------------------------
+// SAX シリーズ共通配色定数
+// ---------------------------------------------------------------------------
+
+/**
+ * SAX ノード群で統一使用する配色。
+ *
+ * アイテム種別色はテーマ非依存の固定色（Canvas 描画・DOM 共用）。
+ * プライマリアクション色は ComfyUI の --primary-background 変数に従い
+ * テーマ変更時にも追従する（DOM インラインスタイル文字列として使用）。
+ */
+export const SAX_COLORS = {
+    // アイテム種別テキスト色
+    group:          "#8bc",   // グループ
+    subgraph:       "#c8b",   // サブグラフ / サブグラフ内ノード
+    node:           "#bc8",   // ノード
+    widget:         "#cb8",   // Boolean ウィジェット（トグル）
+
+    // プライマリアクション（Apply ボタン等）— DOM インラインスタイル用 CSS 変数文字列
+    primaryBg:      "var(--primary-background,      #0b8ce9)",
+    primaryHoverBg: "var(--primary-background-hover,#31b9f4)",
+    primaryText:    "var(--button-surface-contrast, #ffffff)",
+};
 
 // ---------------------------------------------------------------------------
 // ComfyUI テーマ（CSS変数から読み込み・キャッシュ）

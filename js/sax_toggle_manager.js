@@ -13,6 +13,7 @@ import {
     h,
     showDialog,
     getComfyTheme,
+    SAX_COLORS,
     drawPill,
     drawMoveArrows,
     drawDeleteBtn,
@@ -84,10 +85,10 @@ function itemLabel(item) {
 
 function itemColor(item, on) {
     if (!on) return getComfyTheme().contentBg;
-    if (item.type === "group")              return "#8bc";
-    if (item.type === "node" && item.isSub) return "#c8b";
-    if (item.type === "node")               return "#bc8";
-    if (item.type === "widget")             return "#cb8";
+    if (item.type === "group")              return SAX_COLORS.group;
+    if (item.type === "node" && item.isSub) return SAX_COLORS.subgraph;
+    if (item.type === "node")               return SAX_COLORS.node;
+    if (item.type === "widget")             return SAX_COLORS.widget;
     return getComfyTheme().inputText;
 }
 

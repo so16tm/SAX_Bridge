@@ -29,6 +29,7 @@
  */
 
 import { app } from "../../scripts/app.js";
+import { h, SAX_COLORS } from "./sax_ui_base.js";
 
 // ---------------------------------------------------------------------------
 // キャンバスナビゲーション
@@ -65,11 +66,12 @@ export function showReturnButton(restoreOverlay) {
     btn.textContent = "↩ Return to picker";
     btn.style.cssText =
         "position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;" +
-        "padding:9px 22px;background:#1a2a3e;border:2px solid #4a8acc;border-radius:6px;" +
-        "color:#7ac8ff;cursor:pointer;font-size:13px;font-family:sans-serif;font-weight:bold;" +
-        "box-shadow:0 2px 16px rgba(74,138,204,.4);";
-    btn.addEventListener("mouseenter", () => { btn.style.background = "#1e3350"; });
-    btn.addEventListener("mouseleave", () => { btn.style.background = "#1a2a3e"; });
+        "padding:9px 22px;background:var(--comfy-menu-bg,#171718);" +
+        "border:1px solid var(--border-color,#4e4e4e);border-radius:6px;" +
+        "color:var(--input-text,#ddd);cursor:pointer;font-size:13px;" +
+        "font-family:sans-serif;font-weight:bold;box-shadow:0 2px 16px rgba(0,0,0,.5);";
+    btn.addEventListener("mouseenter", () => { btn.style.background = "var(--comfy-menu-secondary-bg,#303030)"; });
+    btn.addEventListener("mouseleave", () => { btn.style.background = "var(--comfy-menu-bg,#171718)"; });
     btn.addEventListener("click", () => {
         btn.remove();
         _returnBtn = null;
@@ -118,14 +120,6 @@ export function showPicker({
 
     const collapsed = new Map();
 
-    // ---- DOM ヘルパー ----
-    function hEl(tag, css = "", text = "") {
-        const e = document.createElement(tag);
-        if (css)  e.style.cssText = css;
-        if (text) e.textContent   = text;
-        return e;
-    }
-
     function typeGroupKey(n) {
         return n.category || n.constructor?.category || "Other";
     }
@@ -133,14 +127,15 @@ export function showPicker({
     // ---- 折りたたみセクション ----
     function makeSection(key, label, color, childEls, defaultCollapsed = false) {
         const isCollapsed = collapsed.has(key) ? collapsed.get(key) : defaultCollapsed;
-        const sec    = hEl("div", "margin-bottom:4px;");
-        const header = hEl("div",
+        const sec    = h("div", "margin-bottom:4px;");
+        const header = h("div",
             `display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 4px;` +
-            `background:#12122a;border-radius:4px;color:${color};font-weight:bold;font-size:12px;`);
-        const arrow  = hEl("span", "font-size:10px;flex-shrink:0;", isCollapsed ? "▶" : "▼");
+            `background:var(--comfy-input-bg,#222);border-radius:4px;` +
+            `color:${color};font-weight:bold;font-size:12px;`);
+        const arrow  = h("span", "font-size:10px;flex-shrink:0;", isCollapsed ? "▶" : "▼");
         header.appendChild(arrow);
-        header.appendChild(hEl("span", "flex:1;", label));
-        const body = hEl("div", `padding-left:6px;${isCollapsed ? "display:none;" : ""}`);
+        header.appendChild(h("span", "flex:1;", label));
+        const body = h("div", `padding-left:6px;${isCollapsed ? "display:none;" : ""}`);
         for (const c of childEls) body.appendChild(c);
         header.addEventListener("click", () => {
             const now = !(collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
@@ -155,27 +150,28 @@ export function showPicker({
 
     // ---- 📍 peek ボタン ----
     function makePeekBtn(onPeek) {
-        const btn = hEl("button",
-            "padding:1px 6px;background:#1e1e32;border:1px solid #3a3a5a;border-radius:3px;" +
-            "color:#aaa;cursor:pointer;font-size:10px;flex-shrink:0;line-height:1.4;",
+        const btn = h("button",
+            "padding:1px 6px;background:var(--comfy-input-bg,#222);" +
+            "border:1px solid var(--border-color,#4e4e4e);border-radius:3px;" +
+            "color:var(--input-text,#ddd);cursor:pointer;font-size:10px;flex-shrink:0;line-height:1.4;",
             "📍");
         btn.title = "Peek location (hides this picker)";
-        btn.addEventListener("mouseenter", () => { btn.style.background = "#2a2a42"; });
-        btn.addEventListener("mouseleave", () => { btn.style.background = "#1e1e32"; });
+        btn.addEventListener("mouseenter", () => { btn.style.background = "var(--comfy-menu-secondary-bg,#303030)"; });
+        btn.addEventListener("mouseleave", () => { btn.style.background = "var(--comfy-input-bg,#222)"; });
         btn.addEventListener("click", (e) => { e.stopPropagation(); onPeek(); });
         return btn;
     }
 
     // ---- multi mode: チェックボックス行 ----
     function makeCheckRow(label, checked, indent, onChange, { onPeek, tooltip } = {}) {
-        const row = hEl("div",
+        const row = h("div",
             `display:flex;align-items:center;gap:8px;padding:3px 0 3px ${indent ? "16px" : "2px"};`);
         if (tooltip) row.title = tooltip;
         const cb = document.createElement("input");
         cb.type = "checkbox"; cb.checked = checked;
         cb.style.cssText = "cursor:pointer;flex-shrink:0;accent-color:#4a9;";
         cb.addEventListener("change", () => onChange(cb.checked));
-        const lbl = hEl("label",
+        const lbl = h("label",
             "cursor:pointer;user-select:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;");
         lbl.textContent = label;
         lbl.addEventListener("click", () => { cb.checked = !cb.checked; onChange(cb.checked); });
@@ -187,24 +183,28 @@ export function showPicker({
 
     // ---- single mode: Select ボタン行 ----
     function makeSelectRow(label, labelColor, isCurrent, tooltip, onPeek, onSelectClick) {
-        const row = hEl("div",
+        const row = h("div",
             `display:flex;align-items:center;gap:6px;padding:3px 2px;border-radius:3px;` +
-            `${isCurrent ? "background:#1a2a1a;" : ""}`);
+            `${isCurrent ? "background:var(--comfy-menu-secondary-bg,#303030);" : ""}`);
         if (tooltip) row.title = tooltip;
         if (onPeek) row.appendChild(makePeekBtn(onPeek));
-        const lbl = hEl("label",
+        const lbl = h("label",
             `cursor:default;user-select:none;flex:1;overflow:hidden;text-overflow:ellipsis;` +
             `white-space:nowrap;font-size:11px;color:${isCurrent ? "#7d7" : labelColor};`);
         lbl.textContent = label;
         row.appendChild(lbl);
-        const selBtn = hEl("button",
+        const selBtn = h("button",
             `padding:2px 10px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;` +
-            `background:${isCurrent ? "#1a4a1a" : "#1a3a1a"};` +
-            `border:1px solid ${isCurrent ? "#3a8a3a" : "#2a6a2a"};` +
+            `background:${isCurrent ? "var(--comfy-menu-secondary-bg,#303030)" : "var(--comfy-input-bg,#222)"};` +
+            `border:1px solid var(--content-bg,#4e4e4e);` +
             `color:${isCurrent ? "#9f9" : "#7d7"};`,
             isCurrent ? "✓" : "Select");
-        selBtn.addEventListener("mouseenter", () => { selBtn.style.background = "#1e4a1e"; });
-        selBtn.addEventListener("mouseleave", () => { selBtn.style.background = isCurrent ? "#1a4a1a" : "#1a3a1a"; });
+        selBtn.addEventListener("mouseenter", () => { selBtn.style.background = "var(--comfy-menu-secondary-bg,#303030)"; });
+        selBtn.addEventListener("mouseleave", () => {
+            selBtn.style.background = isCurrent
+                ? "var(--comfy-menu-secondary-bg,#303030)"
+                : "var(--comfy-input-bg,#222)";
+        });
         selBtn.addEventListener("click", (e) => { e.stopPropagation(); onSelectClick(); });
         row.appendChild(selBtn);
         return row;
@@ -266,7 +266,7 @@ export function showPicker({
         } else {
             // single mode
             const isCurrent = n.id === currentNodeId;
-            const color     = isSub ? "#c8b" : "#bc8";
+            const color     = isSub ? SAX_COLORS.subgraph : SAX_COLORS.node;
             const row = makeSelectRow(label, color, isCurrent, tooltip, nPeek, () => {
                 closeAll();
                 onSelect?.(n);
@@ -276,11 +276,11 @@ export function showPicker({
             if (outs.length > 0) {
                 const outStr = outs.slice(0, 8).map(o => o.name || o.type || "?").join("  ·  ")
                     + (outs.length > 8 ? `  …(+${outs.length - 8})` : "");
-                const sub = hEl("div",
-                    "font-size:10px;color:#555;padding-left:22px;overflow:hidden;" +
+                const sub = h("div",
+                    "font-size:10px;color:var(--content-bg,#4e4e4e);padding-left:22px;overflow:hidden;" +
                     "text-overflow:ellipsis;white-space:nowrap;padding-bottom:2px;",
                     outStr);
-                const wrap = hEl("div", "");
+                const wrap = h("div", "");
                 wrap.appendChild(row);
                 wrap.appendChild(sub);
                 return [wrap];
@@ -290,30 +290,31 @@ export function showPicker({
     }
 
     // ---- オーバーレイ構造 ----
-    const overlay = hEl("div",
+    const overlay = h("div",
         "position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:10000;" +
         "display:flex;align-items:center;justify-content:center;");
-    const dlg = hEl("div",
-        "background:#1a1a2e;border:1px solid #4a4a6a;border-radius:8px;padding:16px;" +
-        "width:440px;max-height:76vh;display:flex;flex-direction:column;" +
-        "color:#ccc;font:13px/1.5 sans-serif;gap:8px;");
-    dlg.appendChild(hEl("div", "font:bold 14px sans-serif;color:#fff;", title));
+    const dlg = h("div",
+        "background:var(--comfy-menu-bg,#171718);border:1px solid var(--border-color,#4e4e4e);" +
+        "border-radius:8px;padding:16px;width:440px;max-height:76vh;display:flex;flex-direction:column;" +
+        "color:var(--input-text,#ddd);font:13px/1.5 sans-serif;gap:8px;");
+    dlg.appendChild(h("div", "font:bold 14px sans-serif;color:var(--fg-color,#fff);flex-shrink:0;", title));
 
     // 検索バー
-    const searchWrap = hEl("div",
-        "display:flex;align-items:center;gap:6px;background:#0e0e20;" +
-        "border:1px solid #3a3a5a;border-radius:4px;padding:5px 10px;flex-shrink:0;");
-    searchWrap.appendChild(hEl("span", "color:#555;", "🔍"));
+    const searchWrap = h("div",
+        "display:flex;align-items:center;gap:6px;background:var(--comfy-input-bg,#222);" +
+        "border:1px solid var(--border-color,#4e4e4e);border-radius:4px;padding:5px 10px;flex-shrink:0;");
+    searchWrap.appendChild(h("span", "color:var(--content-bg,#4e4e4e);", "🔍"));
     const searchInput = document.createElement("input");
     searchInput.placeholder = mode === "single"
         ? "Search node name…"
         : "Search by group or node name…";
     searchInput.style.cssText =
-        "flex:1;background:none;border:none;outline:none;color:#ccc;font-size:12px;";
+        "flex:1;background:none;border:none;outline:none;" +
+        "color:var(--input-text,#ddd);font-size:12px;";
     searchWrap.appendChild(searchInput);
     dlg.appendChild(searchWrap);
 
-    const scroll = hEl("div", "overflow-y:auto;flex:1;");
+    const scroll = h("div", "overflow-y:auto;flex:1;");
     dlg.appendChild(scroll);
 
     // ---- コンテンツ描画 ----
@@ -359,8 +360,7 @@ export function showPicker({
                             else selection.delete(key);
                         }, { onPeek, tooltip });
                     } else {
-                        return makeSelectRow(label, "#8bc", false, tooltip, onPeek, () => {
-                            // single mode でのグループ選択（呼び出し側で用途を決める）
+                        return makeSelectRow(label, SAX_COLORS.group, false, tooltip, onPeek, () => {
                             closeAll();
                             onSelect?.({ type: "group", title: g.title, pos: gPos, _group: g });
                         });
@@ -368,7 +368,7 @@ export function showPicker({
                 });
                 const lbl = `Groups (${groups.length}${groups.length < allGroups.length ? `/${allGroups.length}` : ""})`;
                 if (rows.length > 0)
-                    scroll.appendChild(makeSection("__groups", lbl, "#8bc", rows, false));
+                    scroll.appendChild(makeSection("__groups", lbl, SAX_COLORS.group, rows, false));
             }
         }
 
@@ -395,7 +395,7 @@ export function showPicker({
                 subTitleCount.set(t, (subTitleCount.get(t) ?? 0) + 1);
             }
             const rows = allSubgraphs.flatMap(n => buildNodeRows(n, subTitleCount, true));
-            scroll.appendChild(makeSection("__subgraphs", `Subgraphs (${allSubgraphs.length})`, "#c8b", rows, false));
+            scroll.appendChild(makeSection("__subgraphs", `Subgraphs (${allSubgraphs.length})`, SAX_COLORS.subgraph, rows, false));
         }
 
         // ── Nodes（カテゴリごと）──
@@ -415,21 +415,21 @@ export function showPicker({
                 typeNodes.sort((a, b) =>
                     (a.title || a.type || "").localeCompare(b.title || b.type || ""));
                 const rows = typeNodes.flatMap(n => buildNodeRows(n, nodeTitleCount, false));
-                // single mode: 選択中ノードのカテゴリはデフォルト展開
                 const hasCurrent = mode === "single"
                     && typeNodes.some(n => n.id === currentNodeId);
                 scroll.appendChild(makeSection(
                     `__node_${typeKey}`,
                     `${typeKey}  (${typeNodes.length})`,
-                    "#bc8", rows, !hasCurrent
+                    SAX_COLORS.node, rows, !hasCurrent
                 ));
             }
         }
 
         if (q && allCandidates.length === 0
             && (!(app.graph._groups ?? []).length || !sections.includes("groups"))) {
-            scroll.appendChild(hEl("div",
-                "color:#555;padding:20px;text-align:center;font-size:12px;", "No results"));
+            scroll.appendChild(h("div",
+                "color:var(--content-bg,#4e4e4e);padding:20px;text-align:center;font-size:12px;",
+                "No results"));
         }
     };
 
@@ -437,13 +437,17 @@ export function showPicker({
     searchInput.addEventListener("input", () => renderContent(searchInput.value));
 
     // ---- フッターボタン ----
-    const btnRow = hEl("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
-    const makeBtn = (text, bg, fn) => {
-        const b = hEl("button",
-            `padding:6px 14px;background:${bg};border:1px solid #555;` +
-            `border-radius:4px;color:#fff;cursor:pointer;font-size:12px;`);
+    const btnRow = h("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
+    const makeBtn = (text, bg, fn, color = "var(--input-text,#ddd)", hoverBg = null) => {
+        const b = h("button",
+            `padding:6px 14px;background:${bg};border:1px solid var(--content-bg,#4e4e4e);` +
+            `border-radius:4px;color:${color};cursor:pointer;font-size:12px;`);
         b.textContent = text;
         b.addEventListener("click", fn);
+        if (hoverBg) {
+            b.addEventListener("mouseenter", () => { b.style.background = hoverBg; });
+            b.addEventListener("mouseleave", () => { b.style.background = bg; });
+        }
         return b;
     };
 
@@ -453,12 +457,12 @@ export function showPicker({
         overlay.remove();
     }
 
-    btnRow.appendChild(makeBtn("Cancel", "#2a2a3a", closeAll));
+    btnRow.appendChild(makeBtn("Cancel", "var(--comfy-input-bg,#222)", closeAll));
     if (mode === "multi") {
-        btnRow.appendChild(makeBtn("Apply", "#1e5a32", () => {
+        btnRow.appendChild(makeBtn("Apply", SAX_COLORS.primaryBg, () => {
             closeAll();
             onConfirm?.([...selection.values()]);
-        }));
+        }, SAX_COLORS.primaryText, SAX_COLORS.primaryHoverBg));
     }
     dlg.appendChild(btnRow);
 
