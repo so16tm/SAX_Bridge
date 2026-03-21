@@ -1,11 +1,18 @@
 import { app } from "../../scripts/app.js";
 import { panCanvasTo, showPicker } from "./sax_picker.js";
+import {
+    PAD,
+    rrect, txt, inX,
+    drawPill, drawMoveArrows, drawDeleteBtn,
+    rowLayout,
+    getComfyTheme,
+    SAX_COLORS,
+} from "./sax_ui_base.js";
 
 const EXT_NAME  = "SAX.RemoteGet";
 const NODE_TYPE = "SAX_Bridge_Remote_Get";
 const MAX_SLOTS = 32;   // Python 側 MAX_SLOTS と合わせる
-const ROW_H     = 28;   // ソース行の高さ (px)
-const PAD       = 8;
+const ROW_H     = 28;   // ソース行の高さ（sax_ui_base ROW_H=24 より大きい）
 
 // ---------------------------------------------------------------------------
 // renderLink パッチ — 非表示リンクをスキップする
@@ -53,30 +60,6 @@ function applyLinkVisibility(node) {
 function toggleLinkVisibility(node) {
     node._remoteLinksVisible = !node._remoteLinksVisible;
     applyLinkVisibility(node);
-}
-
-// ---------------------------------------------------------------------------
-// 描画ヘルパー
-// ---------------------------------------------------------------------------
-
-function rrect(ctx, x, y, w, hh, r, fill, stroke) {
-    ctx.beginPath();
-    if (ctx.roundRect) {
-        ctx.roundRect(x, y, w, hh, r);
-    } else {
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.arcTo(x + w, y,      x + w, y + r,      r);
-        ctx.lineTo(x + w, y + hh - r);
-        ctx.arcTo(x + w, y + hh, x + w - r, y + hh, r);
-        ctx.lineTo(x + r, y + hh);
-        ctx.arcTo(x,      y + hh, x,      y + hh - r, r);
-        ctx.lineTo(x,      y + r);
-        ctx.arcTo(x,      y,      x + r,  y,          r);
-        ctx.closePath();
-    }
-    if (fill)   { ctx.fillStyle   = fill;   ctx.fill();   }
-    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +159,7 @@ function addSource(remoteNode, srcNode) {
         slotNames,
         slotTypes,
         sig:         sourceSignature(srcNode),
+        isSub:       srcNode.subgraph != null,
     });
     remoteNode._remoteSources = sources;
 
@@ -346,6 +330,66 @@ function resetAllSources(node) {
 }
 
 // ---------------------------------------------------------------------------
+// ソース順入れ替え（スロット再構築付き）
+// ---------------------------------------------------------------------------
+
+function swapSources(node, si, sj) {
+    const sources = getSources(node);
+
+    // 下流リンクを現在の物理スロット順で保存
+    const downstreamMap = [];
+    for (let idx = 0; idx < sources.length; idx++) {
+        const offset = getOffset(node, idx);
+        for (let li = 0; li < sources[idx].slotCount; li++) {
+            const out = node.outputs?.[offset + li];
+            if (!out?.links?.length) continue;
+            for (const lid of out.links) {
+                const lnk = app.graph.links?.[lid];
+                if (lnk) downstreamMap.push({
+                    sourceId:   sources[idx].sourceId,
+                    localSlot:  li,
+                    targetId:   lnk.target_id,
+                    targetSlot: lnk.target_slot,
+                });
+            }
+        }
+    }
+
+    // ソース順を入れ替え（物理スロットは未変更のまま）
+    [sources[si], sources[sj]] = [sources[sj], sources[si]];
+
+    // スロットをクリアして新しい順で再構築
+    unhideSourceLinks(node);
+    for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
+        const linkId = node.inputs[i]?.link;
+        if (linkId != null) app.graph.removeLink(linkId);
+        node.removeInput(i);
+    }
+    for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
+    node._remoteSources = [];
+
+    for (const src of sources) {
+        const srcNode = app.graph.getNodeById(src.sourceId);
+        if (srcNode) addSource(node, srcNode);
+    }
+
+    // 下流リンクを復元
+    for (const ds of downstreamMap) {
+        const newSi = getSources(node).findIndex(s => s.sourceId === ds.sourceId);
+        if (newSi < 0) continue;
+        const src = getSources(node)[newSi];
+        if (ds.localSlot >= src.slotCount) continue;
+        const newAbsIdx = getOffset(node, newSi) + ds.localSlot;
+        const tgtNode = app.graph.getNodeById(ds.targetId);
+        if (tgtNode && node.outputs?.[newAbsIdx]) node.connect(newAbsIdx, tgtNode, ds.targetSlot);
+    }
+
+    applyLinkVisibility(node);
+    autoResize(node);
+    app.canvas?.setDirty(true, false);
+}
+
+// ---------------------------------------------------------------------------
 // ソース追加ピッカー
 // ---------------------------------------------------------------------------
 
@@ -364,6 +408,9 @@ function showAddSourcePicker(remoteNode) {
 // ソース選択ウィジェット
 // ---------------------------------------------------------------------------
 
+const HEADER_H = 20;   // ヘッダー行（目玉トグル）の高さ
+const ADD_H    = ROW_H; // Add ボタン行の高さ（common UI に合わせる）
+
 function makeSourceWidget(node) {
     // draw() で毎フレーム更新される。mouse() のヒットテストに使用
     let widgetY = 0;
@@ -375,11 +422,12 @@ function makeSourceWidget(node) {
 
         computeSize(W) {
             const n = getSources(node).length;
-            return [W, ROW_H * (n + 1) + 8];
+            return [W, HEADER_H + n * ROW_H + ADD_H];
         },
 
         draw(ctx, drawNode, W, y) {
             widgetY = y;
+            const t = getComfyTheme();
 
             // C/E/F: ソース状態を毎フレームチェック（後ろから検査して安全に削除）
             const sources = getSources(drawNode);
@@ -400,15 +448,12 @@ function makeSourceWidget(node) {
                 // F: スロット構成変更追従
                 const sig = sourceSignature(srcNode);
                 if (sig !== src.sig) {
-                    // 描画サイクル外で構造変更を実行（レンダリング中の変更による不具合を防ぐ）
                     src.sig = sig;  // 再トリガー防止
-                    const capturedSi = si;
-                    const capturedSrcNode = srcNode;
                     const capturedSourceId = src.sourceId;
                     setTimeout(() => {
                         const currentSi = getSources(drawNode).findIndex(s => s.sourceId === capturedSourceId);
                         if (currentSi >= 0 && app.graph.getNodeById(capturedSourceId)) {
-                            resyncSource(drawNode, currentSi, capturedSrcNode);
+                            resyncSource(drawNode, currentSi, app.graph.getNodeById(capturedSourceId));
                         }
                     }, 0);
                     return;
@@ -416,70 +461,53 @@ function makeSourceWidget(node) {
             }
 
             const linksVisible = drawNode._remoteLinksVisible ?? false;
-            ctx.font         = "11px sans-serif";
-            ctx.textBaseline = "middle";
 
-            // ── ソース行 ──
+            // ── ヘッダー行: 目玉トグル pill ──
+            const headerMidY = y + HEADER_H / 2;
+            drawPill(ctx, PAD + 4, headerMidY, linksVisible);
+            txt(ctx, "Show links", PAD + 38, headerMidY, t.contentBg, "left", 10);
+
+            // ── ソース行（Toggle Manager に合わせた pill 形状 + アイコン + 種別色）──
+            const layout = rowLayout(W, { hasMoveUpDown: true, hasDelete: true });
             for (let si = 0; si < sources.length; si++) {
                 const src  = sources[si];
-                const rowY = y + si * ROW_H;
+                const rowY = y + HEADER_H + si * ROW_H;
                 const midY = rowY + ROW_H / 2;
 
-                rrect(ctx, PAD, rowY + 3, W - PAD * 2, ROW_H - 4, 4, "#1a1a2e", "#3a6a3a");
+                // 行: pill 形状、contentBg ボーダー（Toggle Manager と同じ）
+                rrect(ctx, PAD, rowY + 2, W - PAD * 2, ROW_H - 4, (ROW_H - 4) / 2,
+                    t.inputBg, t.contentBg);
 
-                // [✕] ボタン（右端）
-                const delW = 22;
-                const delX = W - PAD - delW;
-                rrect(ctx, delX, rowY + 6, delW, ROW_H - 10, 3, "#3a1a1a", "#6a2a2a");
-                ctx.fillStyle = "#d77";
-                ctx.textAlign = "center";
-                ctx.fillText("✕", delX + delW / 2, midY);
-
-                // ソース名ラベル（クリックでジャンプ）
-                const label = `→ ${src.sourceTitle}  (${src.slotCount} slot${src.slotCount !== 1 ? "s" : ""})`;
-                ctx.fillStyle = "#7d7";
-                ctx.textAlign = "left";
+                // ソース名ラベル（種別アイコン + 色）
+                const icon  = src.isSub ? "▣" : "◈";
+                const color = src.isSub ? SAX_COLORS.subgraph : SAX_COLORS.node;
+                const slots = `  (${src.slotCount} slot${src.slotCount !== 1 ? "s" : ""})`;
                 ctx.save();
                 ctx.beginPath();
-                ctx.rect(PAD + 6, rowY + 3, delX - PAD - 10, ROW_H - 4);
+                ctx.rect(layout.contentX, rowY, layout.contentW, ROW_H);
                 ctx.clip();
-                ctx.fillText(label, PAD + 6, midY);
+                txt(ctx, `${icon}  ${src.sourceTitle}`, layout.contentX + 4, midY, color, "left", 11);
+                txt(ctx, slots, layout.contentX + layout.contentW, midY, t.contentBg, "right", 10);
                 ctx.restore();
+
+                // ▲▼
+                drawMoveArrows(ctx, layout.move.x, rowY, ROW_H, si > 0, si < sources.length - 1);
+
+                // ✕
+                drawDeleteBtn(ctx, layout.del.x, midY);
             }
 
-            // ── ボタン行（最下行）──
-            const noSrc   = sources.length === 0;
-            const btnRowY = y + sources.length * ROW_H;
-            const btnMidY = btnRowY + ROW_H / 2;
-
-            rrect(ctx, PAD, btnRowY + 3, W - PAD * 2, ROW_H - 4, 4,
-                "#1a1a2e", noSrc ? "#4a4a6a" : "#2a3a4a");
-
-            // ソースなし: ボタン全幅。ソースあり: [👁] + [＋ ソース追加]
-            const addW = noSrc ? W - PAD * 2 - 14 : 108;
-            const eyeW = 26;
-            const gap  = 4;
-            const addX = W - PAD - addW;
-            const eyeX = addX - gap - eyeW;
-
-            // [👁] トグルボタン（ソースありのみ表示）
-            if (!noSrc) {
-                rrect(ctx, eyeX, btnRowY + 6, eyeW, ROW_H - 10, 3,
-                    linksVisible ? "#2a3a4a" : "#1a1a1a",
-                    linksVisible ? "#4a8acc" : "#3a3a3a");
-                ctx.fillStyle = linksVisible ? "#7af" : "#555";
-                ctx.textAlign = "center";
-                ctx.fillText(linksVisible ? "👁" : "🚫", eyeX + eyeW / 2, btnMidY);
-            }
-
-            // [ソースを選択… / ＋ ソース追加] ボタン
+            // ── Add ボタン（common UI の addButton と同じスタイル）──
+            const btnY   = y + HEADER_H + sources.length * ROW_H;
             const canAdd = getTotalSlotCount(drawNode) < MAX_SLOTS;
-            rrect(ctx, addX, btnRowY + 6, addW, ROW_H - 10, 3,
-                canAdd ? "#1a3a1a" : "#2a2a2a",
-                canAdd ? "#2a6a2a" : "#3a3a3a");
-            ctx.fillStyle = canAdd ? "#7d7" : "#555";
-            ctx.textAlign = "center";
-            ctx.fillText(noSrc ? "Select source…" : "+ Add source", addX + addW / 2, btnMidY);
+            rrect(ctx, PAD, btnY + 2, W - PAD * 2, ADD_H - 4, 4,
+                canAdd ? t.inputBg : t.menuBg,
+                canAdd ? t.contentBg : t.border);
+            txt(ctx,
+                sources.length === 0 ? "Select source…" : "+ Add source",
+                W / 2, btnY + ADD_H / 2,
+                canAdd ? t.inputText : t.border,
+                "center", 11);
         },
 
         mouse(event, pos, mouseNode) {
@@ -487,20 +515,42 @@ function makeSourceWidget(node) {
             const W       = mouseNode.size[0];
             const relY    = pos[1] - widgetY;
             const sources = getSources(mouseNode);
+            const layout  = rowLayout(W, { hasMoveUpDown: true, hasDelete: true });
 
-            // ソース行のヒットテスト
+            // ── ヘッダー行: 目玉トグル pill ──
+            if (relY < HEADER_H) {
+                if (pos[0] >= PAD && pos[0] < PAD + 34) {
+                    toggleLinkVisibility(mouseNode);
+                    return true;
+                }
+                return false;
+            }
+
+            const localY = relY - HEADER_H;
+
+            // ── ソース行 ──
             for (let si = 0; si < sources.length; si++) {
-                if (relY < si * ROW_H || relY >= (si + 1) * ROW_H) continue;
-                const delW = 22;
-                const delX = W - PAD - delW;
+                if (localY < si * ROW_H || localY >= (si + 1) * ROW_H) continue;
 
-                // [✕] 削除ボタン
-                if (pos[0] >= delX && pos[0] <= delX + delW) {
+                // [✕] 削除
+                if (inX(pos, layout.del.x, layout.del.w)) {
                     removeSourceAt(mouseNode, si);
                     return true;
                 }
-                // ラベル領域 → ソースノードへジャンプ
-                if (pos[0] >= PAD && pos[0] < delX - 4) {
+
+                // [▲▼] 上下移動
+                if (inX(pos, layout.move.x, layout.move.w)) {
+                    const moveUp = (localY - si * ROW_H) < ROW_H / 2;
+                    if (moveUp && si > 0) {
+                        swapSources(mouseNode, si - 1, si);
+                    } else if (!moveUp && si < sources.length - 1) {
+                        swapSources(mouseNode, si, si + 1);
+                    }
+                    return true;
+                }
+
+                // コンテンツ領域 → ソースノードへジャンプ
+                if (inX(pos, layout.contentX, layout.contentW)) {
                     const srcNode = app.graph.getNodeById(sources[si].sourceId);
                     if (srcNode) {
                         panCanvasTo(
@@ -513,30 +563,14 @@ function makeSourceWidget(node) {
                 return false;
             }
 
-            // ボタン行のヒットテスト
-            const btnRowTop = sources.length * ROW_H;
-            if (relY < btnRowTop || relY >= btnRowTop + ROW_H) return false;
+            // ── Add ボタン行 ──
+            const btnRowTop = HEADER_H + sources.length * ROW_H;
+            if (relY < btnRowTop || relY >= btnRowTop + ADD_H) return false;
 
-            const noSrc = sources.length === 0;
-            const addW  = noSrc ? W - PAD * 2 - 14 : 108;
-            const eyeW  = 26;
-            const gap   = 4;
-            const addX  = W - PAD - addW;
-            const eyeX  = addX - gap - eyeW;
-
-            // [＋ ソース追加 / ソースを選択…]
-            if (pos[0] >= addX && pos[0] <= addX + addW) {
-                if (getTotalSlotCount(mouseNode) < MAX_SLOTS) {
-                    showAddSourcePicker(mouseNode);
-                }
-                return true;
+            if (getTotalSlotCount(mouseNode) < MAX_SLOTS) {
+                showAddSourcePicker(mouseNode);
             }
-            // [👁] トグル（ソースありのみ）
-            if (!noSrc && pos[0] >= eyeX && pos[0] <= eyeX + eyeW) {
-                toggleLinkVisibility(mouseNode);
-                return true;
-            }
-            return false;
+            return true;
         },
     };
 }
