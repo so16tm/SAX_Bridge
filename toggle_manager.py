@@ -34,7 +34,7 @@ class SAX_Bridge_Toggle_Manager:
 
     RETURN_TYPES = ()
     FUNCTION = "process"
-    CATEGORY = "SAX/Bridge/Control"
+    CATEGORY = "SAX/Bridge/Utility"
     OUTPUT_NODE = True
     DESCRIPTION = (
         "グループ・ノード・Boolean ウィジェットの bypass/値をシーン単位で管理するコントローラノード。"

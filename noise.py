@@ -174,7 +174,7 @@ class SAX_Bridge_Noise_Image:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("IMAGE",)
     FUNCTION = "apply_noise"
-    CATEGORY = "SAX/Bridge/Noise"
+    CATEGORY = "SAX/Bridge/Enhance"
     DESCRIPTION = "Add various types of noise to masked areas of an image to improve i2i detail and texture. If no mask is provided, noise is applied to the entire image."
 
     def apply_noise(self, image, intensity, noise_type, color_mode, seed, mask_shrink, mask_blur, mask=None):
@@ -238,7 +238,7 @@ class SAX_Bridge_Noise_Latent:
     RETURN_TYPES = ("LATENT",)
     RETURN_NAMES = ("SAMPLES",)
     FUNCTION = "apply_noise"
-    CATEGORY = "SAX/Bridge/Noise"
+    CATEGORY = "SAX/Bridge/Enhance"
     DESCRIPTION = "Add noise directly to masked areas of a latent to robustly improve i2i detail and texture. If no mask is provided, noise is applied to the entire latent."
 
     def apply_noise(self, samples, intensity, noise_type, seed, mask_shrink, mask_blur, mask=None):

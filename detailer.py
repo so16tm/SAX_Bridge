@@ -362,7 +362,7 @@ class SAX_Bridge_Detailer:
     RETURN_TYPES = ("PIPE_LINE", "IMAGE")
     RETURN_NAMES = ("PIPE", "IMAGE")
     FUNCTION = "do_detail_core"
-    CATEGORY = "SAX/Bridge/Detailer"
+    CATEGORY = "SAX/Bridge/Enhance"
 
     def do_detail_core(self, pipe, denoise, denoise_decay, cycle, noise_mask_feather, blend_feather,
                        crop_factor, context_blur_sigma, context_blur_radius,
@@ -440,7 +440,7 @@ class SAX_Bridge_Detailer_Enhanced:
     RETURN_TYPES = ("PIPE_LINE", "IMAGE")
     RETURN_NAMES = ("PIPE", "IMAGE")
     FUNCTION = "do_enhanced_detail"
-    CATEGORY = "SAX/Bridge/Detailer"
+    CATEGORY = "SAX/Bridge/Enhance"
 
     def do_enhanced_detail(self, pipe, denoise, denoise_decay, cycle, noise_mask_feather, blend_feather,
                            crop_factor, latent_noise_intensity, noise_type,

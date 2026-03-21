@@ -17,7 +17,7 @@ import {
 } from "./sax_ui_base.js";
 
 const EXT_NAME   = "SAX.LoraLoader";
-const NODE_TYPE  = "SAX_Bridge_Pipe_Lora_Loader";
+const NODE_TYPE  = "SAX_Bridge_Loader_Lora";
 const WIDGET_JSON = "loras_json";
 const MAX_LORAS  = 10;
 

@@ -46,7 +46,7 @@ def _esrgan_upscale(upscale_model, images: torch.Tensor, target_h: int, target_w
 # ---------------------------------------------------------------------------
 # SAX_Bridge_Pipe_Upscaler ノード
 # ---------------------------------------------------------------------------
-class SAX_Bridge_Pipe_Upscaler:
+class SAX_Bridge_Upscaler:
     """
     Pipe 内の images をアップスケールし、オプションで軽量 i2i を適用するノード。
 
@@ -116,7 +116,7 @@ class SAX_Bridge_Pipe_Upscaler:
     RETURN_TYPES = ("PIPE_LINE", "IMAGE")
     RETURN_NAMES = ("PIPE", "IMAGE")
     FUNCTION = "upscale"
-    CATEGORY = "SAX/Bridge/Upscaler"
+    CATEGORY = "SAX/Bridge/Enhance"
     DESCRIPTION = (
         "Upscales images in the pipe. "
         "Using an ESRGAN model enables high-quality enlargement and allows lower denoise in downstream Detailer nodes."
@@ -201,9 +201,9 @@ class SAX_Bridge_Pipe_Upscaler:
 
 
 NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Pipe_Upscaler": SAX_Bridge_Pipe_Upscaler,
+    "SAX_Bridge_Upscaler": SAX_Bridge_Upscaler,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Pipe_Upscaler": "SAX Upscaler",
+    "SAX_Bridge_Upscaler": "SAX Upscaler",
 }

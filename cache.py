@@ -23,13 +23,13 @@ def _get_sax_cache():
 
 
 # ---------------------------------------------------------------------------
-# SAX_Bridge_Pipe_Cache ノード
+# SAX_Bridge_Cache ノード
 # ---------------------------------------------------------------------------
-class SAX_Bridge_Pipe_Cache:
+class SAX_Bridge_Cache:
     """
     Pipe 内のモデルに DeepCache / TGate をワンタッチ適用するノード。
 
-    SAX Loader → [SAX Pipe Cache] → KSampler / Detailer の順に挿入することで、
+    SAX Loader → [SAX Cache] → KSampler / Detailer の順に挿入することで、
     t2i から全 Detailer パスまで一括してキャッシュ高速化を適用できる。
 
     - DeepCache: UNet の深層ブロックを N ステップに 1 回だけ計算し残りをスキップ。
@@ -95,7 +95,7 @@ class SAX_Bridge_Pipe_Cache:
     RETURN_TYPES = ("PIPE_LINE",)
     RETURN_NAMES = ("PIPE",)
     FUNCTION = "apply"
-    CATEGORY = "SAX/Bridge/Cache"
+    CATEGORY = "SAX/Bridge/Utility"
     DESCRIPTION = (
         "Applies DeepCache / TGate to the model in the pipe, accelerating all downstream processing (KSampler, Detailer)."
     )
@@ -129,7 +129,7 @@ class SAX_Bridge_Pipe_Cache:
                 cfg_skip_multiplier=1,
             )
             logger.info(
-                f"[SAX_Bridge] Cache Pipe: DeepCache applied (interval={deepcache_interval}, "
+                f"[SAX_Bridge] Cache: DeepCache applied (interval={deepcache_interval}, "
                 f"start={deepcache_start_percent:.0%})"
             )
 
@@ -142,17 +142,8 @@ class SAX_Bridge_Pipe_Cache:
                 start_percent=0.0,
                 end_percent=1.0,
             )
-            logger.info(f"[SAX_Bridge] Cache Pipe: TGate applied (gate_step={tgate_gate_step:.0%})")
+            logger.info(f"[SAX_Bridge] Cache: TGate applied (gate_step={tgate_gate_step:.0%})")
 
         new_pipe = pipe.copy()
         new_pipe["model"] = model
         return (new_pipe,)
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Pipe_Cache": SAX_Bridge_Pipe_Cache,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Pipe_Cache": "SAX Cache",
-}

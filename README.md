@@ -6,25 +6,25 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 - [ノード一覧](#ノード一覧)
 - [ノード詳細](#ノード詳細)
-  - [Pipe](#pipe)
+  - [Loader](#loader)
     - [SAX Loader](#sax-loader)
+    - [SAX Lora Loader](#sax-lora-loader)
+  - [Pipe](#pipe)
     - [SAX Pipe](#sax-pipe)
     - [SAX Pipe Switcher](#sax-pipe-switcher)
-    - [SAX Lora Loader](#sax-lora-loader)
-    - [SAX Upscaler](#sax-upscaler)
-    - [SAX Cache](#sax-cache)
   - [Prompt](#prompt)
     - [SAX Prompt](#sax-prompt)
     - [SAX Prompt Concat](#sax-prompt-concat)
-  - [Detailer](#detailer)
+  - [Enhance](#enhance)
     - [SAX Detailer](#sax-detailer)
     - [SAX Enhanced Detailer](#sax-enhanced-detailer)
-  - [Output](#output)
-    - [SAX Output](#sax-output)
-  - [Noise](#noise)
+    - [SAX Upscaler](#sax-upscaler)
     - [SAX Image Noise](#sax-image-noise)
     - [SAX Latent Noise](#sax-latent-noise)
-  - [Control](#control)
+  - [Output](#output)
+    - [SAX Output](#sax-output)
+  - [Utility](#utility)
+    - [SAX Cache](#sax-cache)
     - [SAX Remote Get](#sax-remote-get)
     - [SAX Toggle Manager](#sax-toggle-manager)
 - [典型的なワークフロー](#典型的なワークフロー)
@@ -36,16 +36,19 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 ## ノード一覧
 
+### Loader
+
+| Node ID | 表示名 |
+|---------|--------|
+| `SAX_Bridge_Loader` | [SAX Loader](#sax-loader) |
+| `SAX_Bridge_Loader_Lora` | [SAX Lora Loader](#sax-lora-loader) |
+
 ### Pipe
 
 | Node ID | 表示名 |
 |---------|--------|
-| `SAX_Bridge_Pipe_Loader` | [SAX Loader](#sax-loader) |
 | `SAX_Bridge_Pipe` | [SAX Pipe](#sax-pipe) |
 | `SAX_Bridge_Pipe_Switcher` | [SAX Pipe Switcher](#sax-pipe-switcher) |
-| `SAX_Bridge_Pipe_Lora_Loader` | [SAX Lora Loader](#sax-lora-loader) |
-| `SAX_Bridge_Pipe_Upscaler` | [SAX Upscaler](#sax-upscaler) |
-| `SAX_Bridge_Pipe_Cache` | [SAX Cache](#sax-cache) |
 
 ### Prompt
 
@@ -54,12 +57,15 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 | `SAX_Bridge_Prompt` | [SAX Prompt](#sax-prompt) |
 | `SAX_Bridge_Prompt_Concat` | [SAX Prompt Concat](#sax-prompt-concat) |
 
-### Detailer
+### Enhance
 
 | Node ID | 表示名 |
 |---------|--------|
 | `SAX_Bridge_Detailer` | [SAX Detailer](#sax-detailer) |
 | `SAX_Bridge_Detailer_Enhanced` | [SAX Enhanced Detailer](#sax-enhanced-detailer) |
+| `SAX_Bridge_Upscaler` | [SAX Upscaler](#sax-upscaler) |
+| `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) |
+| `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) |
 
 ### Output
 
@@ -67,17 +73,11 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 |---------|--------|
 | `SAX_Bridge_Output` | [SAX Output](#sax-output) |
 
-### Noise
+### Utility
 
 | Node ID | 表示名 |
 |---------|--------|
-| `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) |
-| `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) |
-
-### Control
-
-| Node ID | 表示名 |
-|---------|--------|
+| `SAX_Bridge_Cache` | [SAX Cache](#sax-cache) |
 | `SAX_Bridge_Remote_Get` | [SAX Remote Get](#sax-remote-get) |
 | `SAX_Bridge_Toggle_Manager` | [SAX Toggle Manager](#sax-toggle-manager) |
 
@@ -85,11 +85,11 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 ## ノード詳細
 
-## Pipe
+## Loader
 
 ### SAX Loader
 
-`SAX_Bridge_Pipe_Loader` — Checkpoint・VAE・LoRA を一括ロードし、`PIPE_LINE` コンテキストを初期化します。
+`SAX_Bridge_Loader` — Checkpoint・VAE・LoRA を一括ロードし、`PIPE_LINE` コンテキストを初期化します。
 
 **入力**
 
@@ -97,7 +97,7 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 |-----------|-----|------|
 | `ckpt_name` | Combo | Checkpoint ファイル選択 |
 | `clip_skip` | Int (-24〜-1) | CLIP レイヤースキップ数 |
-| `vae_name` | Combo | VAE 選択（`Baked VAE` でモデル内蔵 VAE を使用） |
+| `vae_name` | Combo | VAE 選択（`baked_vae` でモデル内蔵 VAE を使用） |
 | `lora_name` | Combo | LoRA 選択（`None` でスキップ） |
 | `lora_model_strength` | Float (-10.0〜10.0) | LoRA のモデル適用強度 |
 | `v_pred` | Boolean | V-Prediction モード（自動で V_PREDICTION + ZSNR 適用） |
@@ -114,39 +114,9 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 ---
 
-### SAX Pipe
-
-`SAX_Bridge_Pipe` — `PIPE_LINE` から任意の要素を抽出・上書き・再構成します。入力が `None` の場合は Pipe 内の値を保持するため、部分的な上書きが可能です。
-
-**入力**: `pipe` (optional) + `model`, `pos`, `neg`, `latent`, `vae`, `clip`, `image`, `seed`, `steps`, `cfg`, `sampler`, `scheduler`, `denoise`, `optional_sampler`, `optional_sigmas`（すべて optional）
-
-**出力**: `PIPE`, `MODEL`, `POS`, `NEG`, `LATENT`, `VAE`, `CLIP`, `IMAGE`, `SEED`, `STEPS`, `CFG`, `SAMPLER`, `SCHEDULER`, `DENOISE`
-
----
-
-### SAX Pipe Switcher
-
-`SAX_Bridge_Pipe_Switcher` — 複数の Pipe 入力から有効な Pipe を選択して展開します。Pipe の経路を条件によって切り替えるスイッチとして機能します。
-
-**入力**
-
-| パラメータ | 型 | 説明 |
-|-----------|-----|------|
-| `slot` | Int (0〜5) | 優先するスロット番号（1 始まり）。`0` でスロット順に自動スキャン |
-| `pipe1`〜`pipe5` | PIPE_LINE (optional) | 入力 Pipe |
-
-**出力**: SAX Pipe と完全共通（`PIPE`, `MODEL`, `POS`, `NEG`, `LATENT`, `VAE`, `CLIP`, `IMAGE`, `SEED`, `STEPS`, `CFG`, `SAMPLER`, `SCHEDULER`, `DENOISE`, `OPTIONAL_SAMPLER`, `OPTIONAL_SIGMAS`）
-
-**選択ロジック**:
-1. `slot` が 1〜5 の場合、該当スロットの Pipe を最優先で参照
-2. 指定スロットが None の場合、`pipe1` → `pipe5` の順にスキャンして最初の非 None を採用
-3. 全スロットが None の場合、空 Pipe として安全に展開
-
----
-
 ### SAX Lora Loader
 
-`SAX_Bridge_Pipe_Lora_Loader` — Pipe 内の model / clip に複数の LoRA を一括適用するノードです。各 LoRA を個別に ON/OFF・強度調整・並び替えできます。
+`SAX_Bridge_Loader_Lora` — Pipe 内の model / clip に複数の LoRA を一括適用するノードです。各 LoRA を個別に ON/OFF・強度調整・並び替えできます。
 
 **入力**
 
@@ -174,53 +144,35 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 ---
 
-### SAX Upscaler
+## Pipe
 
-`SAX_Bridge_Pipe_Upscaler` — Pipe 内の画像をアップスケールし、オプションで軽量 i2i を適用するノードです。
+### SAX Pipe
 
-**入力**
+`SAX_Bridge_Pipe` — `PIPE_LINE` から任意の要素を抽出・上書き・再構成します。入力が `None` の場合は Pipe 内の値を保持するため、部分的な上書きが可能です。
 
-| パラメータ | 型 | 説明 |
-|-----------|-----|------|
-| `pipe` | PIPE_LINE | 入力パイプ |
-| `upscale_model_name` | Combo | アップスケールモデル選択（`None` = ピクセル補間のみ） |
-| `method` | Combo | ピクセル補間メソッド（`lanczos` / `bilinear` / `bicubic` / `nearest-exact`）。モデル選択時は最終リサイズ調整にのみ使用 |
-| `scale_by` | Float (0.25〜8.0, step 0.05) | 元解像度に対する拡大倍率 |
-| `denoise` | Float (0.0〜1.0) | 0 = アップスケールのみ。0 より大きい値でアップスケール後に軽量 i2i を実行 |
-| `steps_override` | Int (0〜200) | i2i 時の steps（0 = Loader 設定を継承） |
-| `cfg_override` | Float (0.0〜100.0) | i2i 時の CFG（0.0 = Loader 設定を継承） |
+**入力**: `pipe` (optional) + `model`, `pos`, `neg`, `latent`, `vae`, `clip`, `image`, `seed`, `steps`, `cfg`, `sampler`, `scheduler`, `denoise`, `optional_sampler`, `optional_sigmas`（すべて optional）
 
-**出力**: `PIPE`, `IMAGE`
-
-**動作**:
-- `upscale_model_name` が `None` 以外の場合、ESRGAN 系モデルでアップスケール後、`scale_by` の目標サイズへ `method` で指定した補間メソッドでリサイズ
-- `upscale_model_name` が `None` の場合、`method` で指定したピクセル補間のみ
-- `scale_by=1.0` かつモデルなしの場合、リサイズ処理をスキップ
-- `denoise > 0` の場合、アップスケール後に KSampler (i2i) を実行してテクスチャを補完
-
-> **アップスケールモデルの選択について**: ESRGAN 系モデルは実写・圧縮画像の復元に効果的。AI 生成アニメ調画像には `4x-AnimeSharp` 等のアニメ特化モデルを推奨。
+**出力**: `PIPE`, `MODEL`, `POS`, `NEG`, `LATENT`, `VAE`, `CLIP`, `IMAGE`, `SEED`, `STEPS`, `CFG`, `SAMPLER`, `SCHEDULER`, `DENOISE`, `OPTIONAL_SAMPLER`, `OPTIONAL_SIGMAS`
 
 ---
 
-### SAX Cache
+### SAX Pipe Switcher
 
-`SAX_Bridge_Pipe_Cache` — Pipe 内のモデルに DeepCache / TGate をワンタッチ適用し、後段の KSampler・Detailer 全体を高速化するノードです。
+`SAX_Bridge_Pipe_Switcher` — 複数の Pipe 入力から有効な Pipe を選択して展開します。Pipe の経路を条件によって切り替えるスイッチとして機能します。
 
 **入力**
 
 | パラメータ | 型 | 説明 |
 |-----------|-----|------|
-| `pipe` | PIPE_LINE | 入力パイプ |
-| `enabled` | Boolean | `False` でキャッシュを適用せずそのまま返す |
-| `deepcache_interval` | Int (1〜10) | N ステップに 1 回だけ深層計算し残りをキャッシュで代替（1 = DeepCache 無効） |
-| `deepcache_start_percent` | Float (0.0〜1.0) | DeepCache を開始するデノイジング進行割合。序盤は品質維持のため通常計算 |
-| `tgate_enabled` | Boolean (optional) | `True` で TGate（cross-attention キャッシュ）も適用 |
-| `tgate_gate_step` | Float (0.0〜1.0, optional) | TGate キャッシュ開始の境界パーセント（0.5 = 50% 以降でキャッシュ） |
+| `slot` | Int (0〜5) | 優先するスロット番号（1 始まり）。`0` でスロット順に自動スキャン |
+| `pipe1`〜`pipe5` | PIPE_LINE (optional) | 入力 Pipe |
 
-**出力**: `PIPE`
+**出力**: SAX Pipe と完全共通（`PIPE`, `MODEL`, `POS`, `NEG`, `LATENT`, `VAE`, `CLIP`, `IMAGE`, `SEED`, `STEPS`, `CFG`, `SAMPLER`, `SCHEDULER`, `DENOISE`, `OPTIONAL_SAMPLER`, `OPTIONAL_SIGMAS`）
 
-> **配置位置**: SAX Loader の直後（KSampler・Detailer より前）に挿入することで全処理に一括適用できます。
-> **注意**: 蒸留モデル（DMD2 等）との組み合わせでは品質劣化が顕著になる場合があります。
+**選択ロジック**:
+1. `slot` が 1〜5 の場合、該当スロットの Pipe を最優先で参照
+2. 指定スロットが None の場合、`pipe1` → `pipe5` の順にスキャンして最初の非 None を採用
+3. 全スロットが None の場合、空 Pipe として安全に展開
 
 ---
 
@@ -259,7 +211,7 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 ---
 
-## Detailer
+## Enhance
 
 ### SAX Detailer
 
@@ -303,6 +255,67 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 | `cfg_override` | Float (0.0〜100.0, optional) | i2i の CFG 上書き（0.0 = Loader 設定を継承） |
 
 **出力**: `PIPE`, `IMAGE`
+
+---
+
+### SAX Upscaler
+
+`SAX_Bridge_Upscaler` — Pipe 内の画像をアップスケールし、オプションで軽量 i2i を適用するノードです。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | 入力パイプ |
+| `upscale_model_name` | Combo | アップスケールモデル選択（`None` = ピクセル補間のみ） |
+| `method` | Combo | ピクセル補間メソッド（`lanczos` / `bilinear` / `bicubic` / `nearest-exact`）。モデル選択時は最終リサイズ調整にのみ使用 |
+| `scale_by` | Float (0.25〜8.0, step 0.05) | 元解像度に対する拡大倍率 |
+| `denoise` | Float (0.0〜1.0) | 0 = アップスケールのみ。0 より大きい値でアップスケール後に軽量 i2i を実行 |
+| `steps_override` | Int (0〜200) | i2i 時の steps（0 = Loader 設定を継承） |
+| `cfg_override` | Float (0.0〜100.0) | i2i 時の CFG（0.0 = Loader 設定を継承） |
+
+**出力**: `PIPE`, `IMAGE`
+
+**動作**:
+- `upscale_model_name` が `None` 以外の場合、ESRGAN 系モデルでアップスケール後、`scale_by` の目標サイズへ `method` で指定した補間メソッドでリサイズ
+- `upscale_model_name` が `None` の場合、`method` で指定したピクセル補間のみ
+- `scale_by=1.0` かつモデルなしの場合、リサイズ処理をスキップ
+- `denoise > 0` の場合、アップスケール後に KSampler (i2i) を実行してテクスチャを補完
+
+> **アップスケールモデルの選択について**: ESRGAN 系モデルは実写・圧縮画像の復元に効果的。AI 生成アニメ調画像には `4x-AnimeSharp` 等のアニメ特化モデルを推奨。
+
+---
+
+### SAX Image Noise
+
+`SAX_Bridge_Noise_Image` — 画像領域（またはマスク領域）にノイズを注入します。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `image` | IMAGE | 入力画像 |
+| `intensity` | Float | ノイズ強度 |
+| `noise_type` | Combo | `gaussian` / `grain` / `uniform` |
+| `color_mode` | Combo | `rgb`（カラーノイズ） / `grayscale`（輝度ノイズ） |
+| `seed` | Int | ノイズ生成シード |
+| `mask` | MASK (optional) | 注入対象マスク |
+| `mask_shrink` | Int | マスク収縮量（px） |
+| `mask_blur` | Int | マスク境界ぼかし量（px） |
+
+**出力**: `IMAGE`
+
+> `grain` モードは輝度感応型（暗部に強くノイズを適用）。
+
+---
+
+### SAX Latent Noise
+
+`SAX_Bridge_Noise_Latent` — Latent 領域にノイズを注入します。i2i での質感復元・ディテール補強に使用します。
+
+**入力**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
+
+**出力**: `LATENT`
 
 ---
 
@@ -380,42 +393,29 @@ output/2026-03-20/001_20260320_153045_01.webp
 
 ---
 
-## Noise
+## Utility
 
-### SAX Image Noise
+### SAX Cache
 
-`SAX_Bridge_Noise_Image` — 画像領域（またはマスク領域）にノイズを注入します。
+`SAX_Bridge_Cache` — Pipe 内のモデルに DeepCache / TGate をワンタッチ適用し、後段の KSampler・Detailer 全体を高速化するノードです。
 
 **入力**
 
 | パラメータ | 型 | 説明 |
 |-----------|-----|------|
-| `image` | IMAGE | 入力画像 |
-| `intensity` | Float | ノイズ強度 |
-| `noise_type` | Combo | `gaussian` / `grain` / `uniform` |
-| `color_mode` | Combo | `rgb`（カラーノイズ） / `grayscale`（輝度ノイズ） |
-| `seed` | Int | ノイズ生成シード |
-| `mask` | MASK (optional) | 注入対象マスク |
-| `mask_shrink` | Int | マスク収縮量（px） |
-| `mask_blur` | Int | マスク境界ぼかし量（px） |
+| `pipe` | PIPE_LINE | 入力パイプ |
+| `enabled` | Boolean | `False` でキャッシュを適用せずそのまま返す |
+| `deepcache_interval` | Int (1〜10) | N ステップに 1 回だけ深層計算し残りをキャッシュで代替（1 = DeepCache 無効） |
+| `deepcache_start_percent` | Float (0.0〜1.0) | DeepCache を開始するデノイジング進行割合。序盤は品質維持のため通常計算 |
+| `tgate_enabled` | Boolean (optional) | `True` で TGate（cross-attention キャッシュ）も適用 |
+| `tgate_gate_step` | Float (0.0〜1.0, optional) | TGate キャッシュ開始の境界パーセント（0.5 = 50% 以降でキャッシュ） |
 
-**出力**: `IMAGE`
+**出力**: `PIPE`
 
-> `grain` モードは輝度感応型（暗部に強くノイズを適用）。
-
----
-
-### SAX Latent Noise
-
-`SAX_Bridge_Noise_Latent` — Latent 領域にノイズを注入します。i2i での質感復元・ディテール補強に使用します。
-
-**入力**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
-
-**出力**: `LATENT`
+> **配置位置**: SAX Loader の直後（KSampler・Detailer より前）に挿入することで全処理に一括適用できます。
+> **注意**: 蒸留モデル（DMD2 等）との組み合わせでは品質劣化が顕著になる場合があります。
 
 ---
-
-## Control
 
 ### SAX Remote Get
 
@@ -533,6 +533,8 @@ output/2026-03-20/001_20260320_153045_01.webp
 
 ```
 SAX Loader
+  ↓ PIPE
+SAX Lora Loader（追加 LoRA がある場合）
   ↓ PIPE
 SAX Prompt / SAX Prompt Concat
   ↓ PIPE（Conditioning 更新済み）

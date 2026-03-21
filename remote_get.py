@@ -28,7 +28,7 @@ class SAX_Bridge_Remote_Get:
     RETURN_TYPES  = (ANY,) * MAX_SLOTS
     RETURN_NAMES  = tuple(f"out_{i}" for i in range(MAX_SLOTS))
     FUNCTION      = "passthrough"
-    CATEGORY      = "SAX/Bridge/Control"
+    CATEGORY      = "SAX/Bridge/Utility"
     OUTPUT_NODE   = False
 
     def passthrough(self, **kwargs):

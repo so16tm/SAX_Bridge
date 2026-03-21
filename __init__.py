@@ -3,16 +3,17 @@ from .detailer import (
     SAX_Bridge_Detailer_Enhanced,
 )
 from .noise import SAX_Bridge_Noise_Image, SAX_Bridge_Noise_Latent
-from .upscaler import SAX_Bridge_Pipe_Upscaler
-from .pipe_cache import SAX_Bridge_Pipe_Cache
+from .upscaler import SAX_Bridge_Upscaler
+from .cache import SAX_Bridge_Cache
 from .output import SAX_Bridge_Output
 from .toggle_manager import SAX_Bridge_Toggle_Manager
 from .remote_get import SAX_Bridge_Remote_Get
-from .lora_loader import SAX_Bridge_Pipe_Lora_Loader
+from .loader import SAX_Bridge_Loader_Lora
 
 # V3 API ノード
 from . import prompt as prompt_node
 from . import pipe as pipe_node
+from . import loader as loader_node
 
 NODE_CLASS_MAPPINGS = {
     # Detailer 系列
@@ -23,19 +24,19 @@ NODE_CLASS_MAPPINGS = {
     "SAX_Bridge_Noise_Image": SAX_Bridge_Noise_Image,
     "SAX_Bridge_Noise_Latent": SAX_Bridge_Noise_Latent,
 
-    # Upscaler 系列
-    "SAX_Bridge_Pipe_Upscaler": SAX_Bridge_Pipe_Upscaler,
+    # Upscaler
+    "SAX_Bridge_Upscaler": SAX_Bridge_Upscaler,
 
-    # Cache 系列
-    "SAX_Bridge_Pipe_Cache": SAX_Bridge_Pipe_Cache,
+    # Cache
+    "SAX_Bridge_Cache": SAX_Bridge_Cache,
 
-    # Output 系列
+    # Output
     "SAX_Bridge_Output": SAX_Bridge_Output,
 
-    # LoRA 系列
-    "SAX_Bridge_Pipe_Lora_Loader": SAX_Bridge_Pipe_Lora_Loader,
+    # Loader 系列（旧API）
+    "SAX_Bridge_Loader_Lora": SAX_Bridge_Loader_Lora,
 
-    # Control 系列
+    # Utility 系列
     "SAX_Bridge_Toggle_Manager": SAX_Bridge_Toggle_Manager,
     "SAX_Bridge_Remote_Get": SAX_Bridge_Remote_Get,
 
@@ -48,10 +49,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Detailer_Enhanced": "SAX Enhanced Detailer",
     "SAX_Bridge_Noise_Image": "SAX Image Noise",
     "SAX_Bridge_Noise_Latent": "SAX Latent Noise",
-    "SAX_Bridge_Pipe_Upscaler": "SAX Upscaler",
-    "SAX_Bridge_Pipe_Cache": "SAX Cache",
+    "SAX_Bridge_Upscaler": "SAX Upscaler",
+    "SAX_Bridge_Cache": "SAX Cache",
     "SAX_Bridge_Output": "SAX Output",
-    "SAX_Bridge_Pipe_Lora_Loader": "SAX Lora Loader",
+    "SAX_Bridge_Loader_Lora": "SAX Lora Loader",
     "SAX_Bridge_Toggle_Manager": "SAX Toggle Manager",
     "SAX_Bridge_Remote_Get": "SAX Remote Get",
     "SAX_Bridge_Prompt": "SAX Prompt",
@@ -59,7 +60,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
 # V3 API ノードの登録 (Loader, Pipe, Switch Pipe, Prompt Concat)
 for v3_node in [
-    pipe_node.SAX_Bridge_Pipe_Loader,
+    loader_node.SAX_Bridge_Loader,
     pipe_node.SAX_Bridge_Pipe,
     pipe_node.SAX_Bridge_Pipe_Switcher,
     prompt_node.SAX_Bridge_Prompt_Concat,
