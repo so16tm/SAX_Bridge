@@ -284,10 +284,11 @@ def _apply_mask_grow(mask: torch.Tensor, grow: int) -> torch.Tensor:
 
 def _segment_single(processor, pil_image: Image.Image, prompt: str,
                     threshold: float, presence_weight: float,
-                    device, target_dtype) -> torch.Tensor:
+                    device, target_dtype) -> tuple[torch.Tensor, torch.Tensor]:
     """
     1枚の PIL 画像に対してセグメンテーションを実行し、
-    OR 結合した [H, W] float32 マスクを返す（検出なし → ゼロマスク）。
+    (標準の二値マスク, プレビュー用のスコア重み付きマスク) のタプルを返す。
+    （検出なしの場合はゼロマスクを返す）
     """
     processor.confidence_threshold = threshold
     processor.presence_weight       = presence_weight
@@ -300,13 +301,26 @@ def _segment_single(processor, pil_image: Image.Image, prompt: str,
         state = processor.set_text_prompt(prompt, state)
 
     masks = state.get("masks", None)
+    scores = state.get("scores", None)
     if masks is None or len(masks) == 0:
         img_h = pil_image.height
         img_w = pil_image.width
-        return torch.zeros(img_h, img_w, device=device)
+        z = torch.zeros(img_h, img_w, device=device)
+        return z, z
 
     mask_tensors = masks.squeeze(1).float()   # [N, H, W]
-    return mask_tensors.max(dim=0)[0]          # [H, W]
+    base_mask = mask_tensors.max(dim=0)[0]    # 標準出力用（二値）のOR結合
+
+    # プレビュー用：一致度(scores)を重みとして掛けたマスク
+    if scores is not None and len(scores) > 0:
+        s_weights = scores.view(-1, 1, 1).to(mask_tensors.dtype)
+        p_masks = mask_tensors * s_weights
+    else:
+        p_masks = mask_tensors
+
+    preview_mask = p_masks.max(dim=0)[0]
+
+    return base_mask, preview_mask
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -465,11 +479,9 @@ class SAX_Bridge_Segmenter_Multi:
 
     入力:
       sam3_model  : SAX_Bridge_Loader_SAM3 から接続
-      pipe        : PIPE_LINE（任意）
-      image       : IMAGE（任意、pipe より優先）
+      image       : IMAGE
+      segments_json: STRING (JSON) - 各セグメント設定
       mask        : MASK（任意、最終マスクを制限する ROI）
-
-    pipe と image は片方が必須。image が優先。
 
     セグメントエントリー（segments_json）の各フィールド:
       on              : bool — エントリーの有効フラグ
@@ -478,6 +490,10 @@ class SAX_Bridge_Segmenter_Multi:
       threshold       : float [0, 1]
       presence_weight : float [0, 1]
       mask_grow       : int [-512, 512]
+
+    出力:
+      MASK          : 最終合成マスク
+      PREVIEW_IMAGE : 一致度(スコア)をヒートマップ化した確認用画像
     """
 
     @classmethod
@@ -503,14 +519,15 @@ class SAX_Bridge_Segmenter_Multi:
             },
         }
 
-    RETURN_TYPES  = ("MASK",)
-    RETURN_NAMES  = ("MASK",)
+    RETURN_TYPES  = ("MASK", "IMAGE")
+    RETURN_NAMES  = ("MASK", "PREVIEW_IMAGE")
     FUNCTION      = "segment"
     CATEGORY      = "SAX/Bridge/Segment"
     OUTPUT_NODE   = False
     DESCRIPTION   = (
         "複数テキストプロンプトによる SAM3 セグメンテーション。"
-        "positive OR − negative OR でマスクを合成して出力する。"
+        "positive OR − negative OR でマスクを合成出力すると同時に、"
+        "検出の一致度をヒートマップで可視化したプレビュー画像を出力する。"
     )
 
     def segment(
@@ -543,8 +560,9 @@ class SAX_Bridge_Segmenter_Multi:
         # 有効エントリーなし → ゼロマスク出力
         if not enabled:
             logger.info("[SAX_Bridge] Segmenter: no enabled entries, returning zero mask")
-            empty = torch.zeros(images.shape[0], img_h, img_w)
-            return (empty,)
+            empty_mask = torch.zeros(images.shape[0], img_h, img_w)
+            # 画像はそのままプレビューとして返す
+            return (empty_mask, images)
 
         # ── モデルを GPU にロード ───────────────────────────────────────────
         comfy.model_management.load_models_gpu([sam3_model])
@@ -554,6 +572,7 @@ class SAX_Bridge_Segmenter_Multi:
 
         batch_size   = images.shape[0]
         batch_masks  = []
+        batch_preview_masks = []
 
         for b in range(batch_size):
             img_np    = (images[b].cpu().numpy() * 255).astype(np.uint8)
@@ -561,6 +580,8 @@ class SAX_Bridge_Segmenter_Multi:
 
             positive_list = []
             negative_list = []
+            
+            p_positive_list = []
 
             for seg in enabled:
                 prompt          = seg.get("prompt", "")
@@ -572,7 +593,7 @@ class SAX_Bridge_Segmenter_Multi:
                 if not prompt.strip():
                     continue
 
-                seg_mask = _segment_single(
+                seg_mask, seg_preview_mask = _segment_single(
                     processor, pil_image, prompt,
                     threshold, presence_weight,
                     device, target_dtype,
@@ -585,29 +606,39 @@ class SAX_Bridge_Segmenter_Multi:
 
                 if grow != 0:
                     seg_mask = _apply_mask_grow(seg_mask, grow)
+                    seg_preview_mask = _apply_mask_grow(seg_preview_mask, grow)
 
                 if mode == "negative":
                     negative_list.append(seg_mask)
                 else:
                     positive_list.append(seg_mask)
+                    p_positive_list.append(seg_preview_mask)
 
             # positive OR 合成
             if positive_list:
                 pos = torch.stack(positive_list).max(dim=0)[0]
+                p_pos = torch.stack(p_positive_list).max(dim=0)[0]
             else:
                 pos = torch.zeros(img_h, img_w, device=device)
+                p_pos = torch.zeros(img_h, img_w, device=device)
 
             # negative OR 合成 → subtract
             if negative_list:
                 neg   = torch.stack(negative_list).max(dim=0)[0]
                 final = (pos - neg).clamp(0.0, 1.0)
+                
+                # プレビューは出力される final マスクエリアのみを残す（ネガティブは完全に除去）
+                p_final = p_pos * final
             else:
                 final = pos
+                p_final = p_pos
 
             batch_masks.append(final)
+            batch_preview_masks.append(p_final)
 
         # [B, H, W]
         result_mask = torch.stack(batch_masks).cpu()
+        preview_mask_combined = torch.stack(batch_preview_masks).cpu()
 
         # ── 入力 mask による ROI 制限 ───────────────────────────────────────
         if mask is not None:
@@ -624,11 +655,52 @@ class SAX_Bridge_Segmenter_Multi:
                     align_corners=False,
                 ).squeeze(1)
             result_mask = (result_mask * m.cpu()).clamp(0.0, 1.0)
+            preview_mask_combined = (preview_mask_combined * m.cpu()).clamp(0.0, 1.0)
+
+        # ── プレビュー用画像の合成 ──
+        # preview_mask_combined: [B, H, W] は 0.0〜1.0 の連続値(一致度スコア)
+        preview_masks_cpu = preview_mask_combined.unsqueeze(-1)  # [B, H, W, 1]
+        
+        # 疑似ヒートマップ (Turbo/Rainbow風) による色の生成
+        # 一致度 x が 0.0 -> 1.0 に向かって: 青 -> 水色 -> 緑 -> 黄 -> 赤
+        x = preview_masks_cpu
+        
+        # 指摘事項1: スコア範囲が偏っている場合に備え、バッチ内で正規化（0.0〜1.0）
+        # 有効なマスク領域(x > 0)の最小・最大を使用してダイナミックレンジを広げる
+        mask_any = (result_mask > 0).unsqueeze(-1)
+        if mask_any.any():
+            x_min = x[mask_any].min()
+            x_max = x[mask_any].max()
+            if x_max > x_min:
+                x = (x - x_min) / (x_max - x_min)
+            else:
+                x = torch.where(mask_any, torch.tensor(1.0, device=x.device), x)
+
+        color_r = torch.clamp(2.0 * x - 0.5, 0.0, 1.0)
+        color_g = torch.clamp(2.0 - 4.0 * torch.abs(x - 0.5), 0.0, 1.0)
+        color_b = torch.clamp(1.5 - 2.0 * x, 0.0, 1.0)
+        colormap_rgb = torch.cat([color_r, color_g, color_b], dim=-1)  # [B, H, W, 3]
+
+        # ベース透過度
+        preview_base_alpha = 0.6
+        # 透過度は出力マスク(result_mask)を基準にする。これにより出力とプレビュー領域が完全一致する
+        # (result_maskが0.0なら透過度0となり色は乗らない)
+        apply_alpha = result_mask.unsqueeze(-1) * preview_base_alpha
+
+        # images は元の CPU テンソル [B, H, W, C]
+        base_img = images[..., :3]  # RGBのみ対象
+        preview_images = base_img * (1.0 - apply_alpha) + colormap_rgb * apply_alpha
+        
+        # もし元の画像が RGBA (4ch) だった場合は Alpha を維持
+        if images.shape[-1] == 4:
+            preview_images = torch.cat([preview_images, images[..., 3:]], dim=-1)
+            
+        preview_images = preview_images.clamp(0.0, 1.0)
 
         gc.collect()
         comfy.model_management.soft_empty_cache()
 
-        return (result_mask,)
+        return (result_mask, preview_images)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
