@@ -9,6 +9,7 @@
  *   drawPill(ctx, x, midY, on)
  *   drawMoveArrows(ctx, x, y, h, canUp, canDown)
  *   drawDeleteBtn(ctx, x, midY)
+ *   drawJumpBtn(ctx, x, midY)
  *   drawParamBox(ctx, x, y, w, h, text, active)
  *   rowLayout(W, flags)
  *   showParamPopup(screenX, screenY, currentVal, cfg, onCommit)
@@ -162,6 +163,12 @@ export function drawDeleteBtn(ctx, x, midY) {
     txt(ctx, "✕", x + 10, midY, t.contentBg, "center", 10);
 }
 
+/** ↗ ジャンプボタンを描画。x: エリア左端、midY: 行中央Y */
+export function drawJumpBtn(ctx, x, midY) {
+    const t = getComfyTheme();
+    txt(ctx, "↗", x + 9, midY, t.contentBg, "center", 10);
+}
+
 /**
  * パラメータ値ボックスを描画。
  * x: ボックス左端、y: 行上端、w: 幅、h: 行高、active: ドラッグ中かどうか
@@ -181,15 +188,16 @@ export function drawParamBox(ctx, x, y, w, h, text, active) {
 // ---------------------------------------------------------------------------
 
 /**
- * rowLayout — 右端から del → move → param を確保し、残りを content 幅とする。
+ * rowLayout — 右端から del → move → jump → param を確保し、残りを content 幅とする。
  *
  * @param {number} W - ウィジェット全幅（node.size[0] をそのまま渡す）
- * @param {{ hasToggle?, hasParam?, hasMoveUpDown?, hasDelete? }} flags
+ * @param {{ hasToggle?, hasParam?, hasMoveUpDown?, hasDelete?, hasJump? }} flags
  * @returns {{
  *   pill?:    { x: number, w: number },
  *   contentX: number,
  *   contentW: number,
  *   param?:   { x: number, w: number },
+ *   jump?:    { x: number, w: number },
  *   move?:    { x: number, w: number },
  *   del?:     { x: number, w: number },
  * }}
@@ -199,6 +207,7 @@ export function rowLayout(W, {
     hasParam      = false,
     hasMoveUpDown = false,
     hasDelete     = false,
+    hasJump       = false,
 } = {}) {
     const layout = {};
 
@@ -211,7 +220,7 @@ export function rowLayout(W, {
     }
     layout.contentX = lx;
 
-    // 右側: 内側に向かって del → move → param を積む
+    // 右側: 内側に向かって del → move → jump → param を積む
     let rx = W - PAD;
 
     if (hasDelete) {
@@ -222,6 +231,11 @@ export function rowLayout(W, {
     if (hasMoveUpDown) {
         rx -= 20;
         layout.move = { x: rx, w: 20 };
+        rx -= 4;
+    }
+    if (hasJump) {
+        rx -= 18;
+        layout.jump = { x: rx, w: 18 };
         rx -= 4;
     }
     if (hasParam) {
