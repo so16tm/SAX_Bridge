@@ -1,25 +1,32 @@
 # SAX_Bridge
 
-ComfyUI のワークフローを補完・拡張する統合ブリッジモジュールです。Pipe 形式によるコンテキスト管理、Wildcard/LoRA 対応プロンプト処理、高精度な Detailer、画像アップスケール、推論高速化キャッシュ、最終出力処理、マスク付きノイズ注入、複数ノードのリモート参照、シーンベースのトグル管理を提供します。
+ComfyUI のワークフローを補完・拡張する統合ブリッジモジュールです。Pipe 形式によるコンテキスト管理、Wildcard/LoRA 対応プロンプト処理、高精度な Detailer、画像アップスケール、推論高速化キャッシュ、最終出力処理、マスク付きノイズ注入、複数ノードのリモート参照、シーンベースのトグル管理、Pipe スイッチを提供します。
 
 ## 目次
 
 - [ノード一覧](#ノード一覧)
 - [ノード詳細](#ノード詳細)
-  - [SAX Loader](#sax-loader)
-  - [SAX Pipe](#sax-pipe)
-  - [SAX Prompt](#sax-prompt)
-  - [SAX Prompt Concat](#sax-prompt-concat)
-  - [SAX Detailer](#sax-detailer)
-  - [SAX Enhanced Detailer](#sax-enhanced-detailer)
-  - [SAX Upscaler](#sax-upscaler)
-  - [SAX Cache](#sax-cache)
-  - [SAX Output](#sax-output)
-  - [SAX Image Noise](#sax-image-noise)
-  - [SAX Latent Noise](#sax-latent-noise)
-  - [SAX Lora Loader](#sax-lora-loader)
-  - [SAX Remote Get](#sax-remote-get)
-  - [SAX Toggle Manager](#sax-toggle-manager)
+  - [Pipe](#pipe)
+    - [SAX Loader](#sax-loader)
+    - [SAX Pipe](#sax-pipe)
+    - [SAX Pipe Switcher](#sax-pipe-switcher)
+    - [SAX Lora Loader](#sax-lora-loader)
+    - [SAX Upscaler](#sax-upscaler)
+    - [SAX Cache](#sax-cache)
+  - [Prompt](#prompt)
+    - [SAX Prompt](#sax-prompt)
+    - [SAX Prompt Concat](#sax-prompt-concat)
+  - [Detailer](#detailer)
+    - [SAX Detailer](#sax-detailer)
+    - [SAX Enhanced Detailer](#sax-enhanced-detailer)
+  - [Output](#output)
+    - [SAX Output](#sax-output)
+  - [Noise](#noise)
+    - [SAX Image Noise](#sax-image-noise)
+    - [SAX Latent Noise](#sax-latent-noise)
+  - [Control](#control)
+    - [SAX Remote Get](#sax-remote-get)
+    - [SAX Toggle Manager](#sax-toggle-manager)
 - [典型的なワークフロー](#典型的なワークフロー)
 - [インストール](#インストール)
 - [依存関係](#依存関係)
@@ -29,26 +36,56 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 ## ノード一覧
 
-| Node ID | 表示名 | カテゴリ |
-|---------|--------|----------|
-| `SAX_Bridge_Pipe_Loader` | [SAX Loader](#sax-loader) | SAX/Bridge/Pipe |
-| `SAX_Bridge_Pipe` | [SAX Pipe](#sax-pipe) | SAX/Bridge/Pipe |
-| `SAX_Bridge_Prompt` | [SAX Prompt](#sax-prompt) | SAX/Bridge/Prompt |
-| `SAX_Bridge_Prompt_Concat` | [SAX Prompt Concat](#sax-prompt-concat) | SAX/Bridge/Prompt |
-| `SAX_Bridge_Detailer` | [SAX Detailer](#sax-detailer) | SAX/Bridge/Detailer |
-| `SAX_Bridge_Detailer_Enhanced` | [SAX Enhanced Detailer](#sax-enhanced-detailer) | SAX/Bridge/Detailer |
-| `SAX_Bridge_Pipe_Upscaler` | [SAX Upscaler](#sax-upscaler) | SAX/Bridge/Upscaler |
-| `SAX_Bridge_Pipe_Cache` | [SAX Cache](#sax-cache) | SAX/Bridge/Cache |
-| `SAX_Bridge_Output` | [SAX Output](#sax-output) | SAX/Bridge/Output |
-| `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) | SAX/Bridge/Noise |
-| `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) | SAX/Bridge/Noise |
-| `SAX_Bridge_Pipe_Lora_Loader` | [SAX Lora Loader](#sax-lora-loader) | SAX/Bridge/Pipe |
-| `SAX_Bridge_Remote_Get` | [SAX Remote Get](#sax-remote-get) | SAX/Bridge/Control |
-| `SAX_Bridge_Toggle_Manager` | [SAX Toggle Manager](#sax-toggle-manager) | SAX/Bridge/Control |
+### Pipe
+
+| Node ID | 表示名 |
+|---------|--------|
+| `SAX_Bridge_Pipe_Loader` | [SAX Loader](#sax-loader) |
+| `SAX_Bridge_Pipe` | [SAX Pipe](#sax-pipe) |
+| `SAX_Bridge_Pipe_Switcher` | [SAX Pipe Switcher](#sax-pipe-switcher) |
+| `SAX_Bridge_Pipe_Lora_Loader` | [SAX Lora Loader](#sax-lora-loader) |
+| `SAX_Bridge_Pipe_Upscaler` | [SAX Upscaler](#sax-upscaler) |
+| `SAX_Bridge_Pipe_Cache` | [SAX Cache](#sax-cache) |
+
+### Prompt
+
+| Node ID | 表示名 |
+|---------|--------|
+| `SAX_Bridge_Prompt` | [SAX Prompt](#sax-prompt) |
+| `SAX_Bridge_Prompt_Concat` | [SAX Prompt Concat](#sax-prompt-concat) |
+
+### Detailer
+
+| Node ID | 表示名 |
+|---------|--------|
+| `SAX_Bridge_Detailer` | [SAX Detailer](#sax-detailer) |
+| `SAX_Bridge_Detailer_Enhanced` | [SAX Enhanced Detailer](#sax-enhanced-detailer) |
+
+### Output
+
+| Node ID | 表示名 |
+|---------|--------|
+| `SAX_Bridge_Output` | [SAX Output](#sax-output) |
+
+### Noise
+
+| Node ID | 表示名 |
+|---------|--------|
+| `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) |
+| `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) |
+
+### Control
+
+| Node ID | 表示名 |
+|---------|--------|
+| `SAX_Bridge_Remote_Get` | [SAX Remote Get](#sax-remote-get) |
+| `SAX_Bridge_Toggle_Manager` | [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
 ## ノード詳細
+
+## Pipe
 
 ### SAX Loader
 
@@ -87,81 +124,53 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 ---
 
-### SAX Prompt
+### SAX Pipe Switcher
 
-`SAX_Bridge_Prompt` — Wildcard 展開・LoRA タグ抽出・`BREAK` 構文による分割エンコードをまとめて処理します。
+`SAX_Bridge_Pipe_Switcher` — 複数の Pipe 入力から有効な Pipe を選択して展開します。Pipe の経路を条件によって切り替えるスイッチとして機能します。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `slot` | Int (0〜5) | 優先するスロット番号（1 始まり）。`0` でスロット順に自動スキャン |
+| `pipe1`〜`pipe5` | PIPE_LINE (optional) | 入力 Pipe |
+
+**出力**: SAX Pipe と完全共通（`PIPE`, `MODEL`, `POS`, `NEG`, `LATENT`, `VAE`, `CLIP`, `IMAGE`, `SEED`, `STEPS`, `CFG`, `SAMPLER`, `SCHEDULER`, `DENOISE`, `OPTIONAL_SAMPLER`, `OPTIONAL_SIGMAS`）
+
+**選択ロジック**:
+1. `slot` が 1〜5 の場合、該当スロットの Pipe を最優先で参照
+2. 指定スロットが None の場合、`pipe1` → `pipe5` の順にスキャンして最初の非 None を採用
+3. 全スロットが None の場合、空 Pipe として安全に展開
+
+---
+
+### SAX Lora Loader
+
+`SAX_Bridge_Pipe_Lora_Loader` — Pipe 内の model / clip に複数の LoRA を一括適用するノードです。各 LoRA を個別に ON/OFF・強度調整・並び替えできます。
 
 **入力**
 
 | パラメータ | 型 | 説明 |
 |-----------|-----|------|
 | `pipe` | PIPE_LINE | 入力パイプ |
-| `wildcard_text` | String (multiline) | プロンプトテキスト。Wildcard (`__tag__`)・LoRA タグ (`<lora:name:weight>`)・`BREAK` 構文に対応 |
-| `seed` | Int | Wildcard 展開用シード |
+| `enabled` | Boolean | `False` で LoRA を適用せずそのまま返す |
+| `loras_json` | String (hidden) | LoRA エントリの JSON 配列。ノード UI が自動管理 |
 
-**出力**: `PIPE`, `POPULATED_TEXT`（展開後テキスト）
+**出力**: `PIPE`（model / clip を上書き）
 
-**動作**:
-1. Wildcard トークンをシードに基づきランダム展開
-2. LoRA タグを抽出し、Model・CLIP に適用
-3. `BREAK` でテキストをチャンク分割し、各チャンクを CLIP エンコード → `ConditioningConcat` で結合
+#### UI 操作
 
----
+| 操作 | 動作 |
+|------|------|
+| LoRA 名エリアをクリック | LoRA 選択ピッカーを開く |
+| 強度ボックスをドラッグ（上下） | 強度を連続調整（1px = 0.01） |
+| 強度ボックスをクリック | 数値直接入力ポップアップ |
+| pill クリック | LoRA の ON/OFF 切り替え |
+| ▲ / ▼ クリック | LoRA の並び替え |
+| ✕ クリック | LoRA を削除 |
+| `+ Add LoRA` クリック | LoRA エントリを追加（最大 10 本） |
 
-### SAX Prompt Concat
-
-`SAX_Bridge_Prompt_Concat` — 複数のテキスト入力（最大 10 ポート）を連結して一括処理します。
-
-**入力**: `pipe`, `target_positive` (Boolean), `seed`, `text_1`〜`text_N`（可変、最大 10）
-
-**出力**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
-
-`target_positive` で Positive / Negative のどちらに結果を格納するか選択します。
-
----
-
-### SAX Detailer
-
-`SAX_Bridge_Detailer` — マスク領域をクロップして i2i 再描画し、元画像にブレンドして合成します。Differential Diffusion を内蔵しており、境界の自然な馴染みを実現します。
-
-**入力**
-
-| パラメータ | 型 | 説明 |
-|-----------|-----|------|
-| `pipe` | PIPE_LINE | 入力パイプ（Model, VAE, Conditioning を使用） |
-| `mask` | MASK (optional) | 詳細化対象マスク |
-| `denoise` | Float (0.0〜1.0) | 初回ステップのデノイズ強度 |
-| `denoise_decay` | Float (0.0〜1.0) | 繰り返しごとのデノイズ減衰率 |
-| `cycle` | Int (1〜10) | 繰り返し回数 |
-| `crop_factor` | Float (1.0〜10.0) | バウンディングボックス拡張倍率 |
-| `noise_mask_feather` | Int (0〜100) | Latent 空間でのマスク境界ぼかし量（Differential Diffusion） |
-| `blend_feather` | Int (0〜100) | 画像空間でのブレンド境界ぼかし量 |
-| `positive_prompt` | String (optional) | Positive プロンプト上書き |
-| `steps_override` | Int (0〜200, optional) | i2i の steps 上書き（0 = Loader 設定を継承） |
-| `cfg_override` | Float (0.0〜100.0, optional) | i2i の CFG 上書き（0.0 = Loader 設定を継承） |
-
-**出力**: `PIPE`, `IMAGE`
-
----
-
-### SAX Enhanced Detailer
-
-`SAX_Bridge_Detailer_Enhanced` — SAX Detailer の全機能に加え、Shadow Enhancement・Edge Enhancement・Latent Noise 注入を追加したエンハンスト版です。
-
-**入力**（SAX Detailer の全入力に加え）
-
-| パラメータ | 型 | 説明 |
-|-----------|-----|------|
-| `latent_noise_intensity` | Float (0.0〜2.0) | Latent ノイズ注入強度（i2i ディテール補強） |
-| `noise_type` | Combo | `gaussian` / `uniform` |
-| `shadow_enhance` | Float (0.0〜1.0) | 暗部への陰影描き込み強度 |
-| `shadow_decay` | Float (0.0〜1.0) | 繰り返しごとの Shadow 強度減衰率 |
-| `edge_weight` | Float (0.0〜1.0) | エッジ鮮鋭化強度（Unsharp Mask） |
-| `edge_blur_sigma` | Float (0.1〜10.0) | Unsharp Mask 用ガウスカーネル幅 |
-| `steps_override` | Int (0〜200, optional) | i2i の steps 上書き（0 = Loader 設定を継承） |
-| `cfg_override` | Float (0.0〜100.0, optional) | i2i の CFG 上書き（0.0 = Loader 設定を継承） |
-
-**出力**: `PIPE`, `IMAGE`
+> **クリップ強度**: モデル強度と常に連動（1スライダー制御）。
 
 ---
 
@@ -214,6 +223,90 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 > **注意**: 蒸留モデル（DMD2 等）との組み合わせでは品質劣化が顕著になる場合があります。
 
 ---
+
+## Prompt
+
+### SAX Prompt
+
+`SAX_Bridge_Prompt` — Wildcard 展開・LoRA タグ抽出・`BREAK` 構文による分割エンコードをまとめて処理します。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | 入力パイプ |
+| `wildcard_text` | String (multiline) | プロンプトテキスト。Wildcard (`__tag__`)・LoRA タグ (`<lora:name:weight>`)・`BREAK` 構文に対応 |
+| `seed` | Int | Wildcard 展開用シード |
+
+**出力**: `PIPE`, `POPULATED_TEXT`（展開後テキスト）
+
+**動作**:
+1. Wildcard トークンをシードに基づきランダム展開
+2. LoRA タグを抽出し、Model・CLIP に適用
+3. `BREAK` でテキストをチャンク分割し、各チャンクを CLIP エンコード → `ConditioningConcat` で結合
+
+---
+
+### SAX Prompt Concat
+
+`SAX_Bridge_Prompt_Concat` — 複数のテキスト入力（最大 10 ポート）を連結して一括処理します。
+
+**入力**: `pipe`, `target_positive` (Boolean), `seed`, `text_1`〜`text_N`（可変、最大 10）
+
+**出力**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
+
+`target_positive` で Positive / Negative のどちらに結果を格納するか選択します。
+
+---
+
+## Detailer
+
+### SAX Detailer
+
+`SAX_Bridge_Detailer` — マスク領域をクロップして i2i 再描画し、元画像にブレンドして合成します。Differential Diffusion を内蔵しており、境界の自然な馴染みを実現します。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | 入力パイプ（Model, VAE, Conditioning を使用） |
+| `mask` | MASK (optional) | 詳細化対象マスク |
+| `denoise` | Float (0.0〜1.0) | 初回ステップのデノイズ強度 |
+| `denoise_decay` | Float (0.0〜1.0) | 繰り返しごとのデノイズ減衰率 |
+| `cycle` | Int (1〜10) | 繰り返し回数 |
+| `crop_factor` | Float (1.0〜10.0) | バウンディングボックス拡張倍率 |
+| `noise_mask_feather` | Int (0〜100) | Latent 空間でのマスク境界ぼかし量（Differential Diffusion） |
+| `blend_feather` | Int (0〜100) | 画像空間でのブレンド境界ぼかし量 |
+| `positive_prompt` | String (optional) | Positive プロンプト上書き |
+| `steps_override` | Int (0〜200, optional) | i2i の steps 上書き（0 = Loader 設定を継承） |
+| `cfg_override` | Float (0.0〜100.0, optional) | i2i の CFG 上書き（0.0 = Loader 設定を継承） |
+
+**出力**: `PIPE`, `IMAGE`
+
+---
+
+### SAX Enhanced Detailer
+
+`SAX_Bridge_Detailer_Enhanced` — SAX Detailer の全機能に加え、Shadow Enhancement・Edge Enhancement・Latent Noise 注入を追加したエンハンスト版です。
+
+**入力**（SAX Detailer の全入力に加え）
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `latent_noise_intensity` | Float (0.0〜2.0) | Latent ノイズ注入強度（i2i ディテール補強） |
+| `noise_type` | Combo | `gaussian` / `uniform` |
+| `shadow_enhance` | Float (0.0〜1.0) | 暗部への陰影描き込み強度 |
+| `shadow_decay` | Float (0.0〜1.0) | 繰り返しごとの Shadow 強度減衰率 |
+| `edge_weight` | Float (0.0〜1.0) | エッジ鮮鋭化強度（Unsharp Mask） |
+| `edge_blur_sigma` | Float (0.1〜10.0) | Unsharp Mask 用ガウスカーネル幅 |
+| `steps_override` | Int (0〜200, optional) | i2i の steps 上書き（0 = Loader 設定を継承） |
+| `cfg_override` | Float (0.0〜100.0, optional) | i2i の CFG 上書き（0.0 = Loader 設定を継承） |
+
+**出力**: `PIPE`, `IMAGE`
+
+---
+
+## Output
 
 ### SAX Output
 
@@ -287,6 +380,8 @@ output/2026-03-20/001_20260320_153045_01.webp
 
 ---
 
+## Noise
+
 ### SAX Image Noise
 
 `SAX_Bridge_Noise_Image` — 画像領域（またはマスク領域）にノイズを注入します。
@@ -320,35 +415,7 @@ output/2026-03-20/001_20260320_153045_01.webp
 
 ---
 
-### SAX Lora Loader
-
-`SAX_Bridge_Pipe_Lora_Loader` — Pipe 内の model / clip に複数の LoRA を一括適用するノードです。各 LoRA を個別に ON/OFF・強度調整・並び替えできます。
-
-**入力**
-
-| パラメータ | 型 | 説明 |
-|-----------|-----|------|
-| `pipe` | PIPE_LINE | 入力パイプ |
-| `enabled` | Boolean | `False` で LoRA を適用せずそのまま返す |
-| `loras_json` | String (hidden) | LoRA エントリの JSON 配列。ノード UI が自動管理 |
-
-**出力**: `PIPE`（model / clip を上書き）
-
-#### UI 操作
-
-| 操作 | 動作 |
-|------|------|
-| LoRA 名エリアをクリック | LoRA 選択ピッカーを開く |
-| 強度ボックスをドラッグ（上下） | 強度を連続調整（1px = 0.01） |
-| 強度ボックスをクリック | 数値直接入力ポップアップ |
-| pill クリック | LoRA の ON/OFF 切り替え |
-| ▲ / ▼ クリック | LoRA の並び替え |
-| ✕ クリック | LoRA を削除 |
-| `+ Add LoRA` クリック | LoRA エントリを追加（最大 10 本） |
-
-> **クリップ強度**: モデル強度と常に連動（1スライダー制御）。
-
----
+## Control
 
 ### SAX Remote Get
 
@@ -370,7 +437,7 @@ output/2026-03-20/001_20260320_153045_01.webp
 - ソース間でスロット配置が重ならないよう自動計算
 
 **ワイヤー表示制御**
-- 👁 / 🚫 トグルボタンでソースとの接続ワイヤーを表示 / 非表示
+- Show links pill トグルでソースとの接続ワイヤーを表示 / 非表示
 - 非表示状態はワークフロー保存・復元後も維持
 
 **自動追従**
@@ -388,8 +455,9 @@ output/2026-03-20/001_20260320_153045_01.webp
 |------|------|
 | `＋ ソース追加` / `ソースを選択…` クリック | ソース選択ピッカーを開く |
 | ソース行の [✕] クリック | 該当ソースを削除 |
+| ソース行の ▲ / ▼ クリック | ソースの並び替え |
 | ソース名ラベルクリック | ソースノードへキャンバス移動 |
-| 👁 / 🚫 クリック | ソースとの接続ワイヤーの表示 / 非表示を切り替え |
+| Show links pill クリック | ソースとの接続ワイヤーの表示 / 非表示を切り替え |
 
 #### ピッカー
 

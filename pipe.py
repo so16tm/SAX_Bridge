@@ -240,3 +240,86 @@ class SAX_Bridge_Pipe_Loader(io.ComfyNode):
         }
 
         return io.NodeOutput(pipe, seed)
+
+
+# ---------------------------------------------------------------------------
+# SAX Switch Pipe
+# ---------------------------------------------------------------------------
+
+N_SWITCH_PIPES = 5
+
+
+class SAX_Bridge_Pipe_Switcher(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="SAX_Bridge_Pipe_Switcher",
+            display_name="SAX Pipe Switcher",
+            category="SAX/Bridge/Pipe",
+            description="CSB Switch Pipe — 複数の Pipe 入力から有効な Pipe を選択して展開する",
+            inputs=[
+                io.Int.Input("slot", default=0, min=0, max=N_SWITCH_PIPES, step=1,
+                             tooltip="優先するスロット番号（1 始まり）。0 の場合はスロット順にスキャン"),
+                *[PipeLine.Input(f"pipe{i}", optional=True) for i in range(1, N_SWITCH_PIPES + 1)],
+            ],
+            outputs=[
+                PipeLine.Output("PIPE"),
+                io.Model.Output("MODEL"),
+                io.Conditioning.Output("POS"),
+                io.Conditioning.Output("NEG"),
+                io.Latent.Output("LATENT"),
+                io.Vae.Output("VAE"),
+                io.Clip.Output("CLIP"),
+                io.Image.Output("IMAGE"),
+                io.Int.Output("SEED"),
+                io.Int.Output("STEPS"),
+                io.Float.Output("CFG"),
+                AnyType.Output("SAMPLER"),
+                AnyType.Output("SCHEDULER"),
+                io.Float.Output("DENOISE"),
+                SamplerType.Output("OPTIONAL_SAMPLER"),
+                io.Sigmas.Output("OPTIONAL_SIGMAS"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, slot=None, **kwargs) -> io.NodeOutput:
+        pipes = [kwargs.get(f"pipe{i}") for i in range(1, N_SWITCH_PIPES + 1)]
+
+        # 1. 指定スロットを最優先で試みる（1 始まり）
+        selected = None
+        if slot is not None and 1 <= slot <= N_SWITCH_PIPES:
+            selected = pipes[slot - 1]
+
+        # 2. フォールバック: スロット順に最初の非 None を採用
+        if selected is None:
+            for p in pipes:
+                if p is not None:
+                    selected = p
+                    break
+
+        # 3. 全スロットが None → 空 Pipe として展開
+        if selected is None:
+            selected = {}
+
+        pipe: dict = selected
+        loader_settings: dict = pipe.get("loader_settings", {})
+
+        return io.NodeOutput(
+            pipe,
+            pipe.get("model"),
+            pipe.get("positive"),
+            pipe.get("negative"),
+            pipe.get("samples"),
+            pipe.get("vae"),
+            pipe.get("clip"),
+            pipe.get("images"),
+            pipe.get("seed"),
+            loader_settings.get("steps"),
+            loader_settings.get("cfg"),
+            loader_settings.get("sampler_name"),
+            loader_settings.get("scheduler"),
+            loader_settings.get("denoise"),
+            loader_settings.get("optional_sampler"),
+            loader_settings.get("optional_sigmas"),
+        )

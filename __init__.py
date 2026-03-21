@@ -57,10 +57,11 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Prompt": "SAX Prompt",
 }
 
-# V3 API ノードの登録 (Loader, Pipe, Prompt Concat)
+# V3 API ノードの登録 (Loader, Pipe, Switch Pipe, Prompt Concat)
 for v3_node in [
     pipe_node.SAX_Bridge_Pipe_Loader,
     pipe_node.SAX_Bridge_Pipe,
+    pipe_node.SAX_Bridge_Pipe_Switcher,
     prompt_node.SAX_Bridge_Prompt_Concat,
 ]:
     _schema = v3_node.GET_SCHEMA()
