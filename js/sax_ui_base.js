@@ -21,6 +21,48 @@ export const PAD   = 8;
 export const ROW_H = 24;
 
 // ---------------------------------------------------------------------------
+// ComfyUI テーマ（CSS変数から読み込み・キャッシュ）
+// ---------------------------------------------------------------------------
+
+let _themeCache = null;
+
+// ComfyUI がパレットを変更した際にキャッシュを自動無効化する。
+// パレット変更は documentElement の style 属性、または head への style 要素追加で行われる。
+{
+    const _inv = () => { _themeCache = null; };
+    const _obs = new MutationObserver(_inv);
+    _obs.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
+    _obs.observe(document.head, { childList: true });
+}
+
+/**
+ * ComfyUI の CSS カスタムプロパティを読み込んでキャッシュする。
+ * Canvas 描画は CSS変数を直接使えないため、一度だけ解決して定数化する。
+ * フォールバック値は ComfyUI デフォルト dark テーマの実値。
+ */
+export function getComfyTheme() {
+    if (_themeCache) return _themeCache;
+    const s = getComputedStyle(document.documentElement);
+    const v = (name, fallback) => s.getPropertyValue(name).trim() || fallback;
+    _themeCache = {
+        // ComfyUI パレット変数（ユーザーカスタマイズ対応）
+        menuBg:          v("--comfy-menu-bg",            "#171718"),
+        menuSecBg:       v("--comfy-menu-secondary-bg",  "#303030"),
+        inputBg:         v("--comfy-input-bg",           "#222222"),
+        bgColor:         v("--bg-color",                 "#202020"),
+        fg:              v("--fg-color",                 "#ffffff"),
+        inputText:       v("--input-text",               "#dddddd"),
+        contentBg:       v("--content-bg",               "#4e4e4e"),
+        contentFg:       v("--content-fg",               "#ffffff"),
+        contentHoverBg:  v("--content-hover-bg",         "#222222"),
+        border:          v("--border-color",             "#4e4e4e"),
+        trEvenBg:        v("--tr-even-bg-color",         "#222222"),
+        trOddBg:         v("--tr-odd-bg-color",          "#353535"),
+    };
+    return _themeCache;
+}
+
+// ---------------------------------------------------------------------------
 // Drawing helpers
 // ---------------------------------------------------------------------------
 
@@ -63,24 +105,29 @@ export function inX(pos, x0, w) {
 
 /** トグル pill を描画。x: pill 左端、midY: 行中央Y */
 export function drawPill(ctx, x, midY, on) {
+    const t  = getComfyTheme();
     const pW = 26, pH = 14;
     const pY = midY - pH / 2;
+    // ON: コンテンツグレー背景 + 明るいボーダー / OFF: 最暗背景 + 通常ボーダー
     rrect(ctx, x, pY, pW, pH, 7,
-        on ? "#1e5a32" : "#5a1e1e",
-        on ? "#2a8a4a" : "#8a2a2a");
+        on ? t.contentBg : t.menuBg,
+        on ? t.inputText : t.border);
     const kX = on ? x + pW - 12 : x + 2;
-    rrect(ctx, kX, pY + 3, 8, 8, 4, "#fff", null);
+    // ON: 白ノブ / OFF: ボーダー色ノブ（暗く = 明確にオフ）
+    rrect(ctx, kX, pY + 3, 8, 8, 4, on ? t.fg : t.border, null);
 }
 
 /** ▲▼ 移動矢印を描画。x: エリア左端、y: 行上端、h: 行高 */
 export function drawMoveArrows(ctx, x, y, h, canUp, canDown) {
-    txt(ctx, "▲", x + 10, y + h / 4,     canUp   ? "#888" : "#383838", "center", 9);
-    txt(ctx, "▼", x + 10, y + h * 3 / 4, canDown ? "#888" : "#383838", "center", 9);
+    const t = getComfyTheme();
+    txt(ctx, "▲", x + 10, y + h / 4 + 2,     canUp   ? t.contentBg : t.menuSecBg, "center", 9);
+    txt(ctx, "▼", x + 10, y + h * 3 / 4 - 2, canDown ? t.contentBg : t.menuSecBg, "center", 9);
 }
 
 /** ✕ 削除ボタンを描画。x: エリア左端、midY: 行中央Y */
 export function drawDeleteBtn(ctx, x, midY) {
-    txt(ctx, "✕", x + 10, midY, "#666", "center", 10);
+    const t = getComfyTheme();
+    txt(ctx, "✕", x + 10, midY, t.contentBg, "center", 10);
 }
 
 /**
@@ -88,10 +135,13 @@ export function drawDeleteBtn(ctx, x, midY) {
  * x: ボックス左端、y: 行上端、w: 幅、h: 行高、active: ドラッグ中かどうか
  */
 export function drawParamBox(ctx, x, y, w, h, text, active) {
-    rrect(ctx, x, y + 3, w, h - 6, 3,
-        active ? "#1a2a3e" : "#1a1a2a",
-        active ? "#4a8acc" : "#3a3a5a");
-    txt(ctx, text, x + w / 2, y + h / 2, active ? "#aef" : "#88a", "center", 11);
+    const t = getComfyTheme();
+    // 背景色 = 行枠線と同色 (contentBg) → 枠線から自然につながる埋め込み表現
+    // y+4 / h-8 で行枠線の内側に 1px のマージンを確保
+    rrect(ctx, x + 1, y + 4, w - 2, h - 8, 4,
+        t.contentBg, null);
+    txt(ctx, text, x + w / 2, y + h / 2,
+        active ? t.fg : t.inputText, "center", 11);
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +173,7 @@ export function rowLayout(W, {
     // 左側: pill があれば確保し、content の開始 X を決める
     let lx = PAD;
     if (hasToggle) {
+        lx += 4;   // 行枠線の内側マージン（枠線との重なりを回避）
         layout.pill = { x: lx, w: 26 };
         lx += 26 + 4;   // pill 幅 + ギャップ
     }
@@ -178,14 +229,18 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
 
     const box = document.createElement("div");
     box.style.cssText =
-        "position:absolute;background:#1a1a2e;border:1px solid #4a8acc;border-radius:8px;" +
+        "position:absolute;background:var(--comfy-menu-bg,#171718);" +
+        "border:1px solid var(--content-bg,#4e4e4e);border-radius:6px;" +
         "padding:12px 14px;display:flex;flex-direction:column;gap:8px;" +
-        "font:13px sans-serif;color:#ccc;box-shadow:0 4px 20px rgba(0,0,0,.7);min-width:200px;";
+        "font:13px sans-serif;color:var(--input-text,#ddd);" +
+        "box-shadow:0 4px 20px rgba(0,0,0,.7);min-width:200px;";
 
     // ラベル（cfg.label があれば表示）
     if (cfg.label) {
         const lbl = document.createElement("div");
-        lbl.style.cssText = "font-size:11px;color:#556;text-transform:uppercase;letter-spacing:.06em;";
+        lbl.style.cssText =
+            "font-size:11px;color:var(--input-text,#ddd);" +
+            "text-transform:uppercase;letter-spacing:.06em;";
         lbl.textContent = cfg.label;
         box.appendChild(lbl);
     }
@@ -194,10 +249,13 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
     const btnRow = document.createElement("div");
     btnRow.style.cssText = "display:flex;align-items:stretch;gap:4px;";
 
+    // ± ボタンは行カプセルと同じスタイル（暗い背景 + コンテンツグレー枠）
     const btnStyle =
-        "width:44px;background:#1e2a3e;border:1px solid #3a5a8a;border-radius:5px;" +
-        "color:#7ac8ff;font-size:24px;cursor:pointer;display:flex;align-items:center;" +
-        "justify-content:center;user-select:none;flex-shrink:0;padding:0;line-height:1;";
+        "width:44px;background:var(--comfy-input-bg,#222);" +
+        "border:1px solid var(--content-bg,#4e4e4e);border-radius:4px;" +
+        "color:var(--input-text,#ddd);font-size:24px;cursor:pointer;" +
+        "display:flex;align-items:center;justify-content:center;" +
+        "user-select:none;flex-shrink:0;padding:0;line-height:1;";
 
     const minusBtn = document.createElement("button");
     minusBtn.style.cssText = btnStyle;
@@ -207,14 +265,15 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
     plusBtn.style.cssText = btnStyle;
     plusBtn.textContent = "+";
 
+    // 入力欄も行スタイルに揃える（暗い背景 + コンテンツグレー枠）
     const input = document.createElement("input");
     input.type      = "text";
     input.inputMode = "decimal";
     input.value     = currentVal.toFixed(decimals);
     input.style.cssText =
-        "flex:1;background:#0e0e20;border:1px solid #3a3a5a;border-radius:5px;" +
-        "color:#fff;padding:8px;font-size:20px;font-weight:bold;outline:none;" +
-        "text-align:center;min-width:0;";
+        "flex:1;background:var(--comfy-input-bg,#222);border:1px solid var(--content-bg,#4e4e4e);" +
+        "border-radius:4px;color:var(--input-text,#ddd);padding:8px;" +
+        "font-size:20px;font-weight:bold;outline:none;text-align:center;min-width:0;";
 
     btnRow.appendChild(minusBtn);
     btnRow.appendChild(input);
@@ -223,7 +282,7 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
 
     // ヒント
     const hint = document.createElement("div");
-    hint.style.cssText = "font-size:10px;color:#445;text-align:center;";
+    hint.style.cssText = "font-size:10px;color:var(--border-color,#4e4e4e);text-align:center;";
     hint.textContent   = `${cfg.min ?? "−∞"} – ${cfg.max ?? "+∞"}  ·  Enter to confirm`;
     box.appendChild(hint);
 
@@ -397,6 +456,7 @@ export function makeItemListWidget(node, spec) {
             this._y = y;
             const items  = getItems();
             const layout = rowLayout(W, { hasToggle, hasParam, hasMoveUpDown, hasDelete });
+            const t      = getComfyTheme();
 
             // ヘッダー行（enabledWidget pill + param.label）
             if (HEADER_H > 0) {
@@ -409,7 +469,7 @@ export function makeItemListWidget(node, spec) {
                     txt(ctx, param.label,
                         layout.param.x + layout.param.w / 2,
                         headerMidY,
-                        "#557", "center", 10);
+                        t.inputText, "center", 10);
                 }
             }
 
@@ -419,9 +479,10 @@ export function makeItemListWidget(node, spec) {
                 const midY = rowY + ROW_H / 2;
                 const on   = hasToggle ? (item.on ?? true) : true;
 
-                // 行背景
-                rrect(ctx, PAD, rowY + 1, W - PAD * 2, ROW_H - 2, 3,
-                    i % 2 === 0 ? "#1c1c2c" : "#20202e", null);
+                // 行背景：暗い背景 + 明るい枠線でカプセルを表現
+                // inputBg (#222) = 暗い本体, contentBg (#4e4e4e) = 枠線（Strength ボックスと同色）
+                rrect(ctx, PAD, rowY + 2, W - PAD * 2, ROW_H - 4, (ROW_H - 4) / 2,
+                    t.inputBg, t.contentBg);
 
                 // Toggle pill
                 if (layout.pill) {
@@ -457,15 +518,15 @@ export function makeItemListWidget(node, spec) {
                 }
             });
 
-            // Add ボタン
+            // Add ボタン（モノクロ）
             if (addButton) {
-                const btnY  = itemsY + items.length * ROW_H;
+                const btnY   = itemsY + items.length * ROW_H;
                 const canAdd = items.length < maxItems;
-                rrect(ctx, PAD, btnY + 3, W - PAD * 2, ADD_H - 6, 3,
-                    canAdd ? "#1a2a1a" : "#1a1a1a",
-                    canAdd ? "#2a4a2a" : "#2a2a2a");
+                rrect(ctx, PAD, btnY + 2, W - PAD * 2, ADD_H - 4, 4,
+                    canAdd ? t.inputBg : t.menuBg,
+                    canAdd ? t.contentBg : t.border);
                 txt(ctx, addButton.label, W / 2, btnY + ADD_H / 2,
-                    canAdd ? "#7d7" : "#444", "center", 11);
+                    canAdd ? t.inputText : t.border, "center", 11);
             }
         },
 

@@ -10,6 +10,7 @@ import {
     PAD, ROW_H,
     txt,
     makeItemListWidget,
+    getComfyTheme,
 } from "./sax_ui_base.js";
 
 const EXT_NAME   = "SAX.LoraLoader";
@@ -56,25 +57,28 @@ function showLoraPicker(currentName, onSelect) {
 
     const dlg = document.createElement("div");
     dlg.style.cssText =
-        "background:#1a1a2e;border:1px solid #4a4a6a;border-radius:8px;padding:16px;" +
-        "width:480px;max-height:76vh;display:flex;flex-direction:column;" +
-        "color:#ccc;font:13px/1.5 sans-serif;gap:8px;";
+        "background:var(--comfy-menu-bg,#353535);border:1px solid var(--border-color,#4e4e4e);" +
+        "border-radius:6px;padding:16px;width:480px;max-height:76vh;" +
+        "display:flex;flex-direction:column;" +
+        "color:var(--fg-color,#fff);font:13px/1.5 sans-serif;gap:8px;";
 
     const title = document.createElement("div");
-    title.style.cssText = "font:bold 14px sans-serif;color:#fff;";
+    title.style.cssText = "font:bold 14px sans-serif;color:var(--fg-color,#fff);";
     title.textContent = "Select LoRA";
 
     const searchWrap = document.createElement("div");
     searchWrap.style.cssText =
-        "display:flex;align-items:center;gap:6px;background:#0e0e20;" +
-        "border:1px solid #3a3a5a;border-radius:4px;padding:5px 10px;flex-shrink:0;";
+        "display:flex;align-items:center;gap:6px;" +
+        "background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#4e4e4e);" +
+        "border-radius:4px;padding:5px 10px;flex-shrink:0;";
     const searchIcon = document.createElement("span");
-    searchIcon.style.cssText = "color:#555;";
+    searchIcon.style.cssText = "color:var(--content-bg,#4e4e4e);";
     searchIcon.textContent = "🔍";
     const searchInput = document.createElement("input");
     searchInput.placeholder = "Search LoRA name…";
     searchInput.style.cssText =
-        "flex:1;background:none;border:none;outline:none;color:#ccc;font-size:12px;";
+        "flex:1;background:none;border:none;outline:none;" +
+        "color:var(--input-text,#ddd);font-size:12px;";
     searchWrap.appendChild(searchIcon);
     searchWrap.appendChild(searchInput);
 
@@ -87,8 +91,9 @@ function showLoraPicker(currentName, onSelect) {
     const cancelBtn = document.createElement("button");
     cancelBtn.textContent = "Cancel";
     cancelBtn.style.cssText =
-        "padding:6px 14px;background:#2a2a3a;border:1px solid #555;" +
-        "border-radius:4px;color:#fff;cursor:pointer;font-size:12px;";
+        "padding:6px 14px;background:var(--comfy-menu-secondary-bg,#303030);" +
+        "border:1px solid var(--border-color,#4e4e4e);" +
+        "border-radius:4px;color:var(--fg-color,#fff);cursor:pointer;font-size:12px;";
     cancelBtn.addEventListener("click", () => overlay.remove());
 
     btnRow.appendChild(cancelBtn);
@@ -110,7 +115,8 @@ function showLoraPicker(currentName, onSelect) {
                 : list;
             if (filtered.length === 0) {
                 const empty = document.createElement("div");
-                empty.style.cssText = "color:#555;padding:20px;text-align:center;font-size:12px;";
+                empty.style.cssText =
+                    "color:var(--content-bg,#4e4e4e);padding:20px;text-align:center;font-size:12px;";
                 empty.textContent   = "No results";
                 scroll.appendChild(empty);
                 return;
@@ -118,25 +124,30 @@ function showLoraPicker(currentName, onSelect) {
             for (const name of filtered) {
                 const row = document.createElement("div");
                 const isCurrent = name === currentName;
+                const selectedBg = "var(--tr-odd-bg-color,#353535)";
+                const hoverBg    = "var(--content-hover-bg,#222)";
                 row.style.cssText =
                     `display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:3px;` +
-                    `cursor:pointer;${isCurrent ? "background:#1a2a1a;" : ""}`;
+                    `cursor:pointer;${isCurrent ? `background:${selectedBg};` : ""}`;
                 row.addEventListener("mouseenter", () => {
-                    if (!isCurrent) row.style.background = "#1e1e32";
+                    if (!isCurrent) row.style.background = hoverBg;
                 });
                 row.addEventListener("mouseleave", () => {
-                    row.style.background = isCurrent ? "#1a2a1a" : "";
+                    row.style.background = isCurrent ? selectedBg : "";
                 });
 
                 const lbl = document.createElement("span");
                 lbl.style.cssText =
                     `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` +
-                    `font-size:11px;color:${isCurrent ? "#7d7" : "#ccc"};`;
+                    `font-size:11px;color:${isCurrent
+                        ? "var(--fg-color,#fff)"
+                        : "var(--input-text,#ddd)"};`;
                 lbl.textContent = name;
 
                 if (isCurrent) {
                     const mark = document.createElement("span");
-                    mark.style.cssText = "color:#7d7;font-size:11px;flex-shrink:0;";
+                    mark.style.cssText =
+                        "color:var(--input-text,#ddd);font-size:11px;flex-shrink:0;";
                     mark.textContent   = "✓";
                     row.appendChild(mark);
                 }
@@ -220,12 +231,14 @@ function buildUI(node) {
         content: {
             // LoRA 名を描画。未設定時はプレースホルダー
             draw(ctx, item, x, y, w, h, on) {
+                const t       = getComfyTheme();
                 const name    = item.lora || "";
                 const display = name
                     ? name.replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "")
                     : "— click to select —";
-                const color   = !name ? "#555"
-                    : on ? "#ccc" : "#666";
+                const color   = !name
+                    ? t.contentBg    // プレースホルダー（暗い行の中で薄く）
+                    : t.inputText;   // 選択済み（ON/OFF を問わずライトグレー、明暗は pill で表現）
                 ctx.save();
                 ctx.beginPath();
                 ctx.rect(x + 2, y, w - 4, h);
