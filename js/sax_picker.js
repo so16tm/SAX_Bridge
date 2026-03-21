@@ -317,17 +317,52 @@ export function showPicker({
     const scroll = h("div", "overflow-y:auto;flex:1;");
     dlg.appendChild(scroll);
 
+    // ---- ソートユーティリティ ----
+    // 全アイテムの中で x+y が最小の座標を基準点（左上アンカー）として返す
+    function computeAnchor(posArr) {
+        let ax = Infinity, ay = Infinity;
+        for (const [x, y] of posArr) {
+            if (x + y < ax + ay) { ax = x; ay = y; }
+        }
+        return ax === Infinity ? [0, 0] : [ax, ay];
+    }
+
+    // 名前昇順、同名ならアンカーからのユークリッド距離昇順でソート
+    function sortByNameThenDist(arr, nameOf, posOf, anchor) {
+        const [ax, ay] = anchor;
+        return arr.slice().sort((a, b) => {
+            const nc = nameOf(a).localeCompare(nameOf(b));
+            if (nc !== 0) return nc;
+            const [x1, y1] = posOf(a);
+            const [x2, y2] = posOf(b);
+            return Math.hypot(x1 - ax, y1 - ay) - Math.hypot(x2 - ax, y2 - ay);
+        });
+    }
+
     // ---- コンテンツ描画 ----
     const renderContent = (query = "") => {
         const q = query.toLowerCase().trim();
         scroll.innerHTML = "";
 
+        // ── アンカー座標を全候補から計算 ──
+        const allPosItems = [];
+        for (const g of app.graph._groups ?? [])
+            allPosItems.push([g.pos[0], g.pos[1]]);
+        for (const n of app.graph._nodes ?? []) {
+            if (n.id !== excludeNodeId && !(filterNode && !filterNode(n)))
+                allPosItems.push([n.pos[0], n.pos[1]]);
+        }
+        const anchor = computeAnchor(allPosItems);
+
         // ── Groups ──
         if (sections.includes("groups")) {
             const allGroups = app.graph._groups ?? [];
-            const groups    = allGroups
-                .filter(g => !q || g.title.toLowerCase().includes(q))
-                .sort((a, b) => a.title.localeCompare(b.title));
+            const groups    = sortByNameThenDist(
+                allGroups.filter(g => !q || g.title.toLowerCase().includes(q)),
+                g => g.title,
+                g => [g.pos[0], g.pos[1]],
+                anchor
+            );
             const titleCount = new Map();
             for (const g of allGroups)
                 titleCount.set(g.title, (titleCount.get(g.title) ?? 0) + 1);
@@ -388,14 +423,19 @@ export function showPicker({
 
         // ── Subgraphs ──
         if (allSubgraphs.length > 0) {
-            allSubgraphs.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+            const sortedSubs = sortByNameThenDist(
+                allSubgraphs,
+                n => n.title || n.type || `Node#${n.id}`,
+                n => [n.pos[0], n.pos[1]],
+                anchor
+            );
             const subTitleCount = new Map();
             for (const n of allSubgraphs) {
                 const t = n.title || n.type || `Node#${n.id}`;
                 subTitleCount.set(t, (subTitleCount.get(t) ?? 0) + 1);
             }
-            const rows = allSubgraphs.flatMap(n => buildNodeRows(n, subTitleCount, true));
-            scroll.appendChild(makeSection("__subgraphs", `Subgraphs (${allSubgraphs.length})`, SAX_COLORS.subgraph, rows, false));
+            const rows = sortedSubs.flatMap(n => buildNodeRows(n, subTitleCount, true));
+            scroll.appendChild(makeSection("__subgraphs", `Subgraphs (${allSubgraphs.length})`, SAX_COLORS.subgraph, rows, true));
         }
 
         // ── Nodes（カテゴリごと）──
@@ -412,15 +452,17 @@ export function showPicker({
                 typeMap.get(k).push(n);
             }
             for (const [typeKey, typeNodes] of [...typeMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-                typeNodes.sort((a, b) =>
-                    (a.title || a.type || "").localeCompare(b.title || b.type || ""));
-                const rows = typeNodes.flatMap(n => buildNodeRows(n, nodeTitleCount, false));
-                const hasCurrent = mode === "single"
-                    && typeNodes.some(n => n.id === currentNodeId);
+                const sortedTypeNodes = sortByNameThenDist(
+                    typeNodes,
+                    n => n.title || n.type || `Node#${n.id}`,
+                    n => [n.pos[0], n.pos[1]],
+                    anchor
+                );
+                const rows = sortedTypeNodes.flatMap(n => buildNodeRows(n, nodeTitleCount, false));
                 scroll.appendChild(makeSection(
                     `__node_${typeKey}`,
                     `${typeKey}  (${typeNodes.length})`,
-                    SAX_COLORS.node, rows, !hasCurrent
+                    SAX_COLORS.node, rows, true
                 ));
             }
         }
