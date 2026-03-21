@@ -9,6 +9,7 @@ from .output import SAX_Bridge_Output
 from .toggle_manager import SAX_Bridge_Toggle_Manager
 from .remote_get import SAX_Bridge_Remote_Get
 from .loader import SAX_Bridge_Loader_Lora
+from .sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
 
 # V3 API ノード
 from . import prompt as prompt_node
@@ -40,6 +41,10 @@ NODE_CLASS_MAPPINGS = {
     "SAX_Bridge_Toggle_Manager": SAX_Bridge_Toggle_Manager,
     "SAX_Bridge_Remote_Get": SAX_Bridge_Remote_Get,
 
+    # Segment 系列
+    "SAX_Bridge_Loader_SAM3":     SAX_Bridge_Loader_SAM3,
+    "SAX_Bridge_Segmenter_Multi": SAX_Bridge_Segmenter_Multi,
+
     # Prompt 系列 (Class Implementations)
     "SAX_Bridge_Prompt": prompt_node.SAX_Bridge_Prompt,
 }
@@ -55,6 +60,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Loader_Lora": "SAX Lora Loader",
     "SAX_Bridge_Toggle_Manager": "SAX Toggle Manager",
     "SAX_Bridge_Remote_Get": "SAX Remote Get",
+    "SAX_Bridge_Loader_SAM3":     "SAX SAM3 Loader",
+    "SAX_Bridge_Segmenter_Multi": "SAX SAM3 Multi Segmenter",
     "SAX_Bridge_Prompt": "SAX Prompt",
 }
 

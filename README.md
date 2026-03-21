@@ -1,6 +1,6 @@
 # SAX_Bridge
 
-ComfyUI のワークフローを補完・拡張する統合ブリッジモジュールです。Pipe 形式によるコンテキスト管理、Wildcard/LoRA 対応プロンプト処理、高精度な Detailer、画像アップスケール、推論高速化キャッシュ、最終出力処理、マスク付きノイズ注入、複数ノードのリモート参照、シーンベースのトグル管理、Pipe スイッチを提供します。
+ComfyUI のワークフローを補完・拡張する統合ブリッジモジュールです。Pipe 形式によるコンテキスト管理、Wildcard/LoRA 対応プロンプト処理、高精度な Detailer、画像アップスケール、SAM3 テキストセグメンテーション、推論高速化キャッシュ、最終出力処理、マスク付きノイズ注入、複数ノードのリモート参照、シーンベースのトグル管理、Pipe スイッチを提供します。
 
 ## 目次
 
@@ -21,6 +21,9 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
     - [SAX Upscaler](#sax-upscaler)
     - [SAX Image Noise](#sax-image-noise)
     - [SAX Latent Noise](#sax-latent-noise)
+  - [Segment](#segment)
+    - [SAX SAM3 Loader](#sax-sam3-loader)
+    - [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter)
   - [Output](#output)
     - [SAX Output](#sax-output)
   - [Utility](#utility)
@@ -66,6 +69,13 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 | `SAX_Bridge_Upscaler` | [SAX Upscaler](#sax-upscaler) |
 | `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) |
 | `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) |
+
+### Segment
+
+| Node ID | 表示名 |
+|---------|--------|
+| `SAX_Bridge_Loader_SAM3` | [SAX SAM3 Loader](#sax-sam3-loader) |
+| `SAX_Bridge_Segmenter_Multi` | [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 
 ### Output
 
@@ -316,6 +326,77 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 **入力**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
 
 **出力**: `LATENT`
+
+---
+
+## Segment
+
+### SAX SAM3 Loader
+
+`SAX_Bridge_Loader_SAM3` — SAM3 モデルをロードし、ComfyUI の VRAM 管理下に配置します。他のモデルと VRAM を共有し、必要に応じて自動的に CPU へ退避されます。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `model_name` | Combo | `models/sam3/` ディレクトリ内のチェックポイントファイル |
+| `precision` | Combo | `fp32`（最高品質・推奨）/ `bf16`（Ampere+ 省 VRAM）/ `fp16`（Volta+ 省 VRAM）/ `auto`（GPU に応じて自動選択） |
+
+**出力**: `CSAM3_MODEL`
+
+> **モデルの配置**: `ComfyUI/models/sam3/` に `.pt` / `.pth` ファイルを配置してください。
+
+---
+
+### SAX SAM3 Multi Segmenter
+
+`SAX_Bridge_Segmenter_Multi` — 複数テキストプロンプトのエントリーを positive / negative で指定し、SAM3 セグメンテーション結果を合成してマスクを出力します。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE (optional) | 画像ソース（`image` 未接続時に使用） |
+| `image` | IMAGE (optional) | 処理対象画像。`pipe` より優先 |
+| `mask` | MASK (optional) | ROI マスク。最終マスクを指定領域内に制限する |
+| `sam3_model` | CSAM3_MODEL (optional*) | SAX SAM3 Loader から接続 |
+| `segments_json` | String (hidden) | セグメントエントリーデータ（JSON）。UI が管理するため直接編集不要 |
+
+`pipe` と `image` は片方が必須。`image` を優先して参照します。`sam3_model` はスロット上は optional ですが実行時に必須です。
+
+**出力**: `PIPE`（入力 Pipe のパススルー）, `MASK`
+
+**マスク合成ロジック**:
+1. 有効（`on=true`）な各エントリーに対し SAM3 セグメンテーションを実行
+2. positive エントリーの結果を OR 合成 → positive マスク
+3. negative エントリーの結果を OR 合成 → negative マスク
+4. 最終マスク = `clamp(positive − negative, 0, 1)`
+5. `mask` 入力がある場合、最終マスクと AND（ROI 制限）
+
+#### UI 操作
+
+各エントリー行は以下の要素で構成されます:
+
+| 要素 | 操作 | 動作 |
+|------|------|------|
+| Toggle pill | クリック | エントリーの有効 / 無効を切り替え |
+| Mode badge（＋/－） | クリック | `positive` / `negative` を切り替え |
+| Prompt テキスト | クリック | プロンプト編集ダイアログを開く |
+| `thr` ボックス | 上下ドラッグ | Threshold を連続調整（click でポップアップ） |
+| `p.w.` ボックス | 上下ドラッグ | Presence Weight を連続調整（click でポップアップ） |
+| `grow` ボックス | 上下ドラッグ | Mask Grow を連続調整（click でポップアップ） |
+| ▲ / ▼ | クリック | エントリーの並び替え |
+| ✕ | クリック | エントリーを削除 |
+| `+ Add Segment` | クリック | エントリーを追加（最大 20 件） |
+
+#### エントリーパラメータ
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `prompt` | `"person"` | 検出対象のテキストプロンプト |
+| `threshold` | `0.2` | 検出信頼度の閾値（小さいほど広く検出） |
+| `presence_weight` | `0.5` | presence_score の影響度。`0.0` = 範囲優先 / `1.0` = 精度優先 |
+| `mask_grow` | `0` | マスクの拡張（正値）または縮小（負値）ピクセル数 |
 
 ---
 
@@ -593,6 +674,7 @@ git clone https://github.com/so16tm/SAX_Bridge.git
 
 **任意（インストール時に互換機能が有効化）**
 - [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) — `PIPE_LINE` 型を共有しているため、Easy Use の Pipe ノードと相互接続が可能
+- `sam3` package — SAX SAM3 Loader / SAX SAM3 Multi Segmenter ノードを使用する場合に必要（`pip install sam3`）
 
 ## ライセンス
 
