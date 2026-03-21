@@ -356,15 +356,12 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 | パラメータ | 型 | 説明 |
 |-----------|-----|------|
-| `pipe` | PIPE_LINE (optional) | 画像ソース（`image` 未接続時に使用） |
-| `image` | IMAGE (optional) | 処理対象画像。`pipe` より優先 |
+| `sam3_model` | CSAM3_MODEL | SAX SAM3 Loader から接続 |
+| `image` | IMAGE | 処理対象画像 |
 | `mask` | MASK (optional) | ROI マスク。最終マスクを指定領域内に制限する |
-| `sam3_model` | CSAM3_MODEL (optional*) | SAX SAM3 Loader から接続 |
 | `segments_json` | String (hidden) | セグメントエントリーデータ（JSON）。UI が管理するため直接編集不要 |
 
-`pipe` と `image` は片方が必須。`image` を優先して参照します。`sam3_model` はスロット上は optional ですが実行時に必須です。
-
-**出力**: `PIPE`（入力 Pipe のパススルー）, `MASK`
+**出力**: `MASK`
 
 **マスク合成ロジック**:
 1. 有効（`on=true`）な各エントリーに対し SAM3 セグメンテーションを実行

@@ -484,6 +484,11 @@ class SAX_Bridge_Segmenter_Multi:
     def INPUT_TYPES(cls):
         return {
             "required": {
+                "sam3_model": (
+                    "CSAM3_MODEL",
+                    {"tooltip": "Connect from SAX SAM3 Loader."},
+                ),
+                "image": ("IMAGE",),
                 "segments_json": (
                     "STRING",
                     {
@@ -494,18 +499,12 @@ class SAX_Bridge_Segmenter_Multi:
                 ),
             },
             "optional": {
-                "pipe":       ("PIPE_LINE",),
-                "image":      ("IMAGE",),
-                "mask":       ("MASK",),
-                "sam3_model": (
-                    "CSAM3_MODEL",
-                    {"tooltip": "Connect from SAX SAM3 Loader."},
-                ),
+                "mask": ("MASK",),
             },
         }
 
-    RETURN_TYPES  = ("PIPE_LINE", "MASK")
-    RETURN_NAMES  = ("PIPE",      "MASK")
+    RETURN_TYPES  = ("MASK",)
+    RETURN_NAMES  = ("MASK",)
     FUNCTION      = "segment"
     CATEGORY      = "SAX/Bridge/Segment"
     OUTPUT_NODE   = False
@@ -516,36 +515,18 @@ class SAX_Bridge_Segmenter_Multi:
 
     def segment(
         self,
+        sam3_model,
+        image,
         segments_json: str,
-        pipe=None,
-        image=None,
         mask=None,
-        sam3_model=None,
     ):
-        if sam3_model is None:
-            raise ValueError(
-                "[SAX_Bridge] sam3_model is required. Connect from SAX SAM3 Loader."
-            )
         if not _SAM3_AVAILABLE:
             raise RuntimeError(
                 "[SAX_Bridge] sam3 package is not installed. "
                 "Please install it: pip install sam3"
             )
 
-        # ── 画像ソースの解決（image 優先） ──────────────────────────────────
-        if image is not None:
-            images = image
-        elif pipe is not None:
-            images = pipe.get("images")
-            if images is None:
-                raise ValueError(
-                    "[SAX_Bridge] Pipe does not contain images. "
-                    "Run Loader → KSampler → VAEDecode first."
-                )
-        else:
-            raise ValueError(
-                "[SAX_Bridge] Either 'image' or 'pipe' must be provided."
-            )
+        images = image
 
         # ── セグメントエントリーのパース ────────────────────────────────────
         try:
@@ -563,8 +544,7 @@ class SAX_Bridge_Segmenter_Multi:
         if not enabled:
             logger.info("[SAX_Bridge] Segmenter: no enabled entries, returning zero mask")
             empty = torch.zeros(images.shape[0], img_h, img_w)
-            out_pipe = pipe.copy() if pipe is not None else {}
-            return (out_pipe, empty)
+            return (empty,)
 
         # ── モデルを GPU にロード ───────────────────────────────────────────
         comfy.model_management.load_models_gpu([sam3_model])
@@ -645,16 +625,10 @@ class SAX_Bridge_Segmenter_Multi:
                 ).squeeze(1)
             result_mask = (result_mask * m.cpu()).clamp(0.0, 1.0)
 
-        # ── パイプラインの更新 ──────────────────────────────────────────────
-        if pipe is not None:
-            out_pipe = pipe.copy()
-        else:
-            out_pipe = {}
-
         gc.collect()
         comfy.model_management.soft_empty_cache()
 
-        return (out_pipe, result_mask)
+        return (result_mask,)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
