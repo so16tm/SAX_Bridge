@@ -13,6 +13,10 @@
  *   rowLayout(W, flags)
  *   showParamPopup(screenX, screenY, currentVal, cfg, onCommit)
  *   makeItemListWidget(node, spec)
+ *
+ * DOM UI ヘルパー:
+ *   h(tag, css, text)
+ *   showDialog({ title, width, maxHeight, gap, className, build })
  */
 
 import { app } from "../../scripts/app.js";
@@ -376,6 +380,55 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
         if (!closeEnabled) return;
         if (e.target === overlay) close();
     });
+}
+
+// ---------------------------------------------------------------------------
+// DOM UI ヘルパー
+// ---------------------------------------------------------------------------
+
+/** DOM 要素ファクトリ。tag・style・text を一括指定して要素を生成する。 */
+export function h(tag, css = "", text = "") {
+    const e = document.createElement(tag);
+    if (css)  e.style.cssText = css;
+    if (text) e.textContent   = text;
+    return e;
+}
+
+/**
+ * ComfyUI スタイルのモーダルダイアログを表示する。
+ * build(dlg, close) コールバックでタイトル行以降のコンテンツを構築する。
+ *
+ * @param {{
+ *   title:      string,
+ *   width?:     number,   // デフォルト 480
+ *   maxHeight?: string,   // デフォルト "76vh"
+ *   gap?:       number,   // dlg の gap (px)。デフォルト 8
+ *   className?: string,   // overlay に付与するクラス名（重複除去用）
+ *   build:      (dlg: HTMLElement, close: () => void) => void,
+ * }} opts
+ * @returns {() => void} close 関数
+ */
+export function showDialog({ title, width = 480, maxHeight = "76vh", gap = 8, className, build }) {
+    const overlay = h("div",
+        "position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:10000;" +
+        "display:flex;align-items:center;justify-content:center;");
+    if (className) overlay.classList.add(className);
+
+    const dlg = h("div",
+        `background:var(--comfy-menu-bg,#171718);border:1px solid var(--border-color,#4e4e4e);` +
+        `border-radius:8px;padding:16px;width:${width}px;max-height:${maxHeight};` +
+        `display:flex;flex-direction:column;color:var(--input-text,#ddd);font:13px/1.5 sans-serif;gap:${gap}px;`);
+
+    dlg.appendChild(h("div", "font:bold 14px sans-serif;color:var(--fg-color,#fff);flex-shrink:0;", title));
+
+    const close = () => overlay.remove();
+    build(dlg, close);
+
+    overlay.appendChild(dlg);
+    overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+
+    return close;
 }
 
 // ---------------------------------------------------------------------------

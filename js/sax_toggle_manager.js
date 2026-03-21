@@ -7,6 +7,17 @@ import {
     itemKey,
     showPicker,
 } from "./sax_picker.js";
+import {
+    PAD, ROW_H,
+    rrect, txt, inX,
+    h,
+    showDialog,
+    getComfyTheme,
+    drawPill,
+    drawMoveArrows,
+    drawDeleteBtn,
+    rowLayout,
+} from "./sax_ui_base.js";
 
 const EXT_NAME   = "SAX.ToggleManager";
 const NODE_TYPE  = "SAX_Bridge_Toggle_Manager";
@@ -14,8 +25,6 @@ const WIDGET_CFG = "config_json";
 
 const MODE_ACTIVE = 0;
 const MODE_BYPASS = 4;
-const PAD   = 8;
-const ROW_H = 24;
 
 // ---------------------------------------------------------------------------
 // Config helpers
@@ -48,23 +57,18 @@ function matchGroup(g, item) {
 }
 
 // グループを exact → pos優先 → title優先 の順で特定する
-// - 移動された（title が同じ、pos が変わった）→ title でマッチして pos を更新
-// - 名称変更された（pos が同じ、title が変わった）→ pos でマッチして title を更新
 function findGroup(item) {
     const groups = app.graph._groups ?? [];
     if (item.pos == null) return groups.find(g => g.title === item.title) ?? null;
-    // 1. exact: pos と title 両方一致
     const exact = groups.find(g =>
         g.title === item.title &&
         Math.abs(g.pos[0] - item.pos[0]) <= 8 && Math.abs(g.pos[1] - item.pos[1]) <= 8
     );
     if (exact) return exact;
-    // 2. pos-primary: 名称変更されたケース
     const byPos = groups.find(g =>
         Math.abs(g.pos[0] - item.pos[0]) <= 8 && Math.abs(g.pos[1] - item.pos[1]) <= 8
     );
     if (byPos) return byPos;
-    // 3. title-primary: 移動されたケース
     return groups.find(g => g.title === item.title) ?? null;
 }
 
@@ -79,12 +83,12 @@ function itemLabel(item) {
 }
 
 function itemColor(item, on) {
-    if (!on) return "#555";
+    if (!on) return getComfyTheme().contentBg;
     if (item.type === "group")              return "#8bc";
     if (item.type === "node" && item.isSub) return "#c8b";
     if (item.type === "node")               return "#bc8";
     if (item.type === "widget")             return "#cb8";
-    return "#ccc";
+    return getComfyTheme().inputText;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,11 +104,9 @@ function applyScene(config) {
 
 // グループ内のノードを取得する（_children が空の場合はバウンディングボックスで判定）
 function getNodesInGroup(group) {
-    // _children (Set) が使えるなら優先する
     if (group._children?.size > 0) {
         return Array.from(group._children).filter(c => c?.id != null && typeof c.mode === "number");
     }
-    // フォールバック: グループの矩形内に pos があるノードを返す
     const x1 = group.pos[0];
     const y1 = group.pos[1];
     const x2 = x1 + group.size[0];
@@ -159,45 +161,6 @@ function snapshotCurrentState(config) {
 }
 
 // ---------------------------------------------------------------------------
-// Canvas drawing helpers
-// ---------------------------------------------------------------------------
-
-function rrect(ctx, x, y, w, h, r, fill, stroke) {
-    ctx.beginPath();
-    if (ctx.roundRect) {
-        ctx.roundRect(x, y, w, h, r);
-    } else {
-        // roundRect 非対応ブラウザ向けフォールバック
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.arcTo(x + w, y,     x + w, y + r,     r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-        ctx.lineTo(x + r, y + h);
-        ctx.arcTo(x,     y + h, x,     y + h - r, r);
-        ctx.lineTo(x,     y + r);
-        ctx.arcTo(x,     y,     x + r, y,         r);
-        ctx.closePath();
-    }
-    if (fill)  { ctx.fillStyle = fill;     ctx.fill();   }
-    if (stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
-}
-
-function txt(ctx, s, x, y, color, align = "left", size = 11) {
-    ctx.font = `${size}px sans-serif`;
-    ctx.fillStyle = color;
-    ctx.textAlign = align;
-    ctx.textBaseline = "middle";
-    ctx.fillText(s, x, y);
-}
-
-function inX(pos, x, w) { return pos[0] >= x && pos[0] <= x + w; }
-
-// ---------------------------------------------------------------------------
-// Back navigation — state & localStorage
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // グループ自動同期（移動・名称変更をインメモリ→config に遅延反映）
 // ---------------------------------------------------------------------------
 
@@ -205,8 +168,6 @@ let _groupSyncTimer = null;
 let _groupSyncNode  = null;
 
 function syncGroupsToConfig(node) {
-    // ウィジェットの closed-over item は draw() で最新化済み
-    // getConfig の stale 値を上書きしてから saveConfig する
     const cfg      = getConfig(node);
     const toggleWs = (node.widgets ?? []).filter(w => w.type === "__sax_toggle");
     let changed    = false;
@@ -248,6 +209,10 @@ function scheduleGroupSync(node) {
     }, 500);
 }
 
+// ---------------------------------------------------------------------------
+// Back navigation — state & localStorage
+// ---------------------------------------------------------------------------
+
 const LS_BACK_POS = "sax_tm_back_pos";
 
 const BACK_POS_STYLES = {
@@ -260,9 +225,9 @@ const BACK_POS_STYLES = {
 };
 
 let _backBtn          = null;
-let _managerNode      = null;  // 最後に作成／使用された Manager ノードへの参照
-let _sceneFlashUntil  = 0;     // シーン切り替えフラッシュの終了時刻 (ms)
-let _capturingBackKey = false; // Back キーキャプチャ中フラグ
+let _managerNode      = null;
+let _sceneFlashUntil  = 0;
+let _capturingBackKey = false;
 
 function exitToRootGraph() {
     try {
@@ -276,7 +241,6 @@ function exitToRootGraph() {
         }
         app.canvas.graph = app.graph;
 
-        // _subgraph が残るとサブグラフの ( ) 接続ポイントが描画され続ける
         app.canvas._subgraph             = null;
         app.canvas.selected_group        = null;
         app.canvas.connecting_node       = null;
@@ -293,7 +257,6 @@ function exitToRootGraph() {
 
 function goBack() {
     exitToRootGraph();
-    // 2フレーム待機してサブグラフ描画を完全にクリアしてからパン
     requestAnimationFrame(() => {
         app.canvas.setDirty(true, true);
         requestAnimationFrame(() => {
@@ -321,11 +284,11 @@ function showBackButton() {
     btn.textContent = "↩ Back";
     btn.style.cssText =
         `position:fixed;${posStyle}z-index:9999;padding:9px 22px;` +
-        `background:#1a2a3e;border:2px solid #4a8acc;border-radius:6px;` +
-        `color:#7ac8ff;cursor:pointer;font-size:13px;font-family:sans-serif;font-weight:bold;` +
-        `box-shadow:0 2px 16px rgba(74,138,204,.4);`;
-    btn.addEventListener("mouseenter", () => { btn.style.background = "#1e3350"; });
-    btn.addEventListener("mouseleave", () => { btn.style.background = "#1a2a3e"; });
+        `background:var(--comfy-menu-bg,#171718);border:1px solid var(--border-color,#4e4e4e);border-radius:6px;` +
+        `color:var(--input-text,#ddd);cursor:pointer;font-size:13px;font-family:sans-serif;font-weight:bold;` +
+        `box-shadow:0 2px 16px rgba(0,0,0,.5);`;
+    btn.addEventListener("mouseenter", () => { btn.style.background = "var(--comfy-menu-secondary-bg,#303030)"; });
+    btn.addEventListener("mouseleave", () => { btn.style.background = "var(--comfy-menu-bg,#171718)"; });
     btn.addEventListener("click", goBack);
     document.body.appendChild(btn);
     _backBtn = btn;
@@ -355,7 +318,7 @@ function navigateToItem(item) {
 
 // キーバインドをモジュールレベルで登録（setup() の呼び出しタイミングに依存しない）
 document.addEventListener("keydown", (e) => {
-    if (_capturingBackKey) return;  // キャプチャ中は Back キー処理をスキップ
+    if (_capturingBackKey) return;
     const tag = e.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
     const mgr = _managerNode ?? (app.graph._nodes ?? []).find(n => n.comfyClass === NODE_TYPE);
@@ -367,7 +330,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// Picker / Rescan logic (shared between scene widget mouse handler)
+// Picker / Rescan logic
 // ---------------------------------------------------------------------------
 
 function runAdd(node) {
@@ -439,12 +402,9 @@ function runRescan(node) {
             const g = findGroup(item);
             if (g) {
                 const oldKey = itemKey(item);
-                // 名称変更への追従: pos で特定された場合に title を更新
                 item.title = g.title;
-                // 移動への追従: title で特定された場合に pos を更新
                 if (item.pos != null) item.pos = [g.pos[0], g.pos[1]];
                 const newKey = itemKey(item);
-                // scene キーにグループ title が含まれるため、変化があればキーを移行する
                 if (oldKey !== newKey) {
                     for (const s of Object.values(config.scenes)) {
                         if (oldKey in s) { s[newKey] = s[oldKey]; delete s[oldKey]; }
@@ -469,13 +429,6 @@ function runRescan(node) {
 //
 //  [ [◀] [シーン名（中央揃え）] [▶] [⚙] ]   [ [+ Node] [⟳ Rescan] ]
 //   ←────────── scene box ──────────────→   ←── node box ──→
-//
-// node box: 5 + [+Node 52] + 4 + [Rescan 58] + 5 = 124px (固定)
-// scene box: 残り幅
-//   ◀: sceneBX+4, w=18
-//   ▶: gearX-4-18, w=18
-//   ⚙: sceneBX+sceneBW-4-24, w=24
-//   シーン名: ◀右 ~ ▶左 の中央揃え
 // ---------------------------------------------------------------------------
 
 function makeSceneWidget(node) {
@@ -488,13 +441,13 @@ function makeSceneWidget(node) {
         const nodeBX  = W - PAD - NODE_BW;
         const sceneBX = PAD;
         const sceneBW = nodeBX - BOX_GAP - sceneBX;
-        const prevX   = sceneBX + 4;                    // [◀] w=18
-        const gearX   = sceneBX + sceneBW - 4 - 24;    // [⚙] w=24
-        const nextX   = gearX - 4 - 18;                // [▶] w=18
-        const nameX   = prevX + 18 + 4;                // シーン名 開始
-        const nameW   = nextX - 4 - nameX;             // シーン名 幅
-        const addX    = nodeBX + 5;                     // [+ Node] w=52
-        const rescanX = addX + 52 + 4;                  // [⟳ Rescan] w=58
+        const prevX   = sceneBX + 4;
+        const gearX   = sceneBX + sceneBW - 4 - 24;
+        const nextX   = gearX - 4 - 18;
+        const nameX   = prevX + 18 + 4;
+        const nameW   = nextX - 4 - nameX;
+        const addX    = nodeBX + 5;
+        const rescanX = addX + 52 + 4;
         return { sceneBX, sceneBW, nodeBX, prevX, nextX, gearX, nameX, nameW, addX, rescanX };
     };
 
@@ -502,9 +455,10 @@ function makeSceneWidget(node) {
         name: "__sax_scene",
         type: "__sax_scene",
         value: null,
-        computeSize: (W) => [W, H],
+        computeSize: (W) => [W, H - 4],
 
         draw(ctx, node, W, y) {
+            const t      = getComfyTheme();
             const config = getConfig(node);
             const scenes = Object.keys(config.scenes);
             const idx    = scenes.indexOf(config.currentScene);
@@ -512,18 +466,18 @@ function makeSceneWidget(node) {
             const p      = bp(W);
 
             // ── scene box ──
-            rrect(ctx, p.sceneBX, y + 2, p.sceneBW, H - 4, 4, "#1e1e32", "#4a4a7a");
+            rrect(ctx, p.sceneBX, y + 2, p.sceneBW, H - 4, 4, t.inputBg, t.contentBg);
 
             // [◀]
             const canPrev = idx > 0;
             rrect(ctx, p.prevX, y + 5, 18, H - 10, 3,
-                canPrev ? "#3a3a5a" : "#28283a",
-                canPrev ? "#5a5a8a" : "#383848");
-            txt(ctx, "◀", p.prevX + 9, midY, canPrev ? "#aaa" : "#444", "center", 9);
+                canPrev ? t.menuSecBg : t.menuBg,
+                canPrev ? t.border    : t.menuSecBg);
+            txt(ctx, "◀", p.prevX + 9, midY, canPrev ? t.inputText : t.contentBg, "center", 9);
 
             // シーン名（◀▶の間に中央揃え・クリップ）
             const flashing   = Date.now() < _sceneFlashUntil;
-            const sceneColor = flashing ? "#ffe066" : "#fff";
+            const sceneColor = flashing ? "#ffe066" : t.fg;
             ctx.save();
             ctx.beginPath();
             ctx.rect(p.nameX, y + 2, p.nameW, H - 4);
@@ -535,24 +489,24 @@ function makeSceneWidget(node) {
             // [▶]
             const canNext = idx < scenes.length - 1;
             rrect(ctx, p.nextX, y + 5, 18, H - 10, 3,
-                canNext ? "#3a3a5a" : "#28283a",
-                canNext ? "#5a5a8a" : "#383848");
-            txt(ctx, "▶", p.nextX + 9, midY, canNext ? "#aaa" : "#444", "center", 9);
+                canNext ? t.menuSecBg : t.menuBg,
+                canNext ? t.border    : t.menuSecBg);
+            txt(ctx, "▶", p.nextX + 9, midY, canNext ? t.inputText : t.contentBg, "center", 9);
 
             // [⚙]
-            rrect(ctx, p.gearX, y + 5, 24, H - 10, 3, "#2a2a2a", "#4a4a4a");
-            txt(ctx, "⚙", p.gearX + 12, midY, "#999", "center", 12);
+            rrect(ctx, p.gearX, y + 5, 24, H - 10, 3, t.menuSecBg, t.border);
+            txt(ctx, "⚙", p.gearX + 12, midY, t.inputText, "center", 12);
 
             // ── node box ──
-            rrect(ctx, p.nodeBX, y + 2, NODE_BW, H - 4, 4, "#1e2a1e", "#4a7a4a");
+            rrect(ctx, p.nodeBX, y + 2, NODE_BW, H - 4, 4, t.inputBg, t.contentBg);
 
             // [+ Node]
-            rrect(ctx, p.addX, y + 5, 52, H - 10, 3, "#1a3a1a", "#2a5a2a");
-            txt(ctx, "+ Node", p.addX + 26, midY, "#7d7", "center", 10);
+            rrect(ctx, p.addX, y + 5, 52, H - 10, 3, t.menuSecBg, t.border);
+            txt(ctx, "+ Node", p.addX + 26, midY, t.inputText, "center", 10);
 
             // [⟳ Rescan]
-            rrect(ctx, p.rescanX, y + 5, 58, H - 10, 3, "#1a1a3a", "#2a2a5a");
-            txt(ctx, "⟳ Rescan", p.rescanX + 29, midY, "#77d", "center", 10);
+            rrect(ctx, p.rescanX, y + 5, 58, H - 10, 3, t.menuSecBg, t.border);
+            txt(ctx, "⟳ Rescan", p.rescanX + 29, midY, t.inputText, "center", 10);
         },
 
         mouse(event, pos_, node) {
@@ -582,17 +536,10 @@ function makeSceneWidget(node) {
 }
 
 // ---------------------------------------------------------------------------
-// Scene management popup  (名称変更・削除・並び替え・Save State)
+// Scene management popup
 // ---------------------------------------------------------------------------
 
 function showSceneManager(node) {
-    const h = (tag, css = "", text = "") => {
-        const e = document.createElement(tag);
-        if (css)  e.style.cssText = css;
-        if (text) e.textContent   = text;
-        return e;
-    };
-
     const makeBtn = (label, bg, border, color, fn) => {
         const b = h("button",
             `padding:2px 8px;background:${bg};border:1px solid ${border};border-radius:3px;color:${color};cursor:pointer;font-size:11px;flex-shrink:0;`);
@@ -601,12 +548,12 @@ function showSceneManager(node) {
         return b;
     };
 
-    const overlay = h("div",
-        "position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:10000;display:flex;align-items:center;justify-content:center;");
-    const dlg = h("div",
-        "background:#1a1a2e;border:1px solid #4a4a6a;border-radius:8px;padding:16px;width:400px;max-height:64vh;display:flex;flex-direction:column;color:#ccc;font:13px/1.5 sans-serif;gap:10px;");
-
-    dlg.appendChild(h("div", "font:bold 14px sans-serif;color:#fff;", "Scene Manager"));
+    showDialog({
+        title:     "Scene Manager",
+        width:     400,
+        maxHeight: "64vh",
+        gap:       10,
+        build(dlg, close) {
 
     const list = h("div", "overflow-y:auto;flex:1;");
     dlg.appendChild(list);
@@ -619,43 +566,52 @@ function showSceneManager(node) {
         for (let i = 0; i < scenes.length; i++) {
             const name = scenes[i];
             const isCurrent = name === config.currentScene;
-            const row  = h("div",
-                "display:flex;align-items:center;gap:6px;padding:5px 2px;border-bottom:1px solid #2a2a3a;");
+            const row = h("div",
+                "display:flex;align-items:center;gap:6px;padding:5px 2px;" +
+                "border-bottom:1px solid var(--border-color,#4e4e4e);");
 
-            const lbl = h("span", `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isCurrent ? "#fff" : "#aaa"};${isCurrent ? "font-weight:bold;" : ""}`);
+            const lbl = h("span",
+                `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` +
+                `color:${isCurrent ? "var(--fg-color,#fff)" : "var(--input-text,#ddd)"};` +
+                `${isCurrent ? "font-weight:bold;" : ""}`);
             lbl.textContent = name;
             row.appendChild(lbl);
 
             // ✎ Rename
-            row.appendChild(makeBtn("✎", "#2a2a3a", "#4a4a6a", "#aaa", () => {
-                const cfg     = getConfig(node);
-                const newName = prompt("Rename scene:", name);
-                if (!newName?.trim() || newName.trim() === name) return;
-                if (cfg.scenes[newName.trim()]) { alert("A scene with that name already exists."); return; }
-                const newScenes = {};
-                for (const k of Object.keys(cfg.scenes))
-                    newScenes[k === name ? newName.trim() : k] = cfg.scenes[k];
-                cfg.scenes = newScenes;
-                if (cfg.currentScene === name) cfg.currentScene = newName.trim();
-                saveConfig(node, cfg); rebuildUI(node); renderList();
-            }));
+            row.appendChild(makeBtn("✎",
+                "var(--comfy-input-bg,#222)", "var(--content-bg,#4e4e4e)", "var(--input-text,#ddd)", () => {
+                    const cfg     = getConfig(node);
+                    const newName = prompt("Rename scene:", name);
+                    if (!newName?.trim() || newName.trim() === name) return;
+                    if (cfg.scenes[newName.trim()]) { alert("A scene with that name already exists."); return; }
+                    const newScenes = {};
+                    for (const k of Object.keys(cfg.scenes))
+                        newScenes[k === name ? newName.trim() : k] = cfg.scenes[k];
+                    cfg.scenes = newScenes;
+                    if (cfg.currentScene === name) cfg.currentScene = newName.trim();
+                    saveConfig(node, cfg); rebuildUI(node); renderList();
+                }));
 
             // ▲ Move up
-            row.appendChild(makeBtn("▲", i > 0 ? "#2a2a3a" : "#1e1e2e", i > 0 ? "#4a4a6a" : "#2a2a2a", i > 0 ? "#aaa" : "#444", () => {
-                if (i === 0) return;
-                const cfg  = getConfig(node);
-                const keys = Object.keys(cfg.scenes);
-                [keys[i - 1], keys[i]] = [keys[i], keys[i - 1]];
-                const ns = {}; for (const k of keys) ns[k] = cfg.scenes[k];
-                cfg.scenes = ns;
-                saveConfig(node, cfg); rebuildUI(node); renderList();
-            }));
+            row.appendChild(makeBtn("▲",
+                i > 0 ? "var(--comfy-input-bg,#222)"    : "var(--comfy-menu-bg,#171718)",
+                i > 0 ? "var(--content-bg,#4e4e4e)"     : "var(--border-color,#4e4e4e)",
+                i > 0 ? "var(--input-text,#ddd)"         : "var(--content-bg,#4e4e4e)",
+                () => {
+                    if (i === 0) return;
+                    const cfg  = getConfig(node);
+                    const keys = Object.keys(cfg.scenes);
+                    [keys[i - 1], keys[i]] = [keys[i], keys[i - 1]];
+                    const ns = {}; for (const k of keys) ns[k] = cfg.scenes[k];
+                    cfg.scenes = ns;
+                    saveConfig(node, cfg); rebuildUI(node); renderList();
+                }));
 
             // ▼ Move down
             row.appendChild(makeBtn("▼",
-                i < scenes.length - 1 ? "#2a2a3a" : "#1e1e2e",
-                i < scenes.length - 1 ? "#4a4a6a" : "#2a2a2a",
-                i < scenes.length - 1 ? "#aaa"    : "#444",
+                i < scenes.length - 1 ? "var(--comfy-input-bg,#222)"    : "var(--comfy-menu-bg,#171718)",
+                i < scenes.length - 1 ? "var(--content-bg,#4e4e4e)"     : "var(--border-color,#4e4e4e)",
+                i < scenes.length - 1 ? "var(--input-text,#ddd)"         : "var(--content-bg,#4e4e4e)",
                 () => {
                     if (i >= scenes.length - 1) return;
                     const cfg  = getConfig(node);
@@ -666,12 +622,12 @@ function showSceneManager(node) {
                     saveConfig(node, cfg); rebuildUI(node); renderList();
                 }));
 
-            // ✕ Delete (disabled if only 1)
+            // ✕ Delete (disabled if only 1 scene)
             const canDel = scenes.length > 1;
             row.appendChild(makeBtn("✕",
-                canDel ? "#3a1a1a" : "#1e1e2e",
-                canDel ? "#6a2a2a" : "#2a2a2a",
-                canDel ? "#d77"    : "#444",
+                canDel ? "#3a1a1a"                      : "var(--comfy-menu-bg,#171718)",
+                canDel ? "#6a2a2a"                      : "var(--border-color,#4e4e4e)",
+                canDel ? "#d77"                         : "var(--content-bg,#4e4e4e)",
                 () => {
                     if (!canDel) return;
                     if (!confirm(`Delete scene "${name}"?`)) return;
@@ -693,7 +649,8 @@ function showSceneManager(node) {
     const btnRow = h("div", "display:flex;gap:8px;justify-content:space-between;flex-shrink:0;");
 
     const newBtn = h("button",
-        "padding:6px 12px;background:#1a3a1a;border:1px solid #2a5a2a;border-radius:4px;color:#7d7;cursor:pointer;font-size:12px;");
+        "padding:6px 12px;background:var(--comfy-input-bg,#222);border:1px solid var(--content-bg,#4e4e4e);" +
+        "border-radius:4px;color:var(--input-text,#ddd);cursor:pointer;font-size:12px;");
     newBtn.textContent = "+ New Scene";
     newBtn.addEventListener("click", () => {
         const cfg  = getConfig(node);
@@ -705,23 +662,29 @@ function showSceneManager(node) {
     });
 
     const closeBtn = h("button",
-        "padding:6px 14px;background:#2a2a3a;border:1px solid #555;border-radius:4px;color:#ccc;cursor:pointer;font-size:12px;");
+        "padding:6px 14px;background:var(--comfy-input-bg,#222);border:1px solid var(--content-bg,#4e4e4e);" +
+        "border-radius:4px;color:var(--input-text,#ddd);cursor:pointer;font-size:12px;");
     closeBtn.textContent = "Close";
-    closeBtn.addEventListener("click", () => overlay.remove());
+    closeBtn.addEventListener("click", close);
 
     btnRow.appendChild(newBtn);
     btnRow.appendChild(closeBtn);
     dlg.appendChild(btnRow);
 
     // ── Settings section ──
-    const sep = h("div", "border-top:1px solid #2a2a3a;padding-top:10px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;");
-    sep.appendChild(h("div", "font:bold 11px sans-serif;color:#666;letter-spacing:.5px;", "SETTINGS"));
+    const sep = h("div",
+        "border-top:1px solid var(--border-color,#4e4e4e);padding-top:10px;flex-shrink:0;" +
+        "display:flex;flex-direction:column;gap:6px;");
+    sep.appendChild(h("div",
+        "font:bold 11px sans-serif;color:var(--content-bg,#4e4e4e);letter-spacing:.5px;", "SETTINGS"));
 
     // Back button position
     const posRow = h("div", "display:flex;align-items:center;gap:8px;");
-    posRow.appendChild(h("span", "font-size:12px;color:#aaa;flex:1;", "Back button"));
+    posRow.appendChild(h("span", "font-size:12px;color:var(--input-text,#ddd);flex:1;", "Back button"));
     const posSelect = document.createElement("select");
-    posSelect.style.cssText = "background:#2a2a3a;border:1px solid #4a4a6a;border-radius:3px;color:#ccc;font-size:12px;padding:2px 6px;cursor:pointer;";
+    posSelect.style.cssText =
+        "background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#4e4e4e);" +
+        "border-radius:3px;color:var(--input-text,#ddd);font-size:12px;padding:2px 6px;cursor:pointer;";
     const POS_OPTIONS = [
         ["top-left",      "Top Left"],
         ["top-middle",    "Top Middle"],
@@ -744,14 +707,16 @@ function showSceneManager(node) {
 
     // Back key
     const keyRow = h("div", "display:flex;align-items:center;gap:8px;");
-    keyRow.appendChild(h("span", "font-size:12px;color:#aaa;flex:1;", "Back key"));
+    keyRow.appendChild(h("span", "font-size:12px;color:var(--input-text,#ddd);flex:1;", "Back key"));
     const curKey     = getConfig(node).backKey ?? "m";
     const keyDisplay = h("span",
-        "padding:2px 10px;background:#2a2a3a;border:1px solid #4a4a6a;border-radius:3px;" +
-        "color:#ccc;font-size:12px;min-width:28px;text-align:center;font-family:monospace;",
+        "padding:2px 10px;background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#4e4e4e);" +
+        "border-radius:3px;color:var(--input-text,#ddd);font-size:12px;min-width:28px;" +
+        "text-align:center;font-family:monospace;",
         curKey.toUpperCase());
     const keyEditBtn = h("button",
-        "padding:2px 8px;background:#2a2a3a;border:1px solid #4a4a6a;border-radius:3px;color:#aaa;cursor:pointer;font-size:11px;",
+        "padding:2px 8px;background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#4e4e4e);" +
+        "border-radius:3px;color:var(--input-text,#ddd);cursor:pointer;font-size:11px;",
         "✎");
     keyEditBtn.addEventListener("click", () => {
         keyDisplay.textContent = "…";
@@ -767,7 +732,7 @@ function showSceneManager(node) {
             } else {
                 keyDisplay.textContent = (getConfig(node).backKey ?? "m").toUpperCase();
             }
-            keyDisplay.style.color = "#ccc";
+            keyDisplay.style.color = "var(--input-text,#ddd)";
             _capturingBackKey = false;
             document.removeEventListener("keydown", capture, true);
         };
@@ -779,9 +744,8 @@ function showSceneManager(node) {
 
     dlg.appendChild(sep);
 
-    overlay.appendChild(dlg);
-    overlay.addEventListener("click", e => { if (e.target === overlay) overlay.remove(); });
-    document.body.appendChild(overlay);
+        }, // build
+    }); // showDialog
 }
 
 // ---------------------------------------------------------------------------
@@ -789,39 +753,36 @@ function showSceneManager(node) {
 // ---------------------------------------------------------------------------
 
 function makeToggleWidget(node, item, index) {
-    const H = ROW_H + 2;
+    const H = ROW_H;
     return {
         name:  `__sax_toggle_${index}`,
         type:  "__sax_toggle",
         value: null,
         item,
         _y: 0,
-        computeSize: (W) => [W, H],
+        computeSize: (W) => [W, H - 4],
 
         draw(ctx, node, W, y) {
             this._y = y;
+            const t      = getComfyTheme();
             const config = getConfig(node);
             const scene  = config.scenes[config.currentScene] ?? {};
             const on     = scene[itemKey(item)] ?? true;
             const midY   = y + H / 2;
             const total  = config.managed.length;
+            const layout = rowLayout(W, { hasToggle: true, hasMoveUpDown: true, hasDelete: true });
 
-            rrect(ctx, PAD, y + 1, W - PAD * 2, H - 2, 3,
-                index % 2 === 0 ? "#1c1c2c" : "#20202e", null);
+            // 行背景：暗いカプセル + 明るい枠線
+            rrect(ctx, PAD, y + 2, W - PAD * 2, H - 4, (H - 4) / 2,
+                t.inputBg, t.contentBg);
 
             // Toggle pill
-            const pX = PAD + 5, pY = y + 7, pW = 26, pH = 12;
-            rrect(ctx, pX, pY, pW, pH, 6,
-                on ? "#1e5a32" : "#5a1e1e",
-                on ? "#2a8a4a" : "#8a2a2a");
-            const kX = on ? pX + pW - 11 : pX + 2;
-            rrect(ctx, kX, pY + 2, 8, 8, 4, "#fff", null);
+            drawPill(ctx, layout.pill.x, midY, on);
 
-            // Label（クリックでナビゲート可能。右端に ⌖ を表示）
-            const labelEndX = W - PAD - 48;
+            // Label（クリックでナビゲート可能）
             ctx.save();
             ctx.beginPath();
-            ctx.rect(PAD + 38, y, labelEndX - (PAD + 38), H);
+            ctx.rect(layout.contentX, y, layout.contentW, H);
             ctx.clip();
             // ライブタイトル取得（毎フレームグラフから直接参照することで名称変更に即追従）
             let displayItem = item;
@@ -835,7 +796,6 @@ function makeToggleWidget(node, item, index) {
                 const liveGroup = findGroup(item);
                 if (liveGroup) {
                     displayItem = { ...item, title: liveGroup.title };
-                    // 乖離を検出したら closed-over item を即時更新して次フレームの findGroup に備える
                     const posChanged = item.pos != null && (
                         Math.abs(liveGroup.pos[0] - item.pos[0]) > 8 ||
                         Math.abs(liveGroup.pos[1] - item.pos[1]) > 8
@@ -855,18 +815,16 @@ function makeToggleWidget(node, item, index) {
                 ).length > 1;
                 if (isDupe) label += `  (${Math.round(item.pos[0])}, ${Math.round(item.pos[1])})`;
             }
-            txt(ctx, label, PAD + 38, midY, itemColor(item, on), "left", 11);
+            txt(ctx, label, layout.contentX + 4, midY, itemColor(item, on), "left", 11);
+            // ⌖ ナビゲートヒント（コンテンツ右端）
+            txt(ctx, "⌖", layout.contentX + layout.contentW - 2, midY, t.contentBg, "right", 10);
             ctx.restore();
-            txt(ctx, "⌖", labelEndX + 4, midY, "#444", "left", 10);
 
-            // ▲ / ▼ (stacked in right area)
-            const upOk   = index > 0;
-            const downOk = index < total - 1;
-            txt(ctx, "▲", W - PAD - 32, y + H / 4,     upOk   ? "#888" : "#383838", "center", 9);
-            txt(ctx, "▼", W - PAD - 32, y + H * 3 / 4, downOk ? "#888" : "#383838", "center", 9);
+            // ▲ / ▼
+            drawMoveArrows(ctx, layout.move.x, y, H, index > 0, index < total - 1);
 
             // ✕
-            txt(ctx, "✕", W - PAD - 10, midY, "#666", "center", 10);
+            drawDeleteBtn(ctx, layout.del.x, midY);
         },
 
         mouse(event, pos, node) {
@@ -874,9 +832,10 @@ function makeToggleWidget(node, item, index) {
             const W      = node.size[0];
             const config = getConfig(node);
             const total  = config.managed.length;
+            const layout = rowLayout(W, { hasToggle: true, hasMoveUpDown: true, hasDelete: true });
 
             // ✕ remove
-            if (inX(pos, W - PAD - 20, 20)) {
+            if (inX(pos, layout.del.x, layout.del.w)) {
                 const key = itemKey(item);
                 config.managed.splice(index, 1);
                 for (const s of Object.values(config.scenes)) delete s[key];
@@ -884,10 +843,10 @@ function makeToggleWidget(node, item, index) {
                 return true;
             }
 
-            // ▲▼ move (X: W-PAD-44 to W-PAD-22)
-            if (inX(pos, W - PAD - 44, 22)) {
-                const relY = pos[1] - this._y;
-                const moveUp = relY < (ROW_H + 2) / 2;
+            // ▲▼ move
+            if (inX(pos, layout.move.x, layout.move.w)) {
+                const relY   = pos[1] - this._y;
+                const moveUp = relY < H / 2;
                 if (moveUp && index > 0) {
                     [config.managed[index - 1], config.managed[index]] =
                     [config.managed[index],     config.managed[index - 1]];
@@ -900,14 +859,8 @@ function makeToggleWidget(node, item, index) {
                 return true;
             }
 
-            // ラベルエリアクリック → ナビゲート
-            if (inX(pos, PAD + 38, W - PAD - 48 - (PAD + 38))) {
-                navigateToItem(item);
-                return true;
-            }
-
-            // Toggle pill
-            if (inX(pos, PAD + 3, 32)) {
+            // Toggle pill（コンテンツより先にチェック — 境界付近の重なりを回避）
+            if (inX(pos, layout.pill.x, layout.pill.w + 6)) {
                 const scene = config.scenes[config.currentScene];
                 if (!scene) return false;
                 const key    = itemKey(item);
@@ -918,6 +871,13 @@ function makeToggleWidget(node, item, index) {
                 app.graph.setDirtyCanvas(true, false);
                 return true;
             }
+
+            // ラベルエリアクリック → ナビゲート
+            if (inX(pos, layout.contentX, layout.contentW)) {
+                navigateToItem(item);
+                return true;
+            }
+
             return false;
         },
     };
@@ -965,15 +925,12 @@ app.registerExtension({
         const config = getConfig(node);
         if (config.managed.length > 0) applyScene(config);
 
-        // Manager ノードの参照を保持
         _managerNode = node;
         showBackButton();
 
-        // ノード削除時のクリーンアップ
         const origOnRemoved = node.onRemoved;
         node.onRemoved = function () {
             if (_managerNode === node) {
-                // 他に Manager ノードが残っていれば参照を切り替え、なければボタンを消す
                 const other = (app.graph._nodes ?? []).find(
                     n => n.comfyClass === NODE_TYPE && n.id !== node.id
                 );

@@ -9,6 +9,8 @@ import { app } from "../../scripts/app.js";
 import {
     PAD, ROW_H,
     txt,
+    h,
+    showDialog,
     makeItemListWidget,
     getComfyTheme,
 } from "./sax_ui_base.js";
@@ -49,121 +51,87 @@ function showLoraPicker(currentName, onSelect) {
     // 既存ピッカーを除去
     document.querySelectorAll(".__sax_lora_picker").forEach(e => e.remove());
 
-    const overlay = document.createElement("div");
-    overlay.className = "__sax_lora_picker";
-    overlay.style.cssText =
-        "position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:10000;" +
-        "display:flex;align-items:center;justify-content:center;";
+    showDialog({
+        title:     "Select LoRA",
+        width:     480,
+        className: "__sax_lora_picker",
+        build(dlg, close) {
+            const searchWrap = h("div",
+                "display:flex;align-items:center;gap:6px;" +
+                "background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#4e4e4e);" +
+                "border-radius:4px;padding:5px 10px;flex-shrink:0;");
+            const searchIcon  = h("span", "color:var(--content-bg,#4e4e4e);", "🔍");
+            const searchInput = h("input");
+            searchInput.placeholder = "Search LoRA name…";
+            searchInput.style.cssText =
+                "flex:1;background:none;border:none;outline:none;" +
+                "color:var(--input-text,#ddd);font-size:12px;";
+            searchWrap.appendChild(searchIcon);
+            searchWrap.appendChild(searchInput);
 
-    const dlg = document.createElement("div");
-    dlg.style.cssText =
-        "background:var(--comfy-menu-bg,#353535);border:1px solid var(--border-color,#4e4e4e);" +
-        "border-radius:6px;padding:16px;width:480px;max-height:76vh;" +
-        "display:flex;flex-direction:column;" +
-        "color:var(--fg-color,#fff);font:13px/1.5 sans-serif;gap:8px;";
+            const scroll = h("div", "overflow-y:auto;flex:1;");
 
-    const title = document.createElement("div");
-    title.style.cssText = "font:bold 14px sans-serif;color:var(--fg-color,#fff);";
-    title.textContent = "Select LoRA";
+            const cancelBtn = h("button",
+                "padding:6px 14px;background:var(--comfy-menu-secondary-bg,#303030);" +
+                "border:1px solid var(--border-color,#4e4e4e);" +
+                "border-radius:4px;color:var(--fg-color,#fff);cursor:pointer;font-size:12px;",
+                "Cancel");
+            cancelBtn.addEventListener("click", close);
 
-    const searchWrap = document.createElement("div");
-    searchWrap.style.cssText =
-        "display:flex;align-items:center;gap:6px;" +
-        "background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#4e4e4e);" +
-        "border-radius:4px;padding:5px 10px;flex-shrink:0;";
-    const searchIcon = document.createElement("span");
-    searchIcon.style.cssText = "color:var(--content-bg,#4e4e4e);";
-    searchIcon.textContent = "🔍";
-    const searchInput = document.createElement("input");
-    searchInput.placeholder = "Search LoRA name…";
-    searchInput.style.cssText =
-        "flex:1;background:none;border:none;outline:none;" +
-        "color:var(--input-text,#ddd);font-size:12px;";
-    searchWrap.appendChild(searchIcon);
-    searchWrap.appendChild(searchInput);
+            const btnRow = h("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
+            btnRow.appendChild(cancelBtn);
 
-    const scroll = document.createElement("div");
-    scroll.style.cssText = "overflow-y:auto;flex:1;";
+            dlg.appendChild(searchWrap);
+            dlg.appendChild(scroll);
+            dlg.appendChild(btnRow);
 
-    const btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;";
-
-    const cancelBtn = document.createElement("button");
-    cancelBtn.textContent = "Cancel";
-    cancelBtn.style.cssText =
-        "padding:6px 14px;background:var(--comfy-menu-secondary-bg,#303030);" +
-        "border:1px solid var(--border-color,#4e4e4e);" +
-        "border-radius:4px;color:var(--fg-color,#fff);cursor:pointer;font-size:12px;";
-    cancelBtn.addEventListener("click", () => overlay.remove());
-
-    btnRow.appendChild(cancelBtn);
-    dlg.appendChild(title);
-    dlg.appendChild(searchWrap);
-    dlg.appendChild(scroll);
-    dlg.appendChild(btnRow);
-    overlay.appendChild(dlg);
-    overlay.addEventListener("click", e => { if (e.target === overlay) overlay.remove(); });
-    document.body.appendChild(overlay);
-
-    // リスト描画
-    const render = (q) => {
-        scroll.innerHTML = "";
-        const lower = q.toLowerCase().trim();
-        getLoraList().then(list => {
-            const filtered = lower
-                ? list.filter(n => n.toLowerCase().includes(lower))
-                : list;
-            if (filtered.length === 0) {
-                const empty = document.createElement("div");
-                empty.style.cssText =
-                    "color:var(--content-bg,#4e4e4e);padding:20px;text-align:center;font-size:12px;";
-                empty.textContent   = "No results";
-                scroll.appendChild(empty);
-                return;
-            }
-            for (const name of filtered) {
-                const row = document.createElement("div");
-                const isCurrent = name === currentName;
-                const selectedBg = "var(--tr-odd-bg-color,#353535)";
-                const hoverBg    = "var(--content-hover-bg,#222)";
-                row.style.cssText =
-                    `display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:3px;` +
-                    `cursor:pointer;${isCurrent ? `background:${selectedBg};` : ""}`;
-                row.addEventListener("mouseenter", () => {
-                    if (!isCurrent) row.style.background = hoverBg;
+            // リスト描画
+            const render = (q) => {
+                scroll.innerHTML = "";
+                const lower = q.toLowerCase().trim();
+                getLoraList().then(list => {
+                    const filtered = lower
+                        ? list.filter(n => n.toLowerCase().includes(lower))
+                        : list;
+                    if (filtered.length === 0) {
+                        scroll.appendChild(h("div",
+                            "color:var(--content-bg,#4e4e4e);padding:20px;text-align:center;font-size:12px;",
+                            "No results"));
+                        return;
+                    }
+                    const selectedBg = "var(--tr-odd-bg-color,#353535)";
+                    const hoverBg    = "var(--content-hover-bg,#222)";
+                    for (const name of filtered) {
+                        const isCurrent = name === currentName;
+                        const row = h("div",
+                            `display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:3px;` +
+                            `cursor:pointer;${isCurrent ? `background:${selectedBg};` : ""}`);
+                        row.addEventListener("mouseenter", () => {
+                            if (!isCurrent) row.style.background = hoverBg;
+                        });
+                        row.addEventListener("mouseleave", () => {
+                            row.style.background = isCurrent ? selectedBg : "";
+                        });
+                        if (isCurrent) {
+                            row.appendChild(h("span",
+                                "color:var(--input-text,#ddd);font-size:11px;flex-shrink:0;", "✓"));
+                        }
+                        const lbl = h("span",
+                            `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` +
+                            `font-size:11px;color:${isCurrent ? "var(--fg-color,#fff)" : "var(--input-text,#ddd)"};`);
+                        lbl.textContent = name;
+                        row.appendChild(lbl);
+                        row.addEventListener("click", () => { close(); onSelect(name); });
+                        scroll.appendChild(row);
+                    }
                 });
-                row.addEventListener("mouseleave", () => {
-                    row.style.background = isCurrent ? selectedBg : "";
-                });
+            };
 
-                const lbl = document.createElement("span");
-                lbl.style.cssText =
-                    `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` +
-                    `font-size:11px;color:${isCurrent
-                        ? "var(--fg-color,#fff)"
-                        : "var(--input-text,#ddd)"};`;
-                lbl.textContent = name;
-
-                if (isCurrent) {
-                    const mark = document.createElement("span");
-                    mark.style.cssText =
-                        "color:var(--input-text,#ddd);font-size:11px;flex-shrink:0;";
-                    mark.textContent   = "✓";
-                    row.appendChild(mark);
-                }
-                row.appendChild(lbl);
-                row.addEventListener("click", () => {
-                    overlay.remove();
-                    onSelect(name);
-                });
-                scroll.appendChild(row);
-            }
-        });
-    };
-
-    render("");
-    searchInput.addEventListener("input", () => render(searchInput.value));
-    requestAnimationFrame(() => searchInput.focus());
+            render("");
+            searchInput.addEventListener("input", () => render(searchInput.value));
+            requestAnimationFrame(() => searchInput.focus());
+        },
+    });
 }
 
 // ---------------------------------------------------------------------------
