@@ -125,8 +125,9 @@ export function showPicker({
     }
 
     // ---- 折りたたみセクション ----
-    function makeSection(key, label, color, childEls, defaultCollapsed = false) {
-        const isCollapsed = collapsed.has(key) ? collapsed.get(key) : defaultCollapsed;
+    // forceOpen=true のとき collapsed Map を無視して強制展開する（検索絞り込み時に使用）
+    function makeSection(key, label, color, childEls, defaultCollapsed = false, forceOpen = false) {
+        const isCollapsed = forceOpen ? false : (collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
         const sec    = h("div", "margin-bottom:4px;");
         const header = h("div",
             `display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 4px;` +
@@ -354,6 +355,28 @@ export function showPicker({
         }
         const anchor = computeAnchor(allPosItems);
 
+        // ── ノード候補を収集（Groups より前に計算し totalFiltered に使う）──
+        const allCandidates = (app.graph._nodes ?? []).filter(n => {
+            if (n.id === excludeNodeId) return false;
+            if (filterNode && !filterNode(n)) return false;
+            if (!q) return true;
+            return (n.title || n.type || "").toLowerCase().includes(q)
+                || (n.type || "").toLowerCase().includes(q);
+        });
+
+        const allSubgraphs = sections.includes("subgraphs")
+            ? allCandidates.filter(n => n.subgraph != null) : [];
+        const allNodes     = sections.includes("nodes")
+            ? allCandidates.filter(n => n.subgraph == null) : [];
+
+        // ── 絞り込み総数を計算 → 閾値以下なら全セクション強制展開 ──
+        const AUTO_EXPAND_THRESHOLD = 3;
+        const filteredGroupCount = sections.includes("groups")
+            ? (app.graph._groups ?? []).filter(g => !q || g.title.toLowerCase().includes(q)).length
+            : 0;
+        const totalFiltered = filteredGroupCount + allSubgraphs.length + allNodes.length;
+        const forceOpen = totalFiltered <= AUTO_EXPAND_THRESHOLD;
+
         // ── Groups ──
         if (sections.includes("groups")) {
             const allGroups = app.graph._groups ?? [];
@@ -403,23 +426,9 @@ export function showPicker({
                 });
                 const lbl = `Groups (${groups.length}${groups.length < allGroups.length ? `/${allGroups.length}` : ""})`;
                 if (rows.length > 0)
-                    scroll.appendChild(makeSection("__groups", lbl, SAX_COLORS.group, rows, false));
+                    scroll.appendChild(makeSection("__groups", lbl, SAX_COLORS.group, rows, false, forceOpen));
             }
         }
-
-        // ── ノード候補を収集 ──
-        const allCandidates = (app.graph._nodes ?? []).filter(n => {
-            if (n.id === excludeNodeId) return false;
-            if (filterNode && !filterNode(n)) return false;
-            if (!q) return true;
-            return (n.title || n.type || "").toLowerCase().includes(q)
-                || (n.type || "").toLowerCase().includes(q);
-        });
-
-        const allSubgraphs = sections.includes("subgraphs")
-            ? allCandidates.filter(n => n.subgraph != null) : [];
-        const allNodes     = sections.includes("nodes")
-            ? allCandidates.filter(n => n.subgraph == null) : [];
 
         // ── Subgraphs ──
         if (allSubgraphs.length > 0) {
@@ -435,7 +444,7 @@ export function showPicker({
                 subTitleCount.set(t, (subTitleCount.get(t) ?? 0) + 1);
             }
             const rows = sortedSubs.flatMap(n => buildNodeRows(n, subTitleCount, true));
-            scroll.appendChild(makeSection("__subgraphs", `Subgraphs (${allSubgraphs.length})`, SAX_COLORS.subgraph, rows, true));
+            scroll.appendChild(makeSection("__subgraphs", `Subgraphs (${allSubgraphs.length})`, SAX_COLORS.subgraph, rows, true, forceOpen));
         }
 
         // ── Nodes（カテゴリごと）──
@@ -462,7 +471,7 @@ export function showPicker({
                 scroll.appendChild(makeSection(
                     `__node_${typeKey}`,
                     `${typeKey}  (${typeNodes.length})`,
-                    SAX_COLORS.node, rows, true
+                    SAX_COLORS.node, rows, true, forceOpen
                 ));
             }
         }
