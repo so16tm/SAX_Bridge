@@ -148,6 +148,20 @@ function showLoraPicker(currentName, onSelect) {
         return own + [...node.children.values()].reduce((s, c) => s + countFiltered(c, filterFn), 0);
     }
 
+    // アイテムを直接含むフォルダセクション数を再帰的に集計
+    // 中間フォルダ（サブフォルダのみ・直接アイテムなし）はカウントしない
+    function countSections(node, filterFn) {
+        let count = 0;
+        for (const child of node.children.values()) {
+            const directItems = filterFn
+                ? child.items.filter(filterFn).length
+                : child.items.length;
+            if (directItems > 0) count += 1;
+            count += countSections(child, filterFn);
+        }
+        return count;
+    }
+
     // current が node のサブツリー内にあるか（pathPrefix はセクションキー）
     function containsCurrent(node, pathPrefix) {
         if (!currentName) return false;
@@ -233,9 +247,12 @@ function showLoraPicker(currentName, onSelect) {
                     }
 
                     // 検索の有無に関わらず常に階層ツリーで表示
-                    // 検索時: マッチしないフォルダを非表示、全セクションを強制展開
-                    const tree = buildTree(list);
-                    const els  = renderTree(tree, "", close, filterFn, !!filterFn);
+                    // 表示されるアコーディオン（フォルダセクション）数が閾値以下なら強制展開
+                    const AUTO_EXPAND_THRESHOLD = 3;
+                    const tree         = buildTree(list);
+                    const sectionCount = countSections(tree, filterFn);
+                    const forceOpen    = sectionCount <= AUTO_EXPAND_THRESHOLD;
+                    const els          = renderTree(tree, "", close, filterFn, forceOpen);
                     if (els.length === 0) {
                         scroll.appendChild(h("div",
                             "color:var(--content-bg,#4e4e4e);padding:20px;text-align:center;font-size:12px;",

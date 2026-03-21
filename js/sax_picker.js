@@ -369,13 +369,22 @@ export function showPicker({
         const allNodes     = sections.includes("nodes")
             ? allCandidates.filter(n => n.subgraph == null) : [];
 
-        // ── 絞り込み総数を計算 → 閾値以下なら全セクション強制展開 ──
+        // ── セクション数を計算 → 閾値以下なら全セクション強制展開 ──
         const AUTO_EXPAND_THRESHOLD = 3;
         const filteredGroupCount = sections.includes("groups")
             ? (app.graph._groups ?? []).filter(g => !q || g.title.toLowerCase().includes(q)).length
             : 0;
-        const totalFiltered = filteredGroupCount + allSubgraphs.length + allNodes.length;
-        const forceOpen = totalFiltered <= AUTO_EXPAND_THRESHOLD;
+        // ノードカテゴリ数を先算出（Nodes レンダリングでも再利用）
+        const typeMap = new Map();
+        for (const n of allNodes) {
+            const k = typeGroupKey(n);
+            if (!typeMap.has(k)) typeMap.set(k, []);
+            typeMap.get(k).push(n);
+        }
+        const sectionCount = (filteredGroupCount > 0 ? 1 : 0)
+            + (allSubgraphs.length > 0 ? 1 : 0)
+            + typeMap.size;
+        const forceOpen = sectionCount <= AUTO_EXPAND_THRESHOLD;
 
         // ── Groups ──
         if (sections.includes("groups")) {
@@ -454,12 +463,7 @@ export function showPicker({
                 const t = n.title || n.type || `Node#${n.id}`;
                 nodeTitleCount.set(t, (nodeTitleCount.get(t) ?? 0) + 1);
             }
-            const typeMap = new Map();
-            for (const n of allNodes) {
-                const k = typeGroupKey(n);
-                if (!typeMap.has(k)) typeMap.set(k, []);
-                typeMap.get(k).push(n);
-            }
+            // typeMap は forceOpen 計算時に構築済み
             for (const [typeKey, typeNodes] of [...typeMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
                 const sortedTypeNodes = sortByNameThenDist(
                     typeNodes,
