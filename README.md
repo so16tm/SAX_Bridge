@@ -1,6 +1,6 @@
 # SAX_Bridge
 
-ComfyUI のワークフローを補完・拡張する統合ブリッジモジュールです。Pipe 形式によるコンテキスト管理、Wildcard/LoRA 対応プロンプト処理、高精度な Detailer、画像アップスケール、SAM3 テキストセグメンテーション、推論高速化キャッシュ、最終出力処理、マスク付きノイズ注入、複数ノードのリモート参照、シーンベースのトグル管理、Pipe スイッチを提供します。
+ComfyUI のワークフローを補完・拡張する統合ブリッジモジュールです。Pipe 形式によるコンテキスト管理、Wildcard/LoRA 対応プロンプト処理、高精度な Detailer、画像アップスケール、SAM3 テキストセグメンテーション、推論高速化キャッシュ、最終出力処理、マスク付きノイズ注入、複数ノードのリモート参照、シーンベースのトグル管理、Pipe スイッチ、バッチ比較プレビューを提供します。
 
 ## 目次
 
@@ -26,7 +26,9 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
     - [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter)
   - [Output](#output)
     - [SAX Output](#sax-output)
+    - [SAX Image Preview](#sax-image-preview)
   - [Utility](#utility)
+    - [SAX Image Collector](#sax-image-collector)
     - [SAX Cache](#sax-cache)
     - [SAX Remote Get](#sax-remote-get)
     - [SAX Toggle Manager](#sax-toggle-manager)
@@ -82,11 +84,13 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 | Node ID | 表示名 |
 |---------|--------|
 | `SAX_Bridge_Output` | [SAX Output](#sax-output) |
+| `SAX_Bridge_Image_Preview` | [SAX Image Preview](#sax-image-preview) |
 
 ### Utility
 
 | Node ID | 表示名 |
 |---------|--------|
+| `SAX_Bridge_Image_Collector` | [SAX Image Collector](#sax-image-collector) |
 | `SAX_Bridge_Cache` | [SAX Cache](#sax-cache) |
 | `SAX_Bridge_Remote_Get` | [SAX Remote Get](#sax-remote-get) |
 | `SAX_Bridge_Toggle_Manager` | [SAX Toggle Manager](#sax-toggle-manager) |
@@ -471,7 +475,74 @@ output/2026-03-20/001_20260320_153045_01.webp
 
 ---
 
+### SAX Image Preview
+
+`SAX_Bridge_Image_Preview` — IMAGE バッチを比較プレビュー表示する終端ノードです。メインビューに選択画像を並べて表示し、トグル式のサムネイルグリッドでプレビュー対象を絞り込めます。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `cell_w` | Int (64〜512) | メインビュー各セルの幅 (px)。高さはアスペクト比から自動計算 |
+| `max_cols` | Int (1〜8) | 同時表示列数。ノード幅は `cell_w × max_cols` から自動確定 |
+| `preview_quality` | Combo | プレビュー解像度。`low`=512px / `medium`=1024px / `high`=フルサイズ |
+| `images` | IMAGE (optional) | 表示対象の IMAGE バッチ。SAX Image Collector と組み合わせて使用 |
+
+**出力**: なし（終端ノード）
+
+#### UI 操作
+
+| 操作 | 動作 |
+|------|------|
+| **メインシークバー** | 選択画像数が `max_cols` を超えた場合のみ操作可能。ページをスライドで切り替え |
+| **▼ Grid トグル** | サムネイルグリッドの表示／非表示を切り替え |
+| **サムネイルクリック** | 画像の選択トグル（赤枠でハイライト）。選択画像のみメインビューに表示 |
+| **◀ / ▶ ボタン** | グリッドのページ切り替え（3行/ページ固定） |
+
+#### 表示仕様
+
+- **メインビュー**: 幅埋め contain-fit 表示（クロップなし）。セル高さは全画像の中で最も縦長なアスペクト比に合わせて自動計算されるため、横黒帯は原理的に発生しない
+- **グリッド非表示時**: 全画像を自動選択した状態でメインビューに表示
+- **サムネイル**: 32×32px 均一（長辺基準のリサイズ）
+
+#### プレビュー品質とエンコード時間の目安
+
+| quality | 長辺上限 | 2048px 画像 40 枚の目安 |
+|---------|---------|----------------------|
+| `low` | 512px | ≈ 2 秒 |
+| `medium` | 1024px | ≈ 9 秒 |
+| `high` | フルサイズ | ≈ 35 秒（品質検査用途向け） |
+
+> temp ディレクトリへの保存形式は WebP lossy (quality=85)。実行ごとに前回ファイルを自動削除するためディスク圧迫は起きない。
+
+---
+
 ## Utility
+
+### SAX Image Collector
+
+`SAX_Bridge_Image_Collector` — 複数ソースノードの IMAGE 出力を収集してバッチ結合するノードです。SAX Image Preview と組み合わせて比較プレビューワークフローを構築できます。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `slot_0` 〜 `slot_63` | ANY (optional) | 収集対象の IMAGE 出力を接続。64 スロット対応 |
+
+**出力**
+
+| 出力 | 型 | 説明 |
+|-----|-----|------|
+| `images` | IMAGE | 全スロットの画像をバッチ結合した IMAGE テンソル |
+
+#### 動作仕様
+
+- **基準サイズ**: 最初に接続された IMAGE のサイズ（H × W）を基準とする
+- **リサイズ**: 他サイズの画像はアスペクト比維持 bilinear リサイズ + letterbox/pillarbox で基準サイズに統一
+- **チャンネル正規化**: グレースケール (1ch)・RGBA (4ch) → RGB (3ch) に自動変換
+- **上限**: 収集枚数が 100 枚を超えた場合は先頭 100 枚に制限（警告ログ出力）
+
+---
 
 ### SAX Cache
 
@@ -654,6 +725,23 @@ KSampler → VAE Decode → SAX Detailer
   ↓ IMAGE
 SAX Output
 ```
+
+### バッチ比較プレビュー構成
+
+複数の生成結果（異なるシード・CFG・LoRA 等）を並べて比較するワークフロー。
+
+```
+KSampler A → VAE Decode ─┐
+KSampler B → VAE Decode ─┤ IMAGE
+KSampler C → VAE Decode ─┘
+                          ↓
+                 SAX Image Collector
+                          ↓ IMAGE（バッチ結合）
+                 SAX Image Preview
+```
+
+- グリッドでサムネイル一覧を確認 → クリックで比較対象を選択 → メインビューで並列比較
+- `preview_quality=high` でフルサイズ確認、`low` で高速プレビューを使い分け
 
 ---
 

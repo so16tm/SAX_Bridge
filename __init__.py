@@ -5,7 +5,8 @@ from .detailer import (
 from .noise import SAX_Bridge_Noise_Image, SAX_Bridge_Noise_Latent
 from .upscaler import SAX_Bridge_Upscaler
 from .cache import SAX_Bridge_Cache
-from .output import SAX_Bridge_Output
+from .output import SAX_Bridge_Output, SAX_Bridge_Image_Preview
+from .image_collector import SAX_Bridge_Image_Collector
 from .toggle_manager import SAX_Bridge_Toggle_Manager
 from .remote_get import SAX_Bridge_Remote_Get
 from .loader import SAX_Bridge_Loader_Lora
@@ -32,7 +33,11 @@ NODE_CLASS_MAPPINGS = {
     "SAX_Bridge_Cache": SAX_Bridge_Cache,
 
     # Output
-    "SAX_Bridge_Output": SAX_Bridge_Output,
+    "SAX_Bridge_Output":        SAX_Bridge_Output,
+    "SAX_Bridge_Image_Preview": SAX_Bridge_Image_Preview,
+
+    # Collector
+    "SAX_Bridge_Image_Collector": SAX_Bridge_Image_Collector,
 
     # Loader 系列（旧API）
     "SAX_Bridge_Loader_Lora": SAX_Bridge_Loader_Lora,
@@ -56,7 +61,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Noise_Latent": "SAX Latent Noise",
     "SAX_Bridge_Upscaler": "SAX Upscaler",
     "SAX_Bridge_Cache": "SAX Cache",
-    "SAX_Bridge_Output": "SAX Output",
+    "SAX_Bridge_Output":          "SAX Output",
+    "SAX_Bridge_Image_Preview":   "SAX Image Preview",
+    "SAX_Bridge_Image_Collector": "SAX Image Collector",
     "SAX_Bridge_Loader_Lora": "SAX Lora Loader",
     "SAX_Bridge_Toggle_Manager": "SAX Toggle Manager",
     "SAX_Bridge_Remote_Get": "SAX Remote Get",

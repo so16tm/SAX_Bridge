@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import datetime
+import uuid
 
 import torch
 import numpy as np
@@ -379,10 +380,118 @@ class SAX_Bridge_Output:
         return {"ui": {"filename_index": [next_index]}, "result": (result,)}
 
 
+class SAX_Bridge_Image_Preview:
+    """
+    IMAGE バッチを比較プレビュー表示する終端ノード。
+
+    SAX Image Collector と組み合わせて使用するが、単独でも動作する。
+    cell_w でメインビューの各セル幅を指定し（高さはアスペクト比から自動算出）、
+    max_cols で同時表示列数を制御する。
+    グリッドは JS 側でトグル表示でき、サムネイルクリックで比較対象を選択できる。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "cell_w": (
+                    "INT",
+                    {
+                        "default": 200,
+                        "min": 64,
+                        "max": 512,
+                        "step": 16,
+                        "tooltip": "Width (px) of each cell. Height is auto-calculated from the images' actual aspect ratios.",
+                    },
+                ),
+                "max_cols": (
+                    "INT",
+                    {
+                        "default": 3,
+                        "min": 1,
+                        "max": 8,
+                        "step": 1,
+                        "tooltip": "Number of columns in the main comparison view. Node width is set automatically from cell_w × max_cols.",
+                    },
+                ),
+                "preview_quality": (
+                    ["low", "medium", "high"],
+                    {
+                        "default": "low",
+                        "tooltip": "Preview resolution. low=512px, medium=1024px, high=full size. Higher quality increases encoding time.",
+                    },
+                ),
+            },
+            "optional": {
+                "images": ("IMAGE",),
+            },
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION     = "execute"
+    CATEGORY     = "SAX/Bridge/Output"
+    OUTPUT_NODE  = True
+    DESCRIPTION  = (
+        "Displays an IMAGE batch with a toggleable thumbnail grid for comparison. "
+        "Click thumbnails to select images for the main view. "
+        "Designed to work with SAX Image Collector, but accepts any IMAGE input."
+    )
+
+    _PREVIEW_MAX_PX = {"low": 512, "medium": 1024, "high": None}
+
+    def execute(self, cell_w: int, max_cols: int, preview_quality: str = "low",
+                images: torch.Tensor | None = None):
+        if images is None:
+            return {"ui": {"images": []}}
+
+        import glob
+        temp_dir = folder_paths.get_temp_directory()
+
+        # 前回実行分のプレビューファイルを削除してディスク圧迫を防ぐ
+        for old in glob.glob(os.path.join(temp_dir, "sax_preview_*.webp")):
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+
+        max_px  = self._PREVIEW_MAX_PX.get(preview_quality)
+        results = []
+
+        for i in range(images.shape[0]):
+            frame  = images[i]   # [H, W, C]
+            img_np = (frame.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+
+            if img_np.shape[-1] == 1:
+                pil_img = Image.fromarray(img_np[..., 0], mode="L").convert("RGB")
+            else:
+                pil_img = Image.fromarray(img_np)
+
+            # 長辺を max_px にクリップ（high の場合はそのまま）
+            if max_px is not None:
+                w, h = pil_img.size
+                long_edge = max(w, h)
+                if long_edge > max_px:
+                    scale   = max_px / long_edge
+                    pil_img = pil_img.resize(
+                        (max(1, round(w * scale)), max(1, round(h * scale))),
+                        Image.LANCZOS,
+                    )
+
+            filename = f"sax_preview_{uuid.uuid4().hex[:12]}.webp"
+            filepath = os.path.join(temp_dir, filename)
+            pil_img.save(filepath, format="WEBP", quality=85)
+
+            results.append({"filename": filename, "subfolder": "", "type": "temp"})
+
+        return {"ui": {"images": results}}
+
+
 NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Output": SAX_Bridge_Output,
+    "SAX_Bridge_Output":        SAX_Bridge_Output,
+    "SAX_Bridge_Image_Preview": SAX_Bridge_Image_Preview,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Output": "SAX Output",
+    "SAX_Bridge_Output":        "SAX Output",
+    "SAX_Bridge_Image_Preview": "SAX Image Preview",
 }

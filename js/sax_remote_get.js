@@ -8,60 +8,14 @@ import {
     getComfyTheme,
     SAX_COLORS,
     showDialog, h,
+    ensureRenderLinkPatch, hideSourceLinks, unhideSourceLinks,
+    applyLinkVisibility, toggleLinkVisibility, _hiddenLinkIds,
 } from "./sax_ui_base.js";
 
 const EXT_NAME  = "SAX.RemoteGet";
 const NODE_TYPE = "SAX_Bridge_Remote_Get";
 const MAX_SLOTS = 32;   // Python 側 MAX_SLOTS と合わせる
 const ROW_H     = 28;   // ソース行の高さ（sax_ui_base ROW_H=24 より大きい）
-
-// ---------------------------------------------------------------------------
-// renderLink パッチ — 非表示リンクをスキップする
-// ---------------------------------------------------------------------------
-
-const _hiddenLinkIds   = new Set();
-let   _renderLinkPatched = false;
-
-function ensureRenderLinkPatch() {
-    if (_renderLinkPatched) return;
-    _renderLinkPatched = true;
-    const proto    = Object.getPrototypeOf(app.canvas);
-    const original = proto.renderLink;
-    if (!original) return;
-    proto.renderLink = function (ctx, a, b, link, ...rest) {
-        if (link && _hiddenLinkIds.has(link.id)) return;
-        return original.call(this, ctx, a, b, link, ...rest);
-    };
-}
-
-function hideSourceLinks(node) {
-    for (let i = 0; i < (node.inputs?.length ?? 0); i++) {
-        const linkId = node.inputs[i]?.link;
-        if (linkId != null) _hiddenLinkIds.add(linkId);
-    }
-    app.canvas?.setDirty(true, false);
-}
-
-function unhideSourceLinks(node) {
-    for (let i = 0; i < (node.inputs?.length ?? 0); i++) {
-        const linkId = node.inputs[i]?.link;
-        if (linkId != null) _hiddenLinkIds.delete(linkId);
-    }
-}
-
-function applyLinkVisibility(node) {
-    if (node._remoteLinksVisible) {
-        unhideSourceLinks(node);
-    } else {
-        hideSourceLinks(node);
-    }
-    app.canvas?.setDirty(true, false);
-}
-
-function toggleLinkVisibility(node) {
-    node._remoteLinksVisible = !node._remoteLinksVisible;
-    applyLinkVisibility(node);
-}
 
 // ---------------------------------------------------------------------------
 // ソース状態アクセサ

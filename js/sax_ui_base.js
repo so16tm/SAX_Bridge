@@ -945,3 +945,59 @@ export function makeItemListWidget(node, spec) {
         },
     };
 }
+
+// ---------------------------------------------------------------------------
+// renderLink パッチ — ステルスリンク（非表示リンク）制御
+//
+// 複数ノードで共有する必要があるため sax_ui_base に定義する。
+// node._remoteLinksVisible: true = リンク表示, false = 非表示（デフォルト）
+// ---------------------------------------------------------------------------
+
+export const _hiddenLinkIds = new Set();
+let _renderLinkPatched = false;
+
+/** renderLink を1度だけパッチし、_hiddenLinkIds に含まれるリンクをスキップする。 */
+export function ensureRenderLinkPatch() {
+    if (_renderLinkPatched) return;
+    _renderLinkPatched = true;
+    const proto    = Object.getPrototypeOf(app.canvas);
+    const original = proto.renderLink;
+    if (!original) return;
+    proto.renderLink = function (ctx, a, b, link, ...rest) {
+        if (link && _hiddenLinkIds.has(link.id)) return;
+        return original.call(this, ctx, a, b, link, ...rest);
+    };
+}
+
+/** ノードの全入力リンクを非表示セットに追加する。 */
+export function hideSourceLinks(node) {
+    for (let i = 0; i < (node.inputs?.length ?? 0); i++) {
+        const linkId = node.inputs[i]?.link;
+        if (linkId != null) _hiddenLinkIds.add(linkId);
+    }
+    app.canvas?.setDirty(true, false);
+}
+
+/** ノードの全入力リンクを非表示セットから除去する。 */
+export function unhideSourceLinks(node) {
+    for (let i = 0; i < (node.inputs?.length ?? 0); i++) {
+        const linkId = node.inputs[i]?.link;
+        if (linkId != null) _hiddenLinkIds.delete(linkId);
+    }
+}
+
+/** node._remoteLinksVisible の値に従ってリンク表示を適用する。 */
+export function applyLinkVisibility(node) {
+    if (node._remoteLinksVisible) {
+        unhideSourceLinks(node);
+    } else {
+        hideSourceLinks(node);
+    }
+    app.canvas?.setDirty(true, false);
+}
+
+/** node._remoteLinksVisible を反転してリンク表示を切り替える。 */
+export function toggleLinkVisibility(node) {
+    node._remoteLinksVisible = !node._remoteLinksVisible;
+    applyLinkVisibility(node);
+}
