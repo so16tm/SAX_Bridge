@@ -17,6 +17,7 @@ import {
     drawPill,
     drawMoveArrows,
     drawDeleteBtn,
+    drawRowBg,
     rowLayout,
 } from "./sax_ui_base.js";
 
@@ -774,8 +775,7 @@ function makeToggleWidget(node, item, index) {
             const layout = rowLayout(W, { hasToggle: true, hasMoveUpDown: true, hasDelete: true });
 
             // 行背景：暗いカプセル + 明るい枠線
-            rrect(ctx, PAD, y + 2, W - PAD * 2, H - 4, (H - 4) / 2,
-                t.inputBg, t.contentBg);
+            drawRowBg(ctx, W, y);
 
             // Toggle pill
             drawPill(ctx, layout.pill.x, midY, on);
@@ -904,9 +904,20 @@ function rebuildUI(node) {
     node.addCustomWidget(makeSceneWidget(node));
     config.managed.forEach((item, i) => node.addCustomWidget(makeToggleWidget(node, item, i)));
 
+    // H-4 トリック補正: 各ウィジェットが H-4 を返すことで LiteGraph の per-widget +4 と
+    // 相殺されるが、ノードレベルで +6 が追加される。これを相殺するため -6 する。
+    if (!node._saxComputeSizeFixed) {
+        node._saxComputeSizeFixed = true;
+        const _origCS = node.computeSize.bind(node);
+        node.computeSize = function(out) {
+            const s = _origCS(out);
+            s[1] -= 6;
+            return s;
+        };
+    }
     const [, newH] = node.computeSize();
     node.size[0] = Math.max(node.size[0], 320);
-    node.size[1] = Math.max(newH, 80);
+    node.size[1] = newH;
     app.graph.setDirtyCanvas(true, false);
 }
 

@@ -214,6 +214,7 @@ export function showPicker({
     // ---- ノードの peek ハンドラ ----
     function makeNodePeek(n) {
         return () => {
+            const savedOffset = [...app.canvas.ds.offset];
             overlay.style.display = "none";
             panCanvasTo(
                 n.pos[0] + (n.size?.[0] ?? 0) / 2,
@@ -228,6 +229,9 @@ export function showPicker({
             showReturnButton(() => {
                 overlay.style.display = "flex";
                 clearPickerHighlight();
+                app.canvas.ds.offset[0] = savedOffset[0];
+                app.canvas.ds.offset[1] = savedOffset[1];
+                app.canvas.setDirty(true, true);
             });
         };
     }
@@ -408,6 +412,7 @@ export function showPicker({
                     const label   = `▦  ${g.title}${posHint}`;
                     const tooltip = `pos: (${Math.round(gPos[0])}, ${Math.round(gPos[1])})  size: ${Math.round(g.size[0])}×${Math.round(g.size[1])}`;
                     const onPeek  = () => {
+                        const savedOffset = [...app.canvas.ds.offset];
                         overlay.style.display = "none";
                         panCanvasTo(g.pos[0] + g.size[0] / 2, g.pos[1] + g.size[1] / 2);
                         g.selected = true;
@@ -417,6 +422,8 @@ export function showPicker({
                             overlay.style.display = "flex";
                             g.selected = false;
                             app.canvas.selected_group = null;
+                            app.canvas.ds.offset[0] = savedOffset[0];
+                            app.canvas.ds.offset[1] = savedOffset[1];
                             app.canvas.setDirty(true, true);
                         });
                     };

@@ -1,5 +1,5 @@
 import { app } from "../../scripts/app.js";
-import { getComfyTheme, rrect, txt } from "./sax_ui_base.js";
+import { getComfyTheme, rrect, txt, BOTTOM_PAD } from "./sax_ui_base.js";
 
 const EXT_NAME   = "SAX.ImagePreview";
 const NODE_TYPE  = "SAX_Bridge_Image_Preview";
@@ -159,10 +159,10 @@ function makePreviewWidget(node) {
             const cellW = Math.max(1, Math.floor((w - (maxCols + 1) * GAP) / maxCols));
             const cellH = calcCellH(widget._images, cellW);
             const baseH = GAP + cellH + GAP + MAIN_NAV_H + TOGGLE_H;
-            if (!widget._showGrid) return [w, baseH];
+            if (!widget._showGrid) return [w, baseH + BOTTOM_PAD];
 
             const gridH = GAP + GRID_ROWS * (THUMB_SZ + GAP) + GRID_BTN_H;
-            return [w, baseH + gridH];
+            return [w, baseH + gridH + BOTTOM_PAD];
         },
 
         draw(ctx, drawNode, W, y) {

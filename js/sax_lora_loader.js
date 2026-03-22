@@ -53,15 +53,44 @@ async function getLoraList() {
 // LoRA ピッカーオーバーレイ
 // ---------------------------------------------------------------------------
 
-function showLoraPicker(currentName, onSelect) {
+function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = null } = {}) {
     document.querySelectorAll(".__sax_lora_picker").forEach(e => e.remove());
 
     // 折りたたみ状態（セクションキー → collapsed boolean）
     const collapsed = new Map();
+    // multi モードの選択状態
+    const selection = new Set();
 
-    // ---- LoRA 行（ノードピッカーの makeSelectRow と同じ構造） ----
+    // ---- LoRA 行 ----
     function makeLoraRow(fullName, isCurrent, close) {
         const label = displayName(fullName);
+
+        if (mode === "multi") {
+            const row = h("div",
+                "display:flex;align-items:center;gap:8px;padding:3px 0 3px 2px;");
+            row.title = fullName;
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = selection.has(fullName);
+            cb.style.cssText = "cursor:pointer;flex-shrink:0;accent-color:#4a9;";
+            const toggle = () => {
+                cb.checked = !cb.checked;
+                if (cb.checked) selection.add(fullName); else selection.delete(fullName);
+            };
+            cb.addEventListener("change", () => {
+                if (cb.checked) selection.add(fullName); else selection.delete(fullName);
+            });
+            const lbl = h("label",
+                "cursor:pointer;user-select:none;flex:1;overflow:hidden;text-overflow:ellipsis;" +
+                "white-space:nowrap;font-size:11px;color:var(--input-text,#ddd);");
+            lbl.textContent = label;
+            lbl.addEventListener("click", toggle);
+            row.appendChild(cb);
+            row.appendChild(lbl);
+            return row;
+        }
+
+        // single モード（既存の Select ボタン）
         const row = h("div",
             `display:flex;align-items:center;gap:6px;padding:3px 2px;border-radius:3px;` +
             `${isCurrent ? "background:var(--comfy-menu-secondary-bg,#303030);" : ""}`);
@@ -198,7 +227,7 @@ function showLoraPicker(currentName, onSelect) {
     }
 
     showDialog({
-        title:     "Select LoRA",
+        title:     mode === "multi" ? "Add LoRAs" : "Select LoRA",
         width:     480,
         className: "__sax_lora_picker",
         build(dlg, close) {
@@ -225,6 +254,17 @@ function showLoraPicker(currentName, onSelect) {
             cancelBtn.addEventListener("click", close);
             const btnRow = h("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
             btnRow.appendChild(cancelBtn);
+            if (mode === "multi") {
+                const applyBtn = h("button",
+                    `padding:6px 14px;background:${SAX_COLORS.primaryBg};` +
+                    `border:1px solid var(--content-bg,#4e4e4e);border-radius:4px;` +
+                    `color:${SAX_COLORS.primaryText};cursor:pointer;font-size:12px;`,
+                    "Apply");
+                applyBtn.addEventListener("mouseenter", () => { applyBtn.style.background = SAX_COLORS.primaryHoverBg; });
+                applyBtn.addEventListener("mouseleave", () => { applyBtn.style.background = SAX_COLORS.primaryBg; });
+                applyBtn.addEventListener("click", () => { close(); onConfirm?.([...selection]); });
+                btnRow.appendChild(applyBtn);
+            }
 
             dlg.appendChild(searchWrap);
             dlg.appendChild(scroll);
@@ -362,7 +402,7 @@ function buildUI(node) {
     );
 
     // makeItemListWidget を使って LoRA リスト UI を追加
-    const widget = makeItemListWidget(node, {
+    const widget = makeItemListWidget({
         widgetName:    "__sax_lora_list",
 
         getItems:      ()        => getEntries(node),
@@ -414,8 +454,22 @@ function buildUI(node) {
         },
 
         addButton: {
-            label:    "+ Add LoRA",
-            onCreate: () => ({ on: true, lora: "", strength: 1.0 }),
+            label: "+ Add LoRA",
+            onAdd(node, items, saveItems) {
+                showLoraPicker("", null, {
+                    mode: "multi",
+                    onConfirm(names) {
+                        const remaining = MAX_LORAS - items.length;
+                        const toAdd = names.slice(0, remaining);
+                        for (const name of toAdd)
+                            items.push({ on: true, lora: name, strength: 1.0 });
+                        if (toAdd.length > 0) {
+                            saveItems(items);
+                            app.graph.setDirtyCanvas(true, false);
+                        }
+                    },
+                });
+            },
         },
     });
 

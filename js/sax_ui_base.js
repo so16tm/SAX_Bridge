@@ -11,7 +11,9 @@
  *   drawDeleteBtn(ctx, x, midY)
  *   drawJumpBtn(ctx, x, midY)
  *   drawParamBox(ctx, x, y, w, h, text, active)
- *   rowLayout(W, flags)
+ *   drawRowBg(ctx, W, y, h?)
+ *   drawAddBtn(ctx, W, y, label, canAdd)
+ *   rowLayout(W, opts)
  *   showParamPopup(screenX, screenY, currentVal, cfg, onCommit)
  *   makeItemListWidget(node, spec)
  *
@@ -26,8 +28,15 @@
 
 import { app } from "../../scripts/app.js";
 
-export const PAD   = 8;
-export const ROW_H = 24;
+export const PAD             = 8;    // 水平余白（左右パディング）
+export const ROW_H           = 24;   // 標準行高（LoRA / SAM3 / Toggle Manager）
+export const HEADER_H        = 20;   // ヘッダー行高（Show Links トグル等）
+export const COLUMN_HEADER_H = 16;   // 列ラベル行高（SAM3 Multi 等）
+export const ADD_H           = 28;   // Add ボタン行高（全ノード統一）
+export const GAP             = 4;    // 行内部の要素間ギャップ
+export const BTN_RADIUS      = 4;    // アクションボタンの角丸半径
+export const ITEM_MARGIN     = 2;    // 行／ボタン内の上下マージン（上: +ITEM_MARGIN, 高さ: -2*ITEM_MARGIN）
+export const BOTTOM_PAD      = 6;    // LiteGraph 標準 computeSize の +6 に合わせたボトムパディング
 
 // ---------------------------------------------------------------------------
 // SAX シリーズ共通配色定数
@@ -169,6 +178,23 @@ export function drawJumpBtn(ctx, x, midY) {
     txt(ctx, "↗", x + 9, midY, t.contentBg, "center", 10);
 }
 
+/** 行背景カプセルを描画。W: ウィジェット全幅、y: 行上端、h: 行高（デフォルト ROW_H） */
+export function drawRowBg(ctx, W, y, h = ROW_H) {
+    const t = getComfyTheme();
+    rrect(ctx, PAD, y + ITEM_MARGIN, W - PAD * 2, h - 2 * ITEM_MARGIN,
+        (h - 2 * ITEM_MARGIN) / 2, t.inputBg, t.contentBg);
+}
+
+/** Add ボタンを描画。W: ウィジェット全幅、y: ボタン行上端 */
+export function drawAddBtn(ctx, W, y, label, canAdd) {
+    const t = getComfyTheme();
+    rrect(ctx, PAD, y + ITEM_MARGIN, W - PAD * 2, ADD_H - 2 * ITEM_MARGIN, BTN_RADIUS,
+        canAdd ? t.inputBg : t.menuBg,
+        canAdd ? t.contentBg : t.border);
+    txt(ctx, label, W / 2, y + ADD_H / 2,
+        canAdd ? t.inputText : t.border, "center", 11);
+}
+
 /**
  * パラメータ値ボックスを描画。
  * x: ボックス左端、y: 行上端、w: 幅、h: 行高、active: ドラッグ中かどうか
@@ -188,27 +214,57 @@ export function drawParamBox(ctx, x, y, w, h, text, active) {
 // ---------------------------------------------------------------------------
 
 /**
- * rowLayout — 右端から del → move → jump → param を確保し、残りを content 幅とする。
+ * rowLayout — 行内の要素配置を計算する。
+ *
+ * **新 API（配列方式）**: opts に `left` または `right` 配列を含む場合に使用。
+ *   left:  左端に並べる要素配列 `[{ key, w }, ...]`（pill の後ろに配置）
+ *   right: 右端から内側へ積む要素配列 `[{ key, w }, ...]`
+ *
+ * **旧 API（フラグ方式）**: 後方互換。`left`/`right` を含まない場合。
+ *   hasToggle, hasParam, hasMoveUpDown, hasDelete, hasJump フラグで構成を指定。
  *
  * @param {number} W - ウィジェット全幅（node.size[0] をそのまま渡す）
- * @param {{ hasToggle?, hasParam?, hasMoveUpDown?, hasDelete?, hasJump? }} flags
- * @returns {{
- *   pill?:    { x: number, w: number },
- *   contentX: number,
- *   contentW: number,
- *   param?:   { x: number, w: number },
- *   jump?:    { x: number, w: number },
- *   move?:    { x: number, w: number },
- *   del?:     { x: number, w: number },
- * }}
+ * @param {object} opts
+ * @returns {{ pill?, contentX, contentW, [key]: { x, w } }}
  */
-export function rowLayout(W, {
-    hasToggle     = false,
-    hasParam      = false,
-    hasMoveUpDown = false,
-    hasDelete     = false,
-    hasJump       = false,
-} = {}) {
+export function rowLayout(W, opts = {}) {
+    // 新 API: left / right 配列が指定された場合
+    if (opts.left !== undefined || opts.right !== undefined) {
+        const { left = [], right = [], hasToggle = false } = opts;
+        const layout = {};
+
+        // 左側: toggle pill → left 要素群
+        let lx = (hasToggle || left.length > 0) ? PAD + GAP : PAD;
+        if (hasToggle) {
+            layout.pill = { x: lx, w: 26 };
+            lx += 26 + GAP;
+        }
+        for (const el of left) {
+            layout[el.key] = { x: lx, w: el.w };
+            lx += el.w + GAP;
+        }
+        layout.contentX = lx;
+
+        // 右側: right 配列を順に右から積む
+        let rx = W - PAD;
+        for (const el of right) {
+            rx -= el.w;
+            layout[el.key] = { x: rx, w: el.w };
+            rx -= GAP;
+        }
+        layout.contentW = Math.max(0, rx - layout.contentX);
+        return layout;
+    }
+
+    // 旧 API（後方互換）: フラグ方式
+    const {
+        hasToggle     = false,
+        hasParam      = false,
+        hasMoveUpDown = false,
+        hasDelete     = false,
+        hasJump       = false,
+    } = opts;
+
     const layout = {};
 
     // 左側: pill があれば確保し、content の開始 X を決める
@@ -239,8 +295,8 @@ export function rowLayout(W, {
         rx -= 4;
     }
     if (hasParam) {
-        rx -= 64;
-        layout.param = { x: rx, w: 64 };
+        rx -= 42;
+        layout.param = { x: rx, w: 42 };
         rx -= 4;
     }
 
@@ -636,7 +692,6 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
 /**
  * アイテムリスト形式のカスタムウィジェットを生成して返す。
  *
- * @param {object} node - LiteGraph ノードオブジェクト
  * @param {{
  *   widgetName?:    string,
  *   getItems:       () => object[],
@@ -645,6 +700,33 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
  *   hasToggle?:     boolean,
  *   hasMoveUpDown?: boolean,
  *   hasDelete?:     boolean,
+ *   hasJump?:       boolean,
+ *
+ *   // 複数パラメータ（新 API）— 指定すると params 配列の各要素がパラメータボックスになる。
+ *   // 配列の最初の要素が content 寄り（最左）、最後が del/move 寄り（最右）に配置される。
+ *   params?: Array<{
+ *     key:         string,
+ *     w?:          number,   // デフォルト 42
+ *     label?:      string,   // ヘッダー列ラベル（COLUMN_HEADER_H モード）
+ *     get:         (item: object) => number,
+ *     set:         (item: object, v: number) => void,
+ *     min?:        number,
+ *     max?:        number,
+ *     step?:       number,
+ *     format?:     (v: number) => string,
+ *     dragScale?:  number,
+ *     onPopup?:    (item, index, node) => void,
+ *   }>,
+ *
+ *   // 左側バッジ等（新 API）— toggle pill の右に並べる要素。
+ *   leftElements?: Array<{
+ *     key:      string,
+ *     w:        number,
+ *     draw:     (ctx, item, x, midY, w, h, on) => void,
+ *     onClick?: (item, index, node) => boolean,  // true を返すと saveItems を呼ぶ
+ *   }>,
+ *
+ *   // 旧 API（後方互換）— params/leftElements を使わない場合に使用
  *   hasParam?:      boolean,
  *   param?: {
  *     key:         string,
@@ -655,19 +737,25 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
  *     step?:       number,
  *     format?:     (v: number) => string,
  *     dragScale?:  number,
+ *     label?:      string,
+ *     onPopup?:    (item, index, node) => void,
  *   },
+ *
  *   content: {
  *     draw:    (ctx, item, x, y, w, h, on: boolean) => void,
  *     onClick?: (item, index, node) => void,
+ *     onJump?:  (item, index, node) => void,
  *   },
  *   addButton?: {
  *     label:    string,
- *     onCreate: (node) => object | null,
+ *     onCreate?: (node) => object | null,
+ *     onAdd?:   (node, items, saveItems) => void,  // onCreate の代替。複数追加などに使用
  *   },
+ *   enabledWidget?: { name: string },  // 指定時はヘッダー行に pill として表示
  * }} spec
  * @returns {object} LiteGraph custom widget
  */
-export function makeItemListWidget(node, spec) {
+export function makeItemListWidget(spec) {
     const {
         widgetName    = "__sax_item_list",
         getItems,
@@ -676,21 +764,50 @@ export function makeItemListWidget(node, spec) {
         hasToggle     = false,
         hasMoveUpDown = false,
         hasDelete     = false,
+        hasJump       = false,
+        params        = null,
+        leftElements  = null,
+        // 旧 API（後方互換）
         hasParam      = false,
         param         = {},
         content,
         addButton     = null,
-        enabledWidget = null,   // { name: string } — 指定時はヘッダー行に pill として表示
+        enabledWidget = null,
     } = spec;
 
-    const ADD_H    = addButton ? ROW_H : 0;
-    // enabledWidget または param.label があればヘッダー行を表示する
-    const HEADER_H = (enabledWidget || (hasParam && param.label)) ? 20 : 0;
+    // 後方互換: hasParam + param → _params[0] に正規化
+    const _params    = params  ?? (hasParam ? [{ w: 42, ...param }] : []);
+    const _leftElems = leftElements ?? [];
+
+    const addBtnH = addButton ? ADD_H : 0;
+
+    // ヘッダー高さ: enabledWidget あり → HEADER_H、param ラベルのみ → COLUMN_HEADER_H、なし → 0
+    const hasAnyParamLabel = _params.some(p => p.label);
+    const hdrH = enabledWidget   ? HEADER_H
+               : hasAnyParamLabel ? COLUMN_HEADER_H
+               : 0;
 
     // ドラッグ状態（クロージャで保持）
-    let _dragIndex   = -1;   // draw() でのアクティブ表示に使用
+    let _activeDrag  = null;  // { paramKey: string, rowIndex: number } | null
     let _dragged     = false;
-    let _moveCleanup = null; // 外部から強制終了できるクリーンアップ関数
+    let _moveCleanup = null;  // 外部から強制終了できるクリーンアップ関数
+
+    // レイアウト計算（W に依存するため都度呼ぶ）
+    function buildLayout(W) {
+        const right = [];
+        if (hasDelete)     right.push({ key: "del",  w: 20 });
+        if (hasMoveUpDown) right.push({ key: "move", w: 20 });
+        if (hasJump)       right.push({ key: "jump", w: 18 });
+        // params を逆順で右側に積む（index 0 が content 寄り = 最左）
+        for (let i = _params.length - 1; i >= 0; i--) {
+            right.push({ key: _params[i].key, w: _params[i].w ?? 42 });
+        }
+        return rowLayout(W, {
+            hasToggle,
+            left:  _leftElems.map(le => ({ key: le.key, w: le.w })),
+            right,
+        });
+    }
 
     return {
         name:  widgetName,
@@ -700,44 +817,50 @@ export function makeItemListWidget(node, spec) {
 
         computeSize(W) {
             const items = getItems();
-            return [W, HEADER_H + items.length * ROW_H + ADD_H];
+            return [W, hdrH + items.length * ROW_H + addBtnH + BOTTOM_PAD];
         },
 
         draw(ctx, node, W, y) {
             this._y = y;
             const items  = getItems();
-            const layout = rowLayout(W, { hasToggle, hasParam, hasMoveUpDown, hasDelete });
+            const layout = buildLayout(W);
             const t      = getComfyTheme();
 
-            // ヘッダー行（enabledWidget pill + param.label）
-            if (HEADER_H > 0) {
-                const headerMidY = y + HEADER_H / 2;
+            // ヘッダー行
+            if (hdrH > 0) {
+                const headerMidY = y + hdrH / 2;
                 if (enabledWidget) {
                     const ew = node.widgets?.find(w => w.name === enabledWidget.name);
                     drawPill(ctx, PAD, headerMidY, ew ? !!ew.value : true);
                 }
-                if (hasParam && param.label) {
-                    txt(ctx, param.label,
-                        layout.param.x + layout.param.w / 2,
-                        headerMidY,
-                        t.border, "center", 9);
+                for (const p of _params) {
+                    if (!p.label) continue;
+                    const area = layout[p.key];
+                    if (area) {
+                        txt(ctx, p.label, area.x + area.w / 2, headerMidY,
+                            t.border, "center", 9);
+                    }
                 }
             }
 
-            const itemsY = y + HEADER_H;
+            const itemsY = y + hdrH;
             items.forEach((item, i) => {
                 const rowY = itemsY + i * ROW_H;
                 const midY = rowY + ROW_H / 2;
                 const on   = hasToggle ? (item.on ?? true) : true;
 
-                // 行背景：暗い背景 + 明るい枠線でカプセルを表現
-                // inputBg (#222) = 暗い本体, contentBg (#4e4e4e) = 枠線（Strength ボックスと同色）
-                rrect(ctx, PAD, rowY + 2, W - PAD * 2, ROW_H - 4, (ROW_H - 4) / 2,
-                    t.inputBg, t.contentBg);
+                // 行背景
+                drawRowBg(ctx, W, rowY);
 
                 // Toggle pill
                 if (layout.pill) {
                     drawPill(ctx, layout.pill.x, midY, on);
+                }
+
+                // leftElements（モードバッジ等）
+                for (const le of _leftElems) {
+                    const area = layout[le.key];
+                    if (area) le.draw?.(ctx, item, area.x, midY, area.w, ROW_H, on);
                 }
 
                 // Content（ノード固有の描画 — クリップ済み）
@@ -748,13 +871,14 @@ export function makeItemListWidget(node, spec) {
                 content.draw(ctx, item, layout.contentX, rowY, layout.contentW, ROW_H, on);
                 ctx.restore();
 
-                // Param ボックス
-                if (layout.param) {
-                    const v    = param.get(item);
-                    const text = param.format ? param.format(v) : v.toFixed(2);
-                    drawParamBox(ctx,
-                        layout.param.x, rowY, layout.param.w, ROW_H,
-                        text, _dragIndex === i);
+                // Param ボックス群
+                for (const p of _params) {
+                    const area = layout[p.key];
+                    if (!area) continue;
+                    const v    = p.get(item);
+                    const text = p.format ? p.format(v) : v.toFixed(2);
+                    const active = _activeDrag?.rowIndex === i && _activeDrag?.paramKey === p.key;
+                    drawParamBox(ctx, area.x, rowY, area.w, ROW_H, text, active);
                 }
 
                 // Move arrows
@@ -767,17 +891,18 @@ export function makeItemListWidget(node, spec) {
                 if (layout.del) {
                     drawDeleteBtn(ctx, layout.del.x, midY);
                 }
+
+                // Jump ボタン
+                if (layout.jump) {
+                    drawJumpBtn(ctx, layout.jump.x, midY);
+                }
             });
 
-            // Add ボタン（モノクロ）
+            // Add ボタン
             if (addButton) {
                 const btnY   = itemsY + items.length * ROW_H;
                 const canAdd = items.length < maxItems;
-                rrect(ctx, PAD, btnY + 2, W - PAD * 2, ADD_H - 4, 4,
-                    canAdd ? t.inputBg : t.menuBg,
-                    canAdd ? t.contentBg : t.border);
-                txt(ctx, addButton.label, W / 2, btnY + ADD_H / 2,
-                    canAdd ? t.inputText : t.border, "center", 11);
+                drawAddBtn(ctx, W, btnY, addButton.label, canAdd);
             }
         },
 
@@ -786,13 +911,13 @@ export function makeItemListWidget(node, spec) {
 
             const items  = getItems();
             const W      = node.size[0];
-            const layout = rowLayout(W, { hasToggle, hasParam, hasMoveUpDown, hasDelete });
+            const layout = buildLayout(W);
 
             const rawY   = pos[1] - this._y;
-            const localY = rawY - HEADER_H;
+            const localY = rawY - hdrH;
 
             // ── ヘッダー行クリック（enabledWidget トグル） ──
-            if (rawY < HEADER_H) {
+            if (rawY < hdrH) {
                 if (enabledWidget && inX(pos, PAD, 30)) {
                     const ew = node.widgets?.find(w => w.name === enabledWidget.name);
                     if (ew) {
@@ -811,11 +936,15 @@ export function makeItemListWidget(node, spec) {
             // ── Add ボタン ──
             if (addButton && rowIndex === items.length) {
                 if (items.length >= maxItems) return true;
-                const newItem = addButton.onCreate(node);
-                if (newItem) {
-                    items.push(newItem);
-                    saveItems(items);
-                    app.graph.setDirtyCanvas(true, false);
+                if (addButton.onAdd) {
+                    addButton.onAdd(node, items, saveItems);
+                } else {
+                    const newItem = addButton.onCreate(node);
+                    if (newItem) {
+                        items.push(newItem);
+                        saveItems(items);
+                        app.graph.setDirtyCanvas(true, false);
+                    }
                 }
                 return true;
             }
@@ -850,20 +979,27 @@ export function makeItemListWidget(node, spec) {
                 return true;
             }
 
-            // ── Param（drag or click） ──
-            if (layout.param && hasParam && inX(pos, layout.param.x, layout.param.w)) {
-                // 既存ドラッグを強制終了してから新しいドラッグを開始
+            // ── Jump ──
+            if (layout.jump && inX(pos, layout.jump.x, layout.jump.w)) {
+                content.onJump?.(item, rowIndex, node);
+                return true;
+            }
+
+            // ── Param ボックス（ドラッグ or クリック） ──
+            for (const p of _params) {
+                const area = layout[p.key];
+                if (!area || !inX(pos, area.x, area.w)) continue;
+
                 if (_moveCleanup) { _moveCleanup(); _moveCleanup = null; }
 
-                _dragIndex = rowIndex;
-                _dragged   = false;
+                _activeDrag = { paramKey: p.key, rowIndex };
+                _dragged    = false;
 
-                const startY    = event.clientY;
-                const startVal  = param.get(item);
-                const scale     = param.dragScale ?? (param.step ?? 0.01);
+                const startY   = event.clientY;
+                const startVal = p.get(item);
+                const scale    = p.dragScale ?? (p.step ?? 0.01);
 
                 // endCalled フラグで idempotent なクリーンアップを保証
-                // — pointerup が canvas + window の両方から届いても二重処理しない
                 let endCalled = false;
 
                 const onMove = (e) => {
@@ -872,10 +1008,10 @@ export function makeItemListWidget(node, spec) {
                     if (!_dragged && Math.abs(dy) < 3) return;
                     _dragged = true;
                     const newVal = Math.max(
-                        param.min ?? -Infinity,
-                        Math.min(param.max ?? Infinity, startVal + dy * scale)
+                        p.min ?? -Infinity,
+                        Math.min(p.max ?? Infinity, startVal + dy * scale)
                     );
-                    param.set(item, newVal);
+                    p.set(item, newVal);
                     saveItems(items);
                     app.graph.setDirtyCanvas(true, false);
                 };
@@ -884,28 +1020,24 @@ export function makeItemListWidget(node, spec) {
                     if (endCalled) return;
                     endCalled    = true;
                     const wasDragged = _dragged;
-                    _dragIndex   = -1;
+                    _activeDrag  = null;
                     _dragged     = false;
                     _moveCleanup = null;
-                    // window capture で登録したリスナーをすべて除去
                     window.removeEventListener("pointermove",   onMove);
                     window.removeEventListener("pointerup",     endDrag, { capture: true });
                     window.removeEventListener("pointercancel", endDrag, { capture: true });
                     app.graph.setDirtyCanvas(true, false);
 
-                    // ドラッグなし（クリック）かつ有効な pointerup → ポップアップ表示
                     if (!wasDragged && e?.type === "pointerup") {
-                        if (param.onPopup) {
-                            // カスタムポップアップ（統合ダイアログ等）
-                            param.onPopup(item, rowIndex, node);
+                        if (p.onPopup) {
+                            p.onPopup(item, rowIndex, node);
                         } else {
                             showParamPopup(
-                                e.clientX,
-                                e.clientY,
-                                param.get(item),
-                                { min: param.min, max: param.max, step: param.step, label: param.label },
+                                e.clientX, e.clientY,
+                                p.get(item),
+                                { min: p.min, max: p.max, step: p.step, label: p.label },
                                 (v) => {
-                                    param.set(item, v);
+                                    p.set(item, v);
                                     saveItems(items);
                                     app.graph.setDirtyCanvas(true, false);
                                 }
@@ -915,15 +1047,25 @@ export function makeItemListWidget(node, spec) {
                 };
 
                 // window + { capture: true } で登録する理由:
-                //   LiteGraph がキャンバスに setPointerCapture している場合や
-                //   canvas の pointerup ハンドラが stopPropagation しても
-                //   window capture リスナーはキャプチャフェーズ先頭で必ず発火する
+                //   LiteGraph がキャンバスに setPointerCapture している場合でも
+                //   キャプチャフェーズ先頭で必ず発火する
                 window.addEventListener("pointermove",   onMove);
                 window.addEventListener("pointerup",     endDrag, { capture: true });
                 window.addEventListener("pointercancel", endDrag, { capture: true });
 
-                // 外部クリーンアップ用（次ドラッグ開始時・ウィジェット破棄時に呼ばれる）
                 _moveCleanup = () => endDrag(null);
+                return true;
+            }
+
+            // ── leftElements クリック ──
+            for (const le of _leftElems) {
+                const area = layout[le.key];
+                if (!area || !inX(pos, area.x, area.w)) continue;
+                const changed = le.onClick?.(item, rowIndex, node);
+                if (changed) {
+                    saveItems(items);
+                    app.graph.setDirtyCanvas(true, false);
+                }
                 return true;
             }
 

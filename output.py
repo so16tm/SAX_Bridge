@@ -407,7 +407,7 @@ class SAX_Bridge_Image_Preview:
                 "max_cols": (
                     "INT",
                     {
-                        "default": 3,
+                        "default": 1,
                         "min": 1,
                         "max": 8,
                         "step": 1,

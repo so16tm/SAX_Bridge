@@ -1,9 +1,11 @@
 import { app } from "../../scripts/app.js";
 import { panCanvasTo, showPicker } from "./sax_picker.js";
 import {
-    PAD,
-    rrect, txt, inX,
+    PAD, ROW_H, BOTTOM_PAD,
+    HEADER_H, ADD_H,
+    txt, inX,
     drawPill, drawMoveArrows, drawDeleteBtn, drawJumpBtn,
+    drawRowBg, drawAddBtn,
     rowLayout,
     getComfyTheme,
     SAX_COLORS,
@@ -15,7 +17,6 @@ import {
 const EXT_NAME  = "SAX.RemoteGet";
 const NODE_TYPE = "SAX_Bridge_Remote_Get";
 const MAX_SLOTS = 32;   // Python 側 MAX_SLOTS と合わせる
-const ROW_H     = 28;   // ソース行の高さ（sax_ui_base ROW_H=24 より大きい）
 
 // ---------------------------------------------------------------------------
 // ソース状態アクセサ
@@ -533,11 +534,19 @@ function showSlotSelectDialog(node, si) {
 function showAddSourcePicker(remoteNode) {
     const existingIds = new Set([remoteNode.id, ...getSources(remoteNode).map(s => s.sourceId)]);
     showPicker({
-        title:      "Select source node",
-        sections:   ["subgraphs", "nodes"],
-        mode:       "single",
-        filterNode: n => !existingIds.has(n.id) && (n.outputs ?? []).length > 0,
-        onSelect:   n => addSource(remoteNode, n),
+        title:       "Select source nodes",
+        sections:    ["subgraphs", "nodes"],
+        mode:        "multi",
+        selection:   new Map(),
+        showWidgets: false,
+        filterNode:  n => !existingIds.has(n.id) && (n.outputs ?? []).length > 0,
+        onConfirm:   (items) => {
+            for (const item of items) {
+                if (item.type !== "node") continue;
+                const n = app.graph.getNodeById(item.id);
+                if (n) addSource(remoteNode, n);
+            }
+        },
     });
 }
 
@@ -545,8 +554,7 @@ function showAddSourcePicker(remoteNode) {
 // ソース選択ウィジェット
 // ---------------------------------------------------------------------------
 
-const HEADER_H = 20;   // ヘッダー行（目玉トグル）の高さ
-const ADD_H    = ROW_H; // Add ボタン行の高さ（common UI に合わせる）
+// HEADER_H, ADD_H は sax_ui_base からインポート済み
 
 function makeSourceWidget(node) {
     let widgetY = 0;
@@ -558,7 +566,7 @@ function makeSourceWidget(node) {
 
         computeSize(W) {
             const n = getSources(node).length;
-            return [W, HEADER_H + n * ROW_H + ADD_H];
+            return [W, HEADER_H + n * ROW_H + ADD_H + BOTTOM_PAD];
         },
 
         draw(ctx, drawNode, W, y) {
@@ -609,8 +617,7 @@ function makeSourceWidget(node) {
                 const enabled = src.enabledSlots?.length ?? src.slotCount ?? 0;
                 const total   = src.slotCount ?? 0;
 
-                rrect(ctx, PAD, rowY + 2, W - PAD * 2, ROW_H - 4, (ROW_H - 4) / 2,
-                    t.inputBg, t.contentBg);
+                drawRowBg(ctx, W, rowY);
 
                 const icon  = src.isSub ? "▣" : "◈";
                 const color = src.isSub ? SAX_COLORS.subgraph : SAX_COLORS.node;
@@ -634,14 +641,9 @@ function makeSourceWidget(node) {
             // ── Add ボタン ──
             const btnY   = y + HEADER_H + sources.length * ROW_H;
             const canAdd = getTotalSlotCount(drawNode) < MAX_SLOTS;
-            rrect(ctx, PAD, btnY + 2, W - PAD * 2, ADD_H - 4, 4,
-                canAdd ? t.inputBg : t.menuBg,
-                canAdd ? t.contentBg : t.border);
-            txt(ctx,
+            drawAddBtn(ctx, W, btnY,
                 sources.length === 0 ? "Select source…" : "+ Add source",
-                W / 2, btnY + ADD_H / 2,
-                canAdd ? t.inputText : t.border,
-                "center", 11);
+                canAdd);
         },
 
         mouse(event, pos, mouseNode) {
@@ -652,7 +654,7 @@ function makeSourceWidget(node) {
             const layout  = rowLayout(W, { hasJump: true, hasMoveUpDown: true, hasDelete: true });
 
             // ── ヘッダー行: 目玉トグル pill ──
-            if (relY < HEADER_H) {
+            if (relY < HEADER_H) {  // HEADER_H: sax_ui_base から import
                 if (pos[0] >= PAD && pos[0] < PAD + 34) {
                     toggleLinkVisibility(mouseNode);
                     return true;
@@ -740,6 +742,7 @@ app.registerExtension({
             for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
             this.addCustomWidget(makeSourceWidget(this));
             this.size[0] = Math.max(this.size[0], 320);
+            this.size[1] = 1;   // slot 数に基づく ComfyUI デフォルト高さを破棄
         };
 
         // --- onSerialize ---
