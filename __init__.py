@@ -8,7 +8,8 @@ from .cache import SAX_Bridge_Cache
 from .output import SAX_Bridge_Output, SAX_Bridge_Image_Preview
 from .image_collector import SAX_Bridge_Image_Collector
 from .node_collector  import SAX_Bridge_Node_Collector
-from .pipe_collector  import SAX_Bridge_Pipe_Collector
+from .pipe_collector    import SAX_Bridge_Pipe_Collector
+from .primitive_store   import SAX_Bridge_Primitive_Store
 from .toggle_manager import SAX_Bridge_Toggle_Manager
 from .loader import SAX_Bridge_Loader_Lora
 from .sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
@@ -46,7 +47,8 @@ NODE_CLASS_MAPPINGS = {
     "SAX_Bridge_Loader_Lora": SAX_Bridge_Loader_Lora,
 
     # Utility 系列
-    "SAX_Bridge_Toggle_Manager": SAX_Bridge_Toggle_Manager,
+    "SAX_Bridge_Primitive_Store": SAX_Bridge_Primitive_Store,
+    "SAX_Bridge_Toggle_Manager":  SAX_Bridge_Toggle_Manager,
 
     # Segment 系列
     "SAX_Bridge_Loader_SAM3":     SAX_Bridge_Loader_SAM3,
@@ -69,7 +71,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Node_Collector":  "SAX Node Collector",
     "SAX_Bridge_Pipe_Collector":  "SAX Pipe Collector",
     "SAX_Bridge_Loader_Lora": "SAX Lora Loader",
-    "SAX_Bridge_Toggle_Manager": "SAX Toggle Manager",
+    "SAX_Bridge_Primitive_Store": "SAX Primitive Store",
+    "SAX_Bridge_Toggle_Manager":  "SAX Toggle Manager",
     "SAX_Bridge_Loader_SAM3":     "SAX SAM3 Loader",
     "SAX_Bridge_Segmenter_Multi": "SAX SAM3 Multi Segmenter",
     "SAX_Bridge_Prompt": "SAX Prompt",

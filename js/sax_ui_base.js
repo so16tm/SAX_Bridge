@@ -17,6 +17,10 @@
  *   showParamPopup(screenX, screenY, currentVal, cfg, onCommit)
  *   makeItemListWidget(node, spec)
  *
+ * 出力スロット接続維持ユーティリティ:
+ *   captureOutputLinks(node, items, slotOffset?)
+ *   restoreOutputLinks(node, items, syncFn, slotOffset?)
+ *
  * DOM UI ヘルパー:
  *   h(tag, css, text)
  *   showDialog({ title, width, maxHeight, gap, className, build })
@@ -627,7 +631,10 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
                     const set = (v) => {
                         if (f.min != null) v = Math.max(f.min, v);
                         if (f.max != null) v = Math.min(f.max, v);
-                        v = dec === 0 ? Math.round(v) : Math.round(v / step) * step;
+                        // toFixed で桁丸めしてから parseFloat に通すことで浮動小数点誤差を除去
+                        v = dec === 0
+                            ? Math.round(v)
+                            : parseFloat((Math.round(v / step) * step).toFixed(dec));
                         ed[f.key]  = v;
                         inp.value  = v.toFixed(dec);
                     };
@@ -696,6 +703,7 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
  *   widgetName?:    string,
  *   getItems:       () => object[],
  *   saveItems:      (items: object[]) => void,
+ *   beforeModify?:  (items: object[]) => void,  // 削除・並び替え直前に呼ばれる（出力スロット接続維持に使用）
  *   maxItems?:      number,
  *   hasToggle?:     boolean,
  *   hasMoveUpDown?: boolean,
@@ -714,7 +722,7 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
  *     max?:        number,
  *     step?:       number,
  *     format?:     (v: number) => string,
- *     dragScale?:  number,
+ *     dragScale?:  number | ((item: any) => number),
  *     onPopup?:    (item, index, node) => void,
  *   }>,
  *
@@ -736,7 +744,7 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
  *     max?:        number,
  *     step?:       number,
  *     format?:     (v: number) => string,
- *     dragScale?:  number,
+ *     dragScale?:  number | ((item: any) => number),
  *     label?:      string,
  *     onPopup?:    (item, index, node) => void,
  *   },
@@ -760,6 +768,7 @@ export function makeItemListWidget(spec) {
         widgetName    = "__sax_item_list",
         getItems,
         saveItems,
+        beforeModify  = null,   // 配列を変更する直前に呼ばれるコールバック (items: object[]) => void
         maxItems      = 20,
         hasToggle     = false,
         hasMoveUpDown = false,
@@ -955,6 +964,7 @@ export function makeItemListWidget(spec) {
 
             // ── Delete ──
             if (layout.del && inX(pos, layout.del.x, layout.del.w)) {
+                beforeModify?.(items);
                 items.splice(rowIndex, 1);
                 saveItems(items);
                 app.graph.setDirtyCanvas(true, false);
@@ -966,11 +976,13 @@ export function makeItemListWidget(spec) {
                 const relY   = localY - rowIndex * ROW_H;
                 const moveUp = relY < ROW_H / 2;
                 if (moveUp && rowIndex > 0) {
+                    beforeModify?.(items);
                     [items[rowIndex - 1], items[rowIndex]] =
                     [items[rowIndex],     items[rowIndex - 1]];
                     saveItems(items);
                     app.graph.setDirtyCanvas(true, false);
                 } else if (!moveUp && rowIndex < items.length - 1) {
+                    beforeModify?.(items);
                     [items[rowIndex],     items[rowIndex + 1]] =
                     [items[rowIndex + 1], items[rowIndex]];
                     saveItems(items);
@@ -997,7 +1009,7 @@ export function makeItemListWidget(spec) {
 
                 const startY   = event.clientY;
                 const startVal = p.get(item);
-                const scale    = p.dragScale ?? (p.step ?? 0.01);
+                const scale    = (typeof p.dragScale === "function" ? p.dragScale(item) : p.dragScale) ?? (p.step ?? 0.01);
 
                 // endCalled フラグで idempotent なクリーンアップを保証
                 let endCalled = false;
@@ -1142,4 +1154,77 @@ export function applyLinkVisibility(node) {
 export function toggleLinkVisibility(node) {
     node._remoteLinksVisible = !node._remoteLinksVisible;
     applyLinkVisibility(node);
+}
+
+// ---------------------------------------------------------------------------
+// 出力スロット接続維持ユーティリティ
+// ---------------------------------------------------------------------------
+
+/**
+ * 各アイテムに現在の出力スロット接続状態を `_links` プロパティとして記録する。
+ *
+ * **呼び出しタイミング:**
+ * - `makeItemListWidget` の `beforeModify` コールバック内（配列変更の直前）
+ * - `onConfigure` の setTimeout 内（LiteGraph によるリンク復元後）
+ *
+ * @param {object}   node        LiteGraph ノード
+ * @param {object[]} items       現在のアイテム配列（node.outputs と同順）
+ * @param {number}  [slotOffset] 出力スロットの開始インデックス（デフォルト: 0）
+ */
+export function captureOutputLinks(node, items, slotOffset = 0) {
+    for (let i = 0; i < items.length; i++) {
+        const slotLinks = node.outputs?.[slotOffset + i]?.links ?? [];
+        items[i]._links = slotLinks.map(linkId => {
+            const link = app.graph.links[linkId];
+            return link ? { targetId: link.target_id, targetSlot: link.target_slot } : null;
+        }).filter(Boolean);
+    }
+}
+
+/**
+ * 全出力スロットのリンクを削除し、`syncFn` でスロット構造を更新してから
+ * 各アイテムの `_links` に記録された接続先へ非同期で再接続する。
+ *
+ * **使い方（パターン）:**
+ * ```js
+ * const saveItems = (newItems) => {
+ *     node._myItems = newItems;
+ *     restoreOutputLinks(node, newItems, () => syncMyOutputSlots(node, newItems));
+ * };
+ * return makeItemListWidget({
+ *     ...
+ *     beforeModify: (items) => captureOutputLinks(node, items),
+ *     saveItems,
+ * });
+ * ```
+ *
+ * @param {object}   node        LiteGraph ノード
+ * @param {object[]} items       新しいアイテム配列（syncFn 適用後の順序）
+ * @param {Function} syncFn      スロット構造を更新する同期関数（removeOutput/addOutput を含む）
+ * @param {number}  [slotOffset] 出力スロットの開始インデックス（デフォルト: 0）
+ */
+export function restoreOutputLinks(node, items, syncFn, slotOffset = 0) {
+    // 全スロットのリンクを削除（removeOutput は内部でリンクも消すが、
+    // スロット数が変わらない場合は removeOutput が呼ばれないため明示削除する）
+    for (let i = 0; i < (node.outputs?.length ?? 0); i++) {
+        for (const linkId of [...(node.outputs[i]?.links ?? [])]) {
+            app.graph.removeLink(linkId);
+        }
+    }
+
+    // スロット構造を更新
+    syncFn();
+
+    // LiteGraph の DOM/グラフ更新を待ってから再接続
+    setTimeout(() => {
+        for (let i = 0; i < items.length; i++) {
+            for (const conn of (items[i]._links ?? [])) {
+                const targetNode = app.graph.getNodeById(conn.targetId);
+                if (targetNode) node.connect(slotOffset + i, targetNode, conn.targetSlot);
+            }
+        }
+        // 再接続後の状態を _links に反映
+        captureOutputLinks(node, items, slotOffset);
+        app.canvas?.setDirty(true, true);
+    }, 0);
 }

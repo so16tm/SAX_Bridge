@@ -32,6 +32,7 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
     - [SAX Node Collector](#sax-node-collector)
     - [SAX Pipe Collector](#sax-pipe-collector)
   - [Utility](#utility)
+    - [SAX Primitive Store](#sax-primitive-store)
     - [SAX Cache](#sax-cache)
     - [SAX Toggle Manager](#sax-toggle-manager)
 - [典型的なワークフロー](#典型的なワークフロー)
@@ -100,8 +101,9 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 
 | Node ID | 表示名 |
 |---------|--------|
-| `SAX_Bridge_Cache` | [SAX Cache](#sax-cache) |
-| `SAX_Bridge_Toggle_Manager` | [SAX Toggle Manager](#sax-toggle-manager) |
+| `SAX_Bridge_Primitive_Store` | [SAX Primitive Store](#sax-primitive-store) |
+| `SAX_Bridge_Cache`           | [SAX Cache](#sax-cache) |
+| `SAX_Bridge_Toggle_Manager`  | [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
@@ -672,6 +674,37 @@ output/2026-03-20/001_20260320_153045_01.webp
 ---
 
 ## Utility
+
+### SAX Primitive Store
+
+`SAX_Bridge_Primitive_Store` — ワークフロー内で利用する共通プリミティブ変数を一か所で定義・管理するノードです。アイテムを追加するたびに出力スロットが増え、下流ノードへ値を配布します。入力スロットはなく、すべての値はノード内で完結します。
+
+**出力**
+
+アイテムごとに動的生成。型はアイテムの型（INT / FLOAT / STRING / BOOLEAN）に対応。
+
+#### 対応型
+
+| バッジ | 型 | 値の操作 |
+|-------|----|---------|
+| `INT` | Integer | ドラッグで増減 / クリックで Value・Min・Max・Step を編集 |
+| `FLT` | Float | ドラッグで増減 / クリックで Value・Min・Max・Step を編集 |
+| `STR` | String | クリックでテキスト入力ダイアログ |
+| `BOL` | Boolean | クリックで即トグル（ON / OFF） |
+
+#### 操作方法
+
+| 操作 | 動作 |
+|------|------|
+| `Add parameter` クリック | 型と名前を指定して新規パラメータを追加 |
+| 値エリアのドラッグ | INT / FLOAT の値を増減（dragScale は型と step に連動） |
+| 値エリアのクリック | INT / FLOAT は Value・Min・Max・Step 編集ポップアップを表示 / STRING はテキスト入力 / BOOLEAN は即トグル |
+| アイテム行の ▲ / ▼ クリック | 出力スロットの並び順を変更 |
+| アイテム行の [✕] クリック | アイテムと対応する出力スロットを削除 |
+
+> **名前変更不可**: 追加後の名前変更はサポートしません。名前を変えたい場合は削除して再追加してください。下流接続の付け替えは ComfyUI 標準機能（リンク再接続）で行えます。
+
+---
 
 ### SAX Toggle Manager
 
