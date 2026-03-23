@@ -9,9 +9,9 @@ ANY = _AnyType("*")
 MAX_SLOTS = 32
 
 
-class SAX_Bridge_Remote_Get:
+class SAX_Bridge_Node_Collector:
     """
-    Remote Get Node — ピッカーで任意ノードの出力を直接参照する。
+    Node Collector — ピッカーで任意ノードの出力を直接参照する。
 
     JS ピッカーがソースノードの出力を slot_0..slot_N に接続し、
     対応する out_0..out_N として下流ノードへ転送する。
@@ -28,7 +28,7 @@ class SAX_Bridge_Remote_Get:
     RETURN_TYPES  = (ANY,) * MAX_SLOTS
     RETURN_NAMES  = tuple(f"out_{i}" for i in range(MAX_SLOTS))
     FUNCTION      = "passthrough"
-    CATEGORY      = "SAX/Bridge/Utility"
+    CATEGORY      = "SAX/Bridge/Collect"
     OUTPUT_NODE   = False
 
     def passthrough(self, **kwargs):

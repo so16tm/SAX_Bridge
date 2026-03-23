@@ -27,10 +27,12 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
   - [Output](#output)
     - [SAX Output](#sax-output)
     - [SAX Image Preview](#sax-image-preview)
-  - [Utility](#utility)
+  - [Collect](#collect)
     - [SAX Image Collector](#sax-image-collector)
+    - [SAX Node Collector](#sax-node-collector)
+    - [SAX Pipe Collector](#sax-pipe-collector)
+  - [Utility](#utility)
     - [SAX Cache](#sax-cache)
-    - [SAX Remote Get](#sax-remote-get)
     - [SAX Toggle Manager](#sax-toggle-manager)
 - [典型的なワークフロー](#典型的なワークフロー)
 - [インストール](#インストール)
@@ -86,13 +88,19 @@ ComfyUI のワークフローを補完・拡張する統合ブリッジモジュ
 | `SAX_Bridge_Output` | [SAX Output](#sax-output) |
 | `SAX_Bridge_Image_Preview` | [SAX Image Preview](#sax-image-preview) |
 
-### Utility
+### Collect
 
 | Node ID | 表示名 |
 |---------|--------|
 | `SAX_Bridge_Image_Collector` | [SAX Image Collector](#sax-image-collector) |
+| `SAX_Bridge_Node_Collector`  | [SAX Node Collector](#sax-node-collector) |
+| `SAX_Bridge_Pipe_Collector`  | [SAX Pipe Collector](#sax-pipe-collector) |
+
+### Utility
+
+| Node ID | 表示名 |
+|---------|--------|
 | `SAX_Bridge_Cache` | [SAX Cache](#sax-cache) |
-| `SAX_Bridge_Remote_Get` | [SAX Remote Get](#sax-remote-get) |
 | `SAX_Bridge_Toggle_Manager` | [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
@@ -517,7 +525,7 @@ output/2026-03-20/001_20260320_153045_01.webp
 
 ---
 
-## Utility
+## Collect
 
 ### SAX Image Collector
 
@@ -566,9 +574,9 @@ output/2026-03-20/001_20260320_153045_01.webp
 
 ---
 
-### SAX Remote Get
+### SAX Node Collector
 
-`SAX_Bridge_Remote_Get` — 複数のノードを「ソース」として登録し、それらの出力を集約して下流ノードへ転送します。中継ノードを挟まずにワークフローを論理的に分割できます。
+`SAX_Bridge_Node_Collector` — 複数のノードを「ソース」として登録し、それらのすべての出力を集約して下流ノードへ転送します。中継ノードを挟まずにワークフローを論理的に分割できます。
 
 > **実行に参加**: Set/Get ノードと異なり実際の配線で接続するため、ComfyUI の通常の実行グラフに乗ります。ソースとの接続ワイヤーは非表示にできます。
 
@@ -612,12 +620,58 @@ output/2026-03-20/001_20260320_153045_01.webp
 
 - サブグラフ / ノードの順に分類表示（出力スロットを持つノードのみ）
 - インクリメンタルサーチ対応
-- 各ノード行に出力スロット名を小さく表示（接続先の選択を補助）
 - 各行の 📍 ボタンでキャンバス上の位置へジャンプ＋ハイライト
 - 「↩ Return to picker」ボタンでピッカーに復帰
 - 現在選択中のソースは ✓ でハイライト
 
 ---
+
+### SAX Pipe Collector
+
+`SAX_Bridge_Pipe_Collector` — 複数の PIPE_LINE 出力を持つノードをソースとして登録し、先頭から走査して最初に見つかった非 None の PIPE を返します。
+
+> **優先順位による切り替え**: ソースリストの先頭から順に評価し、実行済みの有効な PIPE を返します。全スロットが None の場合は下流でエラーになります（設計不備として意図的）。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `slot_0` 〜 `slot_15` | ANY (optional) | 収集対象の PIPE_LINE 出力を接続。16 スロット対応 |
+
+**出力**
+
+| 出力 | 型 | 説明 |
+|-----|-----|------|
+| `pipe` | PIPE_LINE | 最初に見つかった非 None の PIPE |
+
+#### 主な機能
+
+**複数ソースの管理**
+- `＋ ソース追加` ボタンでピッカーを開き、PIPE_LINE 出力を持つノードを選択・追加
+- 1 ソース = 1 スロット固定（PIPE_LINE 出力 1 本のみ接続）
+- 各ソースを独立して削除可能（[✕] ボタン）
+- ソースの並び替えで優先順位を変更（最大 16 ソース）
+
+**ワイヤー表示制御**
+- Show links pill トグルでソースとの接続ワイヤーを表示 / 非表示
+
+**自動追従**
+- ソースノードが削除された場合、該当ソースをウィジェットから自動削除
+- ソースノードのタイトル変更・出力変更を自動検知して再同期
+
+#### 操作方法
+
+| 操作 | 動作 |
+|------|------|
+| `＋ ソース追加` / `ソースを選択…` クリック | ソース選択ピッカーを開く（PIPE_LINE 出力を持つノードのみ） |
+| ソース行の [✕] クリック | 該当ソースを削除 |
+| ソース行の ▲ / ▼ クリック | ソースの優先順位を変更 |
+| ソース名ラベルクリック | ソースノードへキャンバス移動 |
+| Show links pill クリック | ソースとの接続ワイヤーの表示 / 非表示を切り替え |
+
+---
+
+## Utility
 
 ### SAX Toggle Manager
 

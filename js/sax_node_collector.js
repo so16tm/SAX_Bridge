@@ -14,8 +14,8 @@ import {
     applyLinkVisibility, toggleLinkVisibility, _hiddenLinkIds,
 } from "./sax_ui_base.js";
 
-const EXT_NAME  = "SAX.RemoteGet";
-const NODE_TYPE = "SAX_Bridge_Remote_Get";
+const EXT_NAME  = "SAX.NodeCollector";
+const NODE_TYPE = "SAX_Bridge_Node_Collector";
 const MAX_SLOTS = 32;   // Python 側 MAX_SLOTS と合わせる
 
 // ---------------------------------------------------------------------------
@@ -560,8 +560,8 @@ function makeSourceWidget(node) {
     let widgetY = 0;
 
     return {
-        name:  "__sax_remote_source",
-        type:  "__sax_remote_source",
+        name:  "__sax_node_collector",
+        type:  "__sax_node_collector",
         value: null,
 
         computeSize(W) {
@@ -749,7 +749,7 @@ app.registerExtension({
         const onSerialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (data) {
             onSerialize?.apply(this, arguments);
-            data.sax_remote = {
+            data.sax_node_collector = {
                 sources:      getSources(this),
                 linksVisible: this._remoteLinksVisible ?? false,
             };
@@ -759,8 +759,8 @@ app.registerExtension({
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (data) {
             onConfigure?.apply(this, arguments);
-            if (data.sax_remote) {
-                const saved = data.sax_remote;
+            if (data.sax_node_collector) {
+                const saved = data.sax_node_collector;
 
                 // 旧フォーマット（v1: sourceId が直接ある）→ sources[] 形式へ移行
                 let sources;
@@ -801,7 +801,7 @@ app.registerExtension({
                 syncSlotLabels(this);
             }
 
-            if (!this.widgets?.some(w => w.name === "__sax_remote_source")) {
+            if (!this.widgets?.some(w => w.name === "__sax_node_collector")) {
                 this.addCustomWidget(makeSourceWidget(this));
             }
             this.size[0] = Math.max(this.size[0], 320);

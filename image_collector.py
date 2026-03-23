@@ -90,7 +90,7 @@ class SAX_Bridge_Image_Collector:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("images",)
     FUNCTION     = "collect"
-    CATEGORY     = "SAX/Bridge/Utility"
+    CATEGORY     = "SAX/Bridge/Collect"
     OUTPUT_NODE  = False
     DESCRIPTION  = (
         "Collects IMAGE outputs from registered source nodes and concatenates them "
