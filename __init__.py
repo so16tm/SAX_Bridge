@@ -1,23 +1,23 @@
-from .detailer import (
+from .nodes.detailer import (
     SAX_Bridge_Detailer,
     SAX_Bridge_Detailer_Enhanced,
 )
-from .noise import SAX_Bridge_Noise_Image, SAX_Bridge_Noise_Latent
-from .upscaler import SAX_Bridge_Upscaler
-from .cache import SAX_Bridge_Cache
-from .output import SAX_Bridge_Output, SAX_Bridge_Image_Preview
-from .image_collector import SAX_Bridge_Image_Collector
-from .node_collector  import SAX_Bridge_Node_Collector
-from .pipe_collector    import SAX_Bridge_Pipe_Collector
-from .primitive_store   import SAX_Bridge_Primitive_Store
-from .toggle_manager import SAX_Bridge_Toggle_Manager
-from .loader import SAX_Bridge_Loader_Lora
-from .sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
+from .nodes.noise import SAX_Bridge_Noise_Image, SAX_Bridge_Noise_Latent
+from .nodes.upscaler import SAX_Bridge_Upscaler
+from .nodes.cache import SAX_Bridge_Cache
+from .nodes.output import SAX_Bridge_Output, SAX_Bridge_Image_Preview
+from .nodes.image_collector import SAX_Bridge_Image_Collector
+from .nodes.node_collector  import SAX_Bridge_Node_Collector
+from .nodes.pipe_collector  import SAX_Bridge_Pipe_Collector
+from .nodes.primitive_store import SAX_Bridge_Primitive_Store
+from .nodes.toggle_manager  import SAX_Bridge_Toggle_Manager
+from .nodes.loader import SAX_Bridge_Loader_Lora
+from .nodes.sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
 
 # V3 API ノード
-from . import prompt as prompt_node
-from . import pipe as pipe_node
-from . import loader as loader_node
+from .nodes import prompt as prompt_node
+from .nodes import pipe as pipe_node
+from .nodes import loader as loader_node
 
 NODE_CLASS_MAPPINGS = {
     # Detailer 系列
