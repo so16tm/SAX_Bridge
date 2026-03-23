@@ -37,6 +37,7 @@ export const ROW_H           = 24;   // 標準行高（LoRA / SAM3 / Toggle Mana
 export const HEADER_H        = 20;   // ヘッダー行高（Show Links トグル等）
 export const COLUMN_HEADER_H = 16;   // 列ラベル行高（SAM3 Multi 等）
 export const ADD_H           = 28;   // Add ボタン行高（全ノード統一）
+export const ADD_BTN_LABEL   = "+ Add Item";  // Add ボタンの標準ラベル
 export const GAP             = 4;    // 行内部の要素間ギャップ
 export const BTN_RADIUS      = 4;    // アクションボタンの角丸半径
 export const ITEM_MARGIN     = 2;    // 行／ボタン内の上下マージン（上: +ITEM_MARGIN, 高さ: -2*ITEM_MARGIN）
@@ -911,7 +912,7 @@ export function makeItemListWidget(spec) {
             if (addButton) {
                 const btnY   = itemsY + items.length * ROW_H;
                 const canAdd = items.length < maxItems;
-                drawAddBtn(ctx, W, btnY, addButton.label, canAdd);
+                drawAddBtn(ctx, W, btnY, addButton.label ?? ADD_BTN_LABEL, canAdd);
             }
         },
 

@@ -308,7 +308,7 @@ function makeSourceWidget(node) {
             const btnY   = y + HEADER_H + sources.length * ROW_H;
             const canAdd = getTotalSlotCount(drawNode) < MAX_SLOTS;
             drawAddBtn(ctx, W, btnY,
-                sources.length === 0 ? "Select source…" : "+ Add source",
+                sources.length === 0 ? "Select source…" : "+ Add Source",
                 canAdd);
         },
 

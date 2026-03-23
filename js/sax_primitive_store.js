@@ -292,7 +292,6 @@ function makeStoreWidget(node) {
         hasDelete:     true,
 
         addButton: {
-            label: "Add parameter",
             onAdd: (n, _items2, _save) => showAddDialog(node, saveItems),
         },
     });

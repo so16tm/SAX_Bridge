@@ -175,7 +175,6 @@ function buildUI(node) {
         },
 
         addButton: {
-            label:    "+ Add Segment",
             onCreate: () => makeEntry(),
         },
     }));

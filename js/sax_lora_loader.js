@@ -454,7 +454,6 @@ function buildUI(node) {
         },
 
         addButton: {
-            label: "+ Add LoRA",
             onAdd(node, items, saveItems) {
                 showLoraPicker("", null, {
                     mode: "multi",
