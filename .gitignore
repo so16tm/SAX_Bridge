@@ -3,3 +3,6 @@ __pycache__/
 *.pyo
 .env
 *.log
+
+# IDE 設定（ローカル開発環境向け）
+pyrightconfig.json
