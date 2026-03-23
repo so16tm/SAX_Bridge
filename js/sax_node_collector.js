@@ -208,7 +208,10 @@ function resyncSource(node, srcIdx, srcNode) {
 function rebuildAllSources(node) {
     const savedSources = [...getSources(node)];
 
-    // 下流リンクを保存（sourceId + グローバルスロットインデックス → 下流ノード/スロット）
+    // 下流リンクを保存
+    // outName: 保存時点の NC 出力ラベル（= ソースの旧スロット名）。
+    // resyncSource から呼ばれた場合、src.slotNames はすでに新順に更新されているため
+    // インデックスではなく名前で復元先を特定する。
     const downstreamMap = [];
     for (let si = 0; si < savedSources.length; si++) {
         const src     = savedSources[si];
@@ -224,6 +227,7 @@ function rebuildAllSources(node) {
                     downstreamMap.push({
                         sourceId:      src.sourceId,
                         globalSlotIdx: enabled[li],
+                        outName:       out.label ?? out.name ?? null,
                         targetId:      lnk.target_id,
                         targetSlot:    lnk.target_slot,
                     });
@@ -252,8 +256,17 @@ function rebuildAllSources(node) {
     for (const ds of downstreamMap) {
         const newSi = getSources(node).findIndex(s => s.sourceId === ds.sourceId);
         if (newSi < 0) continue;
-        const src      = getSources(node)[newSi];
-        const localIdx = (src.enabledSlots ?? []).indexOf(ds.globalSlotIdx);
+        const src = getSources(node)[newSi];
+
+        // 名前ベースで新インデックスを解決（ソース内でスロットが並び替えられた場合に対応）
+        // 名前が見つからない場合は旧インデックスにフォールバック
+        let resolvedGlobalIdx = ds.globalSlotIdx;
+        if (ds.outName != null) {
+            const nameIdx = src.slotNames.indexOf(ds.outName);
+            if (nameIdx >= 0) resolvedGlobalIdx = nameIdx;
+        }
+
+        const localIdx = (src.enabledSlots ?? []).indexOf(resolvedGlobalIdx);
         if (localIdx < 0) continue;
         const newAbsIdx = getOffset(node, newSi) + localIdx;
         const tgtNode = app.graph.getNodeById(ds.targetId);
