@@ -329,6 +329,16 @@ def _extract_pipe(pipe):
     }
 
 
+def _ensure_negative(p):
+    """negative が None の場合、CLIP で空文字列をエンコードして補完する。"""
+    if p["negative"] is None:
+        if p["clip"] is None:
+            raise ValueError(
+                "[SAX_Bridge] Pipe does not contain negative conditioning or CLIP model."
+            )
+        p["negative"] = nodes.CLIPTextEncode().encode(p["clip"], "")[0]
+
+
 # ---------------------------------------------------------------------------
 # SAX_Bridge_Detailer ノード
 # ---------------------------------------------------------------------------
@@ -369,8 +379,9 @@ class SAX_Bridge_Detailer:
                        mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
-                or p["positive"] is None or p["negative"] is None:
+                or p["positive"] is None:
             return (pipe, p["images"])
+        _ensure_negative(p)
 
         steps_eff = steps_override if steps_override > 0 else p["steps"]
         cfg_eff   = cfg_override   if cfg_override   > 0 else p["cfg"]
@@ -449,8 +460,9 @@ class SAX_Bridge_Detailer_Enhanced:
                            mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
-                or p["positive"] is None or p["negative"] is None:
+                or p["positive"] is None:
             return (pipe, p["images"])
+        _ensure_negative(p)
 
         steps_eff = steps_override if steps_override > 0 else p["steps"]
         cfg_eff   = cfg_override   if cfg_override   > 0 else p["cfg"]

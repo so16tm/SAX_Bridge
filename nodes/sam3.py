@@ -687,8 +687,7 @@ class SAX_Bridge_Segmenter_Multi:
         # (result_maskが0.0なら透過度0となり色は乗らない)
         apply_alpha = result_mask.unsqueeze(-1) * preview_base_alpha
 
-        # images は元の CPU テンソル [B, H, W, C]
-        base_img = images[..., :3]  # RGBのみ対象
+        base_img = images[..., :3].to(colormap_rgb.device)  # デバイスを統一
         preview_images = base_img * (1.0 - apply_alpha) + colormap_rgb * apply_alpha
         
         # もし元の画像が RGBA (4ch) だった場合は Alpha を維持

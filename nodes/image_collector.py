@@ -118,7 +118,7 @@ class SAX_Bridge_Image_Collector:
                 ref_h, ref_w = h, w
 
             for bi in range(val.shape[0]):
-                frames.append(val[bi : bi + 1])   # [1, H, W, C]
+                frames.append(val[bi : bi + 1].cpu())   # [1, H, W, C]
 
         if not frames:
             return (torch.zeros(1, 8, 8, 3, dtype=torch.float32),)

@@ -40,8 +40,8 @@ class SAX_Bridge_Loader(io.ComfyNode):
                 io.Combo.Input("sampler_name", options=comfy.samplers.KSampler.SAMPLERS),
                 io.Combo.Input("scheduler_name", options=comfy.samplers.KSampler.SCHEDULERS),
                 io.Float.Input("denoise", default=1.0, min=0.0, max=1.0, step=0.01),
-                io.Int.Input("width", default=512, min=1, max=8192, step=8),
-                io.Int.Input("height", default=512, min=1, max=8192, step=8),
+                io.Int.Input("width", default=512, min=8, max=8192, step=8),
+                io.Int.Input("height", default=512, min=8, max=8192, step=8),
                 io.Int.Input("batch_size", default=1, min=1, max=4096),
             ],
             outputs=[

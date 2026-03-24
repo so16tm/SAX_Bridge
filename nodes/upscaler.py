@@ -6,7 +6,7 @@ import nodes
 import comfy.utils
 import folder_paths
 
-from .detailer import _extract_pipe
+from .detailer import _extract_pipe, _ensure_negative
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -162,13 +162,13 @@ class SAX_Bridge_Upscaler:
         # --- 2. 軽量 i2i（denoise > 0 のとき） ---
         if denoise > 0:
             p = _extract_pipe(pipe)
-            if p["model"] is None or p["vae"] is None \
-                    or p["positive"] is None or p["negative"] is None:
+            if p["model"] is None or p["vae"] is None or p["positive"] is None:
                 logger.warning(
-                    "[SAX_Bridge] Upscaler: pipe is missing required elements for img2img (model/vae/positive/negative). "
+                    "[SAX_Bridge] Upscaler: pipe is missing required elements for img2img (model/vae/positive). "
                     "Upscaling only."
                 )
             else:
+                _ensure_negative(p)
                 steps_eff = steps_override if steps_override > 0 else p["steps"]
                 cfg_eff   = cfg_override   if cfg_override   > 0 else p["cfg"]
 
