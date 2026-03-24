@@ -188,7 +188,7 @@ def _run_detail_loop(
     shadow_enhance=0.0, shadow_decay=0.0,
     edge_weight=0.0, edge_blur_sigma=1.0,
     # Guidance（共通）
-    guidance_mode="off", guidance_strength=0.0,
+    guidance_mode="off", guidance_strength=0.0, pag_strength=0.0,
 ):
     """
     Detailer / Enhanced Detailer 共通のディテーリングループ。
@@ -217,7 +217,7 @@ def _run_detail_loop(
     mask_in_bbox = mask[:, y_min:y_max+1, x_min:x_max+1]
 
     # モデルパッチ（ループ前に 1 回だけ clone して設定）
-    guided_model = apply_guidance_to_model(model, guidance_mode, guidance_strength)
+    guided_model = apply_guidance_to_model(model, guidance_mode, guidance_strength, pag_strength)
     base_model = guided_model if guided_model is not None else model
 
     if noise_mask_feather > 0 and _HAS_DIFF_DIFFUSION:
@@ -378,6 +378,8 @@ class SAX_Bridge_Detailer:
                     "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both."}),
                 "guidance_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
                                                 "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
+                "pag_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                                           "tooltip": "Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."}),
             }
         }
 
@@ -389,7 +391,7 @@ class SAX_Bridge_Detailer:
     def do_detail_core(self, pipe, denoise, denoise_decay, cycle, noise_mask_feather, blend_feather,
                        crop_factor, context_blur_sigma, context_blur_radius,
                        mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0,
-                       guidance_mode="off", guidance_strength=0.5):
+                       guidance_mode="off", guidance_strength=0.5, pag_strength=0.0):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
@@ -410,7 +412,7 @@ class SAX_Bridge_Detailer:
             noise_mask_feather, blend_feather, crop_factor,
             context_blur_sigma, context_blur_radius,
             mask=mask,
-            guidance_mode=guidance_mode, guidance_strength=guidance_strength,
+            guidance_mode=guidance_mode, guidance_strength=guidance_strength, pag_strength=pag_strength,
         )
 
         if result_images is None:
@@ -464,6 +466,8 @@ class SAX_Bridge_Detailer_Enhanced:
                     "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both."}),
                 "guidance_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
                                                 "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
+                "pag_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                                           "tooltip": "Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."}),
             }
         }
 
@@ -477,7 +481,7 @@ class SAX_Bridge_Detailer_Enhanced:
                            shadow_enhance, shadow_decay, edge_weight, edge_blur_sigma,
                            context_blur_sigma, context_blur_radius,
                            mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0,
-                           guidance_mode="off", guidance_strength=0.5):
+                           guidance_mode="off", guidance_strength=0.5, pag_strength=0.0):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
@@ -504,7 +508,7 @@ class SAX_Bridge_Detailer_Enhanced:
             shadow_decay=shadow_decay,
             edge_weight=edge_weight,
             edge_blur_sigma=edge_blur_sigma,
-            guidance_mode=guidance_mode, guidance_strength=guidance_strength,
+            guidance_mode=guidance_mode, guidance_strength=guidance_strength, pag_strength=pag_strength,
         )
 
         if result_images is None:

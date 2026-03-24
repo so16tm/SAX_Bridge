@@ -15,6 +15,10 @@ from .nodes.loader import SAX_Bridge_Loader_Lora
 from .nodes.sampler import SAX_Bridge_KSampler
 from .nodes.guidance import SAX_Bridge_Guidance
 from .nodes.sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
+from .nodes.schedulers import register_schedulers
+
+# AYS スケジューラをグローバル登録（ドロップダウンに表示される）
+register_schedulers()
 
 # V3 API ノード
 from .nodes import prompt as prompt_node

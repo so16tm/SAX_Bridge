@@ -1,16 +1,19 @@
 """
 SAX_Bridge_Guidance — CFG ガイダンス強化ノード
 
-信号処理の基本手法（帯域分離ゲイン制御・ソフトクリッピング）を
-ComfyUI の sampler_cfg_function / sampler_post_cfg_function に適用し、
-高 CFG 時の色飽和・スパイク抑制、および低 CFG 時のディテール強調を行う。
+信号処理の基本手法（帯域分離ゲイン制御・ソフトクリッピング）と
+Attention ベースのガイダンス（PAG）を ComfyUI のサンプラーフックに適用する。
 
 参考文献:
   - 帯域分離: 古典的ハイパス/ローパスフィルタ分解
   - ソフトクリッピング: tanh 圧縮（信号処理の標準手法）
+  - PAG: arXiv:2403.17377 (Ahn et al. 2024)
 """
 import torch
 import torch.nn.functional as F
+
+import comfy.model_patcher
+import comfy.samplers
 
 from .io_types import PipeLine
 
@@ -73,9 +76,10 @@ _AGC_TAU_RANGE = (4.0, 1.5)        # 弱→強: tau が大きいほど緩い
 _FDG_LOW_GAIN_RANGE = (1.0, 0.4)   # 弱→強: 1.0=無効、0.4=最大抑制
 _FDG_HIGH_GAIN_RANGE = (1.0, 1.6)  # 弱→強: 1.0=無効、1.6=最大強調
 # post-CFG 用（denoised 空間）: 毎ステップ累積するため控えめに設定
-# strength=0.2 が実用中央値になるよう調整
 _POST_FDG_LOW_GAIN_RANGE = (1.0, 0.85)
 _POST_FDG_HIGH_GAIN_RANGE = (1.0, 1.15)
+# PAG スケール: ComfyUI デフォルト 3.0、strength=0.5 で 3.0 になるよう設定
+_PAG_SCALE_RANGE = (0.0, 6.0)
 
 
 def _lerp(a: float, b: float, t: float) -> float:
@@ -83,7 +87,7 @@ def _lerp(a: float, b: float, t: float) -> float:
 
 
 def _strength_to_params(strength: float):
-    """0.0〜1.0 の strength を AGC tau / FDG gain に変換する。"""
+    """0.0〜1.0 の strength を各パラメータに変換する。"""
     t = max(0.0, min(1.0, strength))
     return {
         "agc_tau": _lerp(*_AGC_TAU_RANGE, t),
@@ -91,6 +95,7 @@ def _strength_to_params(strength: float):
         "fdg_high_gain": _lerp(*_FDG_HIGH_GAIN_RANGE, t),
         "post_fdg_low_gain": _lerp(*_POST_FDG_LOW_GAIN_RANGE, t),
         "post_fdg_high_gain": _lerp(*_POST_FDG_HIGH_GAIN_RANGE, t),
+        "pag_scale": _lerp(*_PAG_SCALE_RANGE, t),
     }
 
 
@@ -150,48 +155,100 @@ def _build_post_cfg_function(
 
 
 # ---------------------------------------------------------------------------
+# PAG: Perturbed Attention Guidance (post-CFG)
+# ---------------------------------------------------------------------------
+def _build_pag_post_cfg_function(pag_scale: float):
+    """
+    Self-Attention を劣化させた推論結果との差分をガイダンスとして加算する。
+    CFG スケールに依存せず、CFG=1 でも構造・ディテールを強化できる。
+
+    参考: arXiv:2403.17377, ComfyUI comfy_extras/nodes_pag.py
+    """
+
+    def perturbed_attention(q, k, v, extra_options, mask=None):
+        return v
+
+    def post_cfg_func(args):
+        if pag_scale == 0:
+            return args["denoised"]
+
+        model = args["model"]
+        cond_pred = args["cond_denoised"]
+        cond = args["cond"]
+        cfg_result = args["denoised"]
+        sigma = args["sigma"]
+        model_options = args["model_options"].copy()
+        x = args["input"]
+
+        model_options = comfy.model_patcher.set_model_options_patch_replace(
+            model_options, perturbed_attention, "attn1", "middle", 0
+        )
+        (pag,) = comfy.samplers.calc_cond_batch(model, [cond], x, sigma, model_options)
+
+        return cfg_result + (cond_pred - pag) * pag_scale
+
+    return post_cfg_func
+
+
+# ---------------------------------------------------------------------------
 # モデルパッチ適用（detailer.py / SAX_Bridge_Guidance 共通）
 # ---------------------------------------------------------------------------
-def apply_guidance_to_model(model, guidance_mode: str, guidance_strength: float):
+def apply_guidance_to_model(model, guidance_mode: str, guidance_strength: float,
+                            pag_strength: float = 0.0):
     """
-    guidance_mode と strength に基づいてモデルをパッチする。
+    guidance_mode / strength / pag_strength に基づいてモデルをパッチする。
     パッチ不要なら None を返す。パッチ済みモデルを返す。
 
-    モード:
-      - off:      何もしない
+    guidance_mode:
+      - off:      何もしない（PAG のみ適用可能）
       - agc:      高 CFG スパイク抑制（sampler_cfg_function）
       - fdg:      帯域分離（高 CFG: sampler_cfg_function）
       - agc+fdg:  上記両方
       - post_fdg: 帯域分離（低 CFG 対応: sampler_post_cfg_function）
+
+    pag_strength:
+      - 0.0: PAG 無効
+      - > 0: PAG 有効（post_cfg_function として追加、他モードと併用可能）
     """
-    if guidance_mode == "off" or guidance_strength <= 0.0:
+    has_guidance = guidance_mode != "off" and guidance_strength > 0.0
+    has_pag = pag_strength > 0.0
+
+    if not has_guidance and not has_pag:
         return None
 
     params = _strength_to_params(guidance_strength)
+    pag_params = _strength_to_params(pag_strength)
     patched = model.clone()
 
-    if guidance_mode == "post_fdg":
-        # post-CFG: denoised テンソルに直接適用（CFG スケール非依存）
-        import comfy.model_patcher
+    # --- CFG / FDG / AGC ---
+    if has_guidance:
+        if guidance_mode == "post_fdg":
+            patched.model_options = comfy.model_patcher.set_model_options_post_cfg_function(
+                patched.model_options.copy(),
+                _build_post_cfg_function(
+                    fdg_low_gain=params["post_fdg_low_gain"],
+                    fdg_high_gain=params["post_fdg_high_gain"],
+                ),
+                disable_cfg1_optimization=True,
+            )
+        else:
+            agc_on = guidance_mode in ("agc", "agc+fdg")
+            fdg_on = guidance_mode in ("fdg", "agc+fdg")
+            patched.set_model_sampler_cfg_function(
+                _build_cfg_function(
+                    agc_enable=agc_on, agc_tau=params["agc_tau"],
+                    fdg_enable=fdg_on,
+                    fdg_low_gain=params["fdg_low_gain"],
+                    fdg_high_gain=params["fdg_high_gain"],
+                ),
+                disable_cfg1_optimization=True,
+            )
+
+    # --- PAG（post-CFG として追加、他モードと併用可能）---
+    if has_pag:
         patched.model_options = comfy.model_patcher.set_model_options_post_cfg_function(
             patched.model_options.copy(),
-            _build_post_cfg_function(
-                fdg_low_gain=params["post_fdg_low_gain"],
-                fdg_high_gain=params["post_fdg_high_gain"],
-            ),
-            disable_cfg1_optimization=True,
-        )
-    else:
-        # pre-CFG: delta に適用（従来方式）
-        agc_on = guidance_mode in ("agc", "agc+fdg")
-        fdg_on = guidance_mode in ("fdg", "agc+fdg")
-        patched.set_model_sampler_cfg_function(
-            _build_cfg_function(
-                agc_enable=agc_on, agc_tau=params["agc_tau"],
-                fdg_enable=fdg_on,
-                fdg_low_gain=params["fdg_low_gain"],
-                fdg_high_gain=params["fdg_high_gain"],
-            ),
+            _build_pag_post_cfg_function(pag_scale=pag_params["pag_scale"]),
             disable_cfg1_optimization=True,
         )
 
@@ -206,7 +263,7 @@ _ALL_MODES = ["off", "agc", "fdg", "agc+fdg", "post_fdg"]
 
 class SAX_Bridge_Guidance:
     """
-    パイプラインのモデルに AGC / FDG ガイダンス強化を適用する。
+    パイプラインのモデルに AGC / FDG / PAG ガイダンス強化を適用する。
     Detailer・KSampler・Upscaler の前に配置して使う。
     """
 
@@ -221,7 +278,12 @@ class SAX_Bridge_Guidance:
                                "agc+fdg=both, post_fdg=detail emphasis (low CFG / low-step LoRA)"}),
                 "strength": ("FLOAT", {
                     "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "Effect intensity. 0.0=no effect, 0.5=moderate, 1.0=maximum."}),
+                    "tooltip": "Effect intensity for AGC/FDG modes. 0.0=no effect, 0.5=moderate, 1.0=maximum."}),
+                "pag_strength": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "Perturbed Attention Guidance intensity. Works at any CFG. "
+                               "0.0=disabled, 0.5=standard (scale=3.0). Can combine with other modes. "
+                               "Note: adds one extra forward pass per step."}),
             },
         }
 
@@ -230,15 +292,15 @@ class SAX_Bridge_Guidance:
     FUNCTION = "apply_guidance"
     CATEGORY = "SAX/Bridge/Enhance"
 
-    def apply_guidance(self, pipe, mode, strength):
-        if mode == "off" or strength <= 0.0:
+    def apply_guidance(self, pipe, mode, strength, pag_strength):
+        if (mode == "off" or strength <= 0.0) and pag_strength <= 0.0:
             return (pipe,)
 
         model = pipe.get("model")
         if model is None:
             return (pipe,)
 
-        patched = apply_guidance_to_model(model, mode, strength)
+        patched = apply_guidance_to_model(model, mode, strength, pag_strength)
         if patched is None:
             return (pipe,)
 
