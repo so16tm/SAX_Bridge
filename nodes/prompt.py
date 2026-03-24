@@ -224,16 +224,6 @@ class SAX_Bridge_Prompt:
                         "tooltip": "Enter your prompt using wildcard syntax. LoRA syntax and BREAK syntax are also supported.",
                     },
                 ),
-                "seed": (
-                    "INT",
-                    {
-                        "default": -1,
-                        "min": -1,
-                        "max": 0xFFFFFFFFFFFFFFFF,
-                        "control_after_generate": True,
-                        "tooltip": "Random seed for wildcard processing. -1 for inheritance from pipe seed.",
-                    },
-                ),
                 "select_to_add_lora": (
                     ["Select the LoRA to add to the text"]
                     + folder_paths.get_filename_list("loras"),
@@ -247,7 +237,7 @@ class SAX_Bridge_Prompt:
     RETURN_NAMES = ("PIPE", "POPULATED_TEXT")
     FUNCTION = "doit"
 
-    def doit(self, pipe, wildcard_text, seed, **kwargs):
+    def doit(self, pipe, wildcard_text, **kwargs):
         wildcards = _get_impact_wildcards()
 
         # --- 1. Pipe から model, clip を取得 ---
@@ -260,7 +250,7 @@ class SAX_Bridge_Prompt:
             raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
 
         # --- 2. ワイルドカード展開 ---
-        actual_seed = seed if seed != -1 else pipe.get("seed", 0)
+        actual_seed = pipe.get("seed", 0)
         populated = wildcards.process(wildcard_text, actual_seed)
 
         # --- 3. LoRA タグ解析・除去 ---
@@ -331,14 +321,6 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
                     label_on="positive",
                     label_off="negative",
                 ),
-                io.Int.Input(
-                    "seed",
-                    default=-1,
-                    min=-1,
-                    max=0xFFFFFFFFFFFFFFFF,
-                    control_after_generate=True,
-                    tooltip="Random seed for wildcard processing. -1 for inheritance from pipe seed.",
-                ),
                 io.Autogrow.Input("texts", template=autogrow_template),
             ],
             outputs=[
@@ -353,7 +335,6 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         cls,
         pipe,
         target_positive,
-        seed,
         texts: io.Autogrow.Type,
     ) -> io.NodeOutput:
         wildcards = _get_impact_wildcards()
@@ -383,7 +364,7 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
             raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
 
         # 展開・エンコード処理
-        actual_seed = seed if seed != -1 else pipe.get("seed", 0)
+        actual_seed = pipe.get("seed", 0)
         populated = wildcards.process(wildcard_text, actual_seed)
         loras = wildcards.extract_lora_values(populated)
         clean_text = wildcards.remove_lora_tags(populated)

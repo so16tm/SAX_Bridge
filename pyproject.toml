@@ -1,10 +1,13 @@
 [project]
 name = "sax-bridge"
-description = "ComfyUI custom nodes for Pipe-based workflow management, Wildcard/LoRA prompting, Precision Detailer, and Masked Noise Injection."
+description = "ComfyUI custom nodes for Pipe-based workflow management, KSampler, Detailer, Upscaler, SAM3 segmentation, Toggle Manager, and Collector nodes."
 version = "1.0.0"
 license = { file = "LICENSE" }
-requires = ["comfyui-impact-pack"]
+requires = []
 dependencies = []
+
+[project.optional-dependencies]
+wildcards = ["comfyui-impact-pack"]
 
 [project.urls]
 Repository = "https://github.com/so16tm/SAX_Bridge"
@@ -12,4 +15,4 @@ Repository = "https://github.com/so16tm/SAX_Bridge"
 [tool.comfy]
 PublisherId = "so16tm"
 DisplayName = "SAX Bridge"
-Icon = ""
+Icon = "https://raw.githubusercontent.com/so16tm/SAX_Bridge/main/docs/images/icon.png"
