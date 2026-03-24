@@ -4,6 +4,7 @@ import nodes
 
 from .io_types import PipeLine
 from .noise import SAXNoiseEngine
+from .guidance import apply_guidance_to_model, _ALL_MODES
 
 try:
     import comfy_extras.nodes_differential_diffusion as _diff_diffusion
@@ -186,6 +187,8 @@ def _run_detail_loop(
     latent_noise_intensity=0.0, noise_type="gaussian",
     shadow_enhance=0.0, shadow_decay=0.0,
     edge_weight=0.0, edge_blur_sigma=1.0,
+    # Guidance（共通）
+    guidance_mode="off", guidance_strength=0.0,
 ):
     """
     Detailer / Enhanced Detailer 共通のディテーリングループ。
@@ -213,15 +216,19 @@ def _run_detail_loop(
     y_min, x_min, y_max, x_max = bbox
     mask_in_bbox = mask[:, y_min:y_max+1, x_min:x_max+1]
 
-    # DifferentialDiffusion（ループ前に 1 回だけ clone して設定）
-    sample_model = model
+    # モデルパッチ（ループ前に 1 回だけ clone して設定）
+    guided_model = apply_guidance_to_model(model, guidance_mode, guidance_strength)
+    base_model = guided_model if guided_model is not None else model
+
     if noise_mask_feather > 0 and _HAS_DIFF_DIFFUSION:
-        sample_model = model.clone()
+        sample_model = base_model if base_model is not model else model.clone()
         sample_model.set_model_denoise_mask_function(
             lambda sigma, denoise_mask, extra_options: _diff_diffusion.DifferentialDiffusion.forward(
                 sigma, denoise_mask, extra_options, strength=1.0
             )
         )
+    else:
+        sample_model = base_model
 
     result_images = images
     for i in range(cycle):
@@ -366,6 +373,11 @@ class SAX_Bridge_Detailer:
                                            "tooltip": "0 = inherit steps from loader_settings. Values ≥1 override it."}),
                 "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
                                            "tooltip": "0.0 = inherit CFG from loader_settings. Values > 0 override it."}),
+                "guidance_mode": (_ALL_MODES, {
+                    "default": "off",
+                    "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both."}),
+                "guidance_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
+                                                "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
             }
         }
 
@@ -376,7 +388,8 @@ class SAX_Bridge_Detailer:
 
     def do_detail_core(self, pipe, denoise, denoise_decay, cycle, noise_mask_feather, blend_feather,
                        crop_factor, context_blur_sigma, context_blur_radius,
-                       mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0):
+                       mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0,
+                       guidance_mode="off", guidance_strength=0.5):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
@@ -397,6 +410,7 @@ class SAX_Bridge_Detailer:
             noise_mask_feather, blend_feather, crop_factor,
             context_blur_sigma, context_blur_radius,
             mask=mask,
+            guidance_mode=guidance_mode, guidance_strength=guidance_strength,
         )
 
         if result_images is None:
@@ -445,6 +459,11 @@ class SAX_Bridge_Detailer_Enhanced:
                                            "tooltip": "0 = inherit steps from loader_settings. Values ≥1 override it."}),
                 "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
                                            "tooltip": "0.0 = inherit CFG from loader_settings. Values > 0 override it."}),
+                "guidance_mode": (_ALL_MODES, {
+                    "default": "off",
+                    "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both."}),
+                "guidance_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
+                                                "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
             }
         }
 
@@ -457,7 +476,8 @@ class SAX_Bridge_Detailer_Enhanced:
                            crop_factor, latent_noise_intensity, noise_type,
                            shadow_enhance, shadow_decay, edge_weight, edge_blur_sigma,
                            context_blur_sigma, context_blur_radius,
-                           mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0):
+                           mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0,
+                           guidance_mode="off", guidance_strength=0.5):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
@@ -484,6 +504,7 @@ class SAX_Bridge_Detailer_Enhanced:
             shadow_decay=shadow_decay,
             edge_weight=edge_weight,
             edge_blur_sigma=edge_blur_sigma,
+            guidance_mode=guidance_mode, guidance_strength=guidance_strength,
         )
 
         if result_images is None:

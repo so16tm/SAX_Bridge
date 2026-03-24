@@ -28,6 +28,17 @@ Differential Diffusion を内蔵しているため、境界の馴染みを別途
 
 さらなる品質が必要な場合は **SAX Enhanced Detailer** を選択することで、Shadow Enhancement・Edge Enhancement・Latent Noise 注入も加えられます。
 
+両 Detailer ノードにはオプションの **CFG Guidance Enhancement** 機能を搭載しています。モードを選択し強度を調整するだけで、ディテール描写を改善できます。
+
+| モード | 対象 | 効果 |
+|---|---|---|
+| `agc` | 高 CFG (5+) | tanh ソフトクリッピングで色飽和スパイクを抑制 |
+| `fdg` | 高 CFG (5+) | 帯域分離によるディテール強調 |
+| `agc+fdg` | 高 CFG (5+) | 上記両方 |
+| `post_fdg` | 低 CFG (1–3) | 低ステップ LoRA（DMD2 等）向けディテール強調 |
+
+> **SAX Guidance** をスタンドアロンノードとして SAX KSampler や SAX Upscaler の前に配置することもできます。
+
 [↑ トップへ](#sax_bridge)
 
 ---

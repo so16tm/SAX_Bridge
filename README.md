@@ -28,6 +28,17 @@ Simply append it to the end of your workflow to automatically refine areas prone
 
 For even higher quality, choose **SAX Enhanced Detailer** to add Shadow Enhancement, Edge Enhancement, and Latent Noise injection.
 
+Both Detailer nodes include an optional **CFG Guidance Enhancement** feature — select a mode and adjust strength to improve detail rendering.
+
+| Mode | Target | Effect |
+|---|---|---|
+| `agc` | High CFG (5+) | Suppresses color saturation spikes via tanh soft-clipping |
+| `fdg` | High CFG (5+) | Emphasizes detail via frequency band separation |
+| `agc+fdg` | High CFG (5+) | Both of the above |
+| `post_fdg` | Low CFG (1–3) | Detail emphasis for low-step LoRA workflows (e.g. DMD2) |
+
+> **SAX Guidance** is also available as a standalone node for use before SAX KSampler or SAX Upscaler.
+
 [↑ Back to top](#sax_bridge)
 
 ---

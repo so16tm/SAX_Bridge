@@ -13,6 +13,7 @@ from .nodes.primitive_store import SAX_Bridge_Primitive_Store
 from .nodes.toggle_manager  import SAX_Bridge_Toggle_Manager
 from .nodes.loader import SAX_Bridge_Loader_Lora
 from .nodes.sampler import SAX_Bridge_KSampler
+from .nodes.guidance import SAX_Bridge_Guidance
 from .nodes.sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
 
 # V3 API ノード
@@ -58,6 +59,9 @@ NODE_CLASS_MAPPINGS = {
     # Sampler 系列
     "SAX_Bridge_KSampler": SAX_Bridge_KSampler,
 
+    # Guidance 系列
+    "SAX_Bridge_Guidance": SAX_Bridge_Guidance,
+
     # Prompt 系列 (Class Implementations)
     "SAX_Bridge_Prompt": prompt_node.SAX_Bridge_Prompt,
 }
@@ -80,6 +84,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Loader_SAM3":     "SAX SAM3 Loader",
     "SAX_Bridge_Segmenter_Multi": "SAX SAM3 Multi Segmenter",
     "SAX_Bridge_KSampler": "SAX KSampler",
+    "SAX_Bridge_Guidance": "SAX Guidance",
     "SAX_Bridge_Prompt": "SAX Prompt",
 }
 
