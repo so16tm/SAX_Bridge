@@ -220,7 +220,7 @@ def apply_guidance_to_model(model, guidance_mode: str, guidance_strength: float,
     pag_params = _strength_to_params(pag_strength)
     patched = model.clone()
 
-    # --- CFG / FDG / AGC ---
+    # --- CFG / FDG / AGC / CFG Curve ---
     if has_guidance:
         if guidance_mode == "post_fdg":
             patched.model_options = comfy.model_patcher.set_model_options_post_cfg_function(

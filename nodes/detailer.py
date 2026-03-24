@@ -176,6 +176,48 @@ def uncrop_and_blend(original: torch.Tensor, cropped: torch.Tensor, mask: torch.
 _GRAIN_SEED_OFFSET = 10000  # shadow grain と latent noise のシード分離用オフセット
 
 
+def _match_color(
+    generated: torch.Tensor,
+    original: torch.Tensor,
+    mask_hw: torch.Tensor,
+    strength: float,
+) -> torch.Tensor:
+    """
+    生成画像の色分布を元画像に合わせる（チャネルごとの mean/std マッチング）。
+    マスク領域のみを統計計算の対象にし、strength で補正量をブレンドする。
+
+    generated : (B, H, W, C) — VAE decode 後のクロップ画像
+    original  : (B, H, W, C) — 元画像の同じクロップ領域
+    mask_hw   : (B, H, W)    — マスク (1=対象領域)
+    strength  : 0.0〜1.0 (0=無補正, 1=完全マッチ)
+    """
+    if strength <= 0 or original.shape != generated.shape:
+        return generated
+
+    mask = mask_hw.unsqueeze(-1).to(generated.device)  # (B, H, W, 1)
+    eps = 1e-6
+
+    # マスク領域のチャネルごと mean / std
+    pixel_count = mask.sum(dim=(1, 2), keepdim=True).clamp(min=1.0)  # (B, 1, 1, 1)
+
+    orig_mean = (original * mask).sum(dim=(1, 2), keepdim=True) / pixel_count
+    gen_mean = (generated * mask).sum(dim=(1, 2), keepdim=True) / pixel_count
+
+    orig_var = ((original - orig_mean) * mask).pow(2).sum(dim=(1, 2), keepdim=True) / pixel_count
+    gen_var = ((generated - gen_mean) * mask).pow(2).sum(dim=(1, 2), keepdim=True) / pixel_count
+
+    orig_std = (orig_var + eps).sqrt()
+    gen_std = (gen_var + eps).sqrt()
+
+    # 正規化 → 元の分布にスケール
+    corrected = (generated - gen_mean) * (orig_std / gen_std) + orig_mean
+    corrected = torch.clamp(corrected, 0.0, 1.0)
+
+    # strength でブレンド
+    return generated * (1.0 - strength) + corrected * strength
+
+
+
 def _run_detail_loop(
     model, vae, images, positive, negative, seed,
     steps, cfg, sampler_name, scheduler_name,
@@ -189,6 +231,8 @@ def _run_detail_loop(
     edge_weight=0.0, edge_blur_sigma=1.0,
     # Guidance（共通）
     guidance_mode="off", guidance_strength=0.0, pag_strength=0.0,
+    # カラードリフト補正
+    color_correction=0.0,
 ):
     """
     Detailer / Enhanced Detailer 共通のディテーリングループ。
@@ -295,6 +339,7 @@ def _run_detail_loop(
                 lat_noise = torch.randn(t.shape, generator=generator, dtype=t.dtype, device='cpu')
             else:
                 lat_noise = torch.rand(t.shape, generator=generator, dtype=t.dtype, device='cpu') * 2.0 - 1.0
+
             t = t + lat_noise.to(t.device) * latent_noise_intensity * noise_mask.unsqueeze(1)
 
         # noise_mask feathering
@@ -313,6 +358,12 @@ def _run_detail_loop(
         samples = sampler[0]["samples"]
 
         decoded_images = vae.decode(samples)
+
+        # カラードリフト補正: マスク領域の色分布を元画像に合わせる
+        if color_correction > 0:
+            original_crop = crop_bbox(result_images, bbox)
+            decoded_images = _match_color(decoded_images, original_crop, mask_in_bbox, color_correction)
+
         result_images = uncrop_and_blend(result_images, decoded_images, mask, bbox, feather=blend_feather)
 
     return result_images
@@ -380,6 +431,8 @@ class SAX_Bridge_Detailer:
                                                 "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
                 "pag_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                                            "tooltip": "Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."}),
+                "color_correction": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                                               "tooltip": "Color drift correction. Matches generated color distribution to original. 0=off, 0.7-1.0=recommended."}),
             }
         }
 
@@ -391,7 +444,8 @@ class SAX_Bridge_Detailer:
     def do_detail_core(self, pipe, denoise, denoise_decay, cycle, noise_mask_feather, blend_feather,
                        crop_factor, context_blur_sigma, context_blur_radius,
                        mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0,
-                       guidance_mode="off", guidance_strength=0.5, pag_strength=0.0):
+                       guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
+                       color_correction=0.0):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
@@ -413,6 +467,7 @@ class SAX_Bridge_Detailer:
             context_blur_sigma, context_blur_radius,
             mask=mask,
             guidance_mode=guidance_mode, guidance_strength=guidance_strength, pag_strength=pag_strength,
+            color_correction=color_correction,
         )
 
         if result_images is None:
@@ -468,6 +523,8 @@ class SAX_Bridge_Detailer_Enhanced:
                                                 "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
                 "pag_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                                            "tooltip": "Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."}),
+                "color_correction": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                                               "tooltip": "Color drift correction. Matches generated color distribution to original. 0=off, 0.7-1.0=recommended."}),
             }
         }
 
@@ -481,7 +538,8 @@ class SAX_Bridge_Detailer_Enhanced:
                            shadow_enhance, shadow_decay, edge_weight, edge_blur_sigma,
                            context_blur_sigma, context_blur_radius,
                            mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0,
-                           guidance_mode="off", guidance_strength=0.5, pag_strength=0.0):
+                           guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
+                       color_correction=0.0):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
@@ -509,6 +567,7 @@ class SAX_Bridge_Detailer_Enhanced:
             edge_weight=edge_weight,
             edge_blur_sigma=edge_blur_sigma,
             guidance_mode=guidance_mode, guidance_strength=guidance_strength, pag_strength=pag_strength,
+            color_correction=color_correction,
         )
 
         if result_images is None:
