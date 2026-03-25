@@ -283,11 +283,11 @@ def _run_detail_loop(
 
         # 暗部ディテール強調（Enhanced のみ有効）
         if shadow_enhance > 0:
-            current_shadow = shadow_enhance * max(0.0, 1.0 - i * shadow_decay / cycle)
+            current_shadow = shadow_enhance * 0.2 * max(0.0, 1.0 - i * shadow_decay / cycle)
             if current_shadow > 0:
                 crop_rgb = cropped_images[:, :, :, :3].permute(0, 3, 1, 2)
                 luminance = 0.299 * crop_rgb[:, 0:1] + 0.587 * crop_rgb[:, 1:2] + 0.114 * crop_rgb[:, 2:3]
-                grain_weight = 1.0 - (luminance * 0.8)
+                grain_weight = (1.0 - luminance).clamp(0.0, 1.0)
                 generator = torch.Generator(device='cpu')
                 generator.manual_seed(current_seed + _GRAIN_SEED_OFFSET)
                 grain = torch.randn(
@@ -406,33 +406,31 @@ class SAX_Bridge_Detailer:
         return {
             "required": {
                 "pipe": ("PIPE_LINE",),
+                # Sampling
                 "denoise": ("FLOAT", {"default": 0.45, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "denoise_decay": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
                 "cycle": ("INT", {"default": 1, "min": 1, "max": 10, "step": 1}),
+                # Mask & Blend
+                "crop_factor": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 10.0, "step": 0.1}),
                 "noise_mask_feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
                 "blend_feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
-                "crop_factor": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 10.0, "step": 0.1}),
-                "context_blur_sigma": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 64.0, "step": 0.5,
-                                                  "tooltip": "Blurs the context area near the mask boundary to suppress text artifacts. 0=disabled."}),
-                "context_blur_radius": ("INT", {"default": 48, "min": 0, "max": 256, "step": 4,
-                                                "tooltip": "Limits the blur target to a ring N px outside the mask boundary. 0=entire context."}),
             },
             "optional": {
                 "mask": ("MASK",),
-                "positive_prompt": ("STRING", {"multiline": True}),
+                # Override
                 "steps_override": ("INT", {"default": 0, "min": 0, "max": 200,
                                            "tooltip": "0 = inherit steps from loader_settings. Values ≥1 override it."}),
                 "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
                                            "tooltip": "0.0 = inherit CFG from loader_settings. Values > 0 override it."}),
+                # Guidance
                 "guidance_mode": (_ALL_MODES, {
                     "default": "off",
-                    "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both."}),
+                    "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both, post_fdg=low CFG."}),
                 "guidance_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
                                                 "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
                 "pag_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                                            "tooltip": "Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."}),
-                "color_correction": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                               "tooltip": "Color drift correction. Matches generated color distribution to original. 0=off, 0.7-1.0=recommended."}),
+                # Prompt (always last)
+                "positive_prompt": ("STRING", {"multiline": True}),
             }
         }
 
@@ -441,11 +439,10 @@ class SAX_Bridge_Detailer:
     FUNCTION = "do_detail_core"
     CATEGORY = "SAX/Bridge/Enhance"
 
-    def do_detail_core(self, pipe, denoise, denoise_decay, cycle, noise_mask_feather, blend_feather,
-                       crop_factor, context_blur_sigma, context_blur_radius,
-                       mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0,
+    def do_detail_core(self, pipe, denoise, cycle, crop_factor, noise_mask_feather, blend_feather,
+                       mask=None, steps_override=0, cfg_override=0.0,
                        guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
-                       color_correction=0.0):
+                       positive_prompt=None):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
@@ -462,12 +459,11 @@ class SAX_Bridge_Detailer:
         result_images = _run_detail_loop(
             p["model"], p["vae"], p["images"], positive, p["negative"], p["seed"],
             steps_eff, cfg_eff, p["sampler_name"], p["scheduler_name"],
-            denoise, denoise_decay, cycle,
+            denoise, 0.0, cycle,
             noise_mask_feather, blend_feather, crop_factor,
-            context_blur_sigma, context_blur_radius,
+            0.0, 48,
             mask=mask,
             guidance_mode=guidance_mode, guidance_strength=guidance_strength, pag_strength=pag_strength,
-            color_correction=color_correction,
         )
 
         if result_images is None:
@@ -488,21 +484,22 @@ class SAX_Bridge_Detailer_Enhanced:
         return {
             "required": {
                 "pipe": ("PIPE_LINE",),
+                # Sampling
                 "denoise": ("FLOAT", {"default": 0.45, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "denoise_decay": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
                 "cycle": ("INT", {"default": 1, "min": 1, "max": 10, "step": 1}),
+                # Mask & Blend
+                "crop_factor": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 10.0, "step": 0.1}),
                 "noise_mask_feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
                 "blend_feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
-                "crop_factor": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 10.0, "step": 0.1}),
+                # Pixel Enhancement
+                "shadow_enhance": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "shadow_decay": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "edge_weight": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "edge_blur_sigma": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.1}),
                 # Latent Enhancement
                 "latent_noise_intensity": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 2.0, "step": 0.01}),
                 "noise_type": (["gaussian", "uniform"],),
-                # Shadow Enhancement
-                "shadow_enhance": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "shadow_decay": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05}),
-                # Edge Enhancement
-                "edge_weight": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
-                "edge_blur_sigma": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.1}),
                 # Context Blur
                 "context_blur_sigma": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 64.0, "step": 0.5,
                                                   "tooltip": "Blurs the context area near the mask boundary to suppress text artifacts. 0=disabled."}),
@@ -511,20 +508,24 @@ class SAX_Bridge_Detailer_Enhanced:
             },
             "optional": {
                 "mask": ("MASK",),
-                "positive_prompt": ("STRING", {"multiline": True}),
+                # Override
                 "steps_override": ("INT", {"default": 0, "min": 0, "max": 200,
                                            "tooltip": "0 = inherit steps from loader_settings. Values ≥1 override it."}),
                 "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
                                            "tooltip": "0.0 = inherit CFG from loader_settings. Values > 0 override it."}),
+                # Guidance
                 "guidance_mode": (_ALL_MODES, {
                     "default": "off",
-                    "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both."}),
+                    "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both, post_fdg=low CFG."}),
                 "guidance_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
                                                 "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
                 "pag_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                                            "tooltip": "Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."}),
+                # Post-processing
                 "color_correction": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                                                "tooltip": "Color drift correction. Matches generated color distribution to original. 0=off, 0.7-1.0=recommended."}),
+                # Prompt (always last)
+                "positive_prompt": ("STRING", {"multiline": True}),
             }
         }
 
@@ -533,13 +534,14 @@ class SAX_Bridge_Detailer_Enhanced:
     FUNCTION = "do_enhanced_detail"
     CATEGORY = "SAX/Bridge/Enhance"
 
-    def do_enhanced_detail(self, pipe, denoise, denoise_decay, cycle, noise_mask_feather, blend_feather,
-                           crop_factor, latent_noise_intensity, noise_type,
+    def do_enhanced_detail(self, pipe, denoise, denoise_decay, cycle,
+                           crop_factor, noise_mask_feather, blend_feather,
                            shadow_enhance, shadow_decay, edge_weight, edge_blur_sigma,
+                           latent_noise_intensity, noise_type,
                            context_blur_sigma, context_blur_radius,
-                           mask=None, positive_prompt=None, steps_override=0, cfg_override=0.0,
+                           mask=None, steps_override=0, cfg_override=0.0,
                            guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
-                       color_correction=0.0):
+                           color_correction=0.0, positive_prompt=None):
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
