@@ -38,6 +38,21 @@ Both Detailer nodes include an optional **CFG Guidance Enhancement** feature —
 | `post_fdg` | Low CFG (1–3) | Detail emphasis for low-step LoRA workflows (e.g. DMD2) |
 
 > **SAX Guidance** is also available as a standalone node for use before SAX KSampler or SAX Upscaler.
+> Guidance also supports **PAG (Perturbed Attention Guidance)** which works independently of CFG scale.
+
+### Finishing touches — Finisher
+
+**SAX Finisher** applies post-processing effects to the final image. Place it between the Detailer and Output.
+
+| Effect | Parameter | Description |
+|---|---|---|
+| Smooth | `smooth` | Reduces jaggies and oversharpened edges via high-frequency suppression |
+| Bloom | `bloom` | Soft glow from bright areas for atmospheric lighting |
+| Vignette | `vignette` | Darkens edges to draw focus to the center |
+| Color Temp | `color_temp` | Warm (+) or cool (−) color temperature shift |
+| Color Correction | `color_correction` | Matches color distribution to a reference image |
+
+All parameters default to 0 (disabled). Set any value above 0 to enable the effect.
 
 [↑ Back to top](#sax_bridge)
 

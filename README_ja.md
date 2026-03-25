@@ -38,6 +38,21 @@ Differential Diffusion を内蔵しているため、境界の馴染みを別途
 | `post_fdg` | 低 CFG (1–3) | 低ステップ LoRA（DMD2 等）向けディテール強調 |
 
 > **SAX Guidance** をスタンドアロンノードとして SAX KSampler や SAX Upscaler の前に配置することもできます。
+> Guidance は CFG スケールに依存しない **PAG（Perturbed Attention Guidance）** にも対応しています。
+
+### 最終仕上げを1ノードで — Finisher
+
+**SAX Finisher** は最終画像にポストエフェクトを適用する仕上げノードです。Detailer と Output の間に配置します。
+
+| 効果 | パラメータ | 説明 |
+|---|---|---|
+| スムージング | `smooth` | 帯域選択でジャギー・過剰エッジを抑制 |
+| ブルーム | `bloom` | 明部からの光の滲みで空気感を演出 |
+| ビネット | `vignette` | 画面端を暗くして視線を中央に集める |
+| 色温度 | `color_temp` | 暖色（+）/ 寒色（−）にシフト |
+| 色補正 | `color_correction` | 参照画像に色分布を合わせる |
+
+すべてのパラメータはデフォルト 0（無効）です。0 より大きい値を設定すると効果が有効になります。
 
 [↑ トップへ](#sax_bridge)
 
