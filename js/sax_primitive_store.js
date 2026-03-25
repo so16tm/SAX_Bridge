@@ -1,9 +1,11 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 import {
     PAD, ROW_H, BOTTOM_PAD, ADD_H,
     txt, rrect,
     makeItemListWidget, showItemEditDialog, getComfyTheme,
     captureOutputLinks, restoreOutputLinks,
+    PRIMITIVE_TYPE_META, PRIMITIVE_BADGE_FALLBACK, PRIMITIVE_BADGE_TEXT_COLOR,
 } from "./sax_ui_base.js";
 
 const EXT_NAME  = "SAX.PrimitiveStore";
@@ -28,16 +30,10 @@ function hideWidget(widget) {
     widget.draw        = () => {};
 }
 
-// ---------------------------------------------------------------------------
-// 型メタデータ
-// ---------------------------------------------------------------------------
+const TYPE_META = PRIMITIVE_TYPE_META;
 
-const TYPE_META = {
-    INT:     { badge: "INT", color: "#3a7bd5" },
-    FLOAT:   { badge: "FLT", color: "#2d9e6b" },
-    STRING:  { badge: "STR", color: "#c47c22" },
-    BOOLEAN: { badge: "BOL", color: "#8c52c7" },
-};
+/** SEED 型 → 出力スロットでは INT として接続互換にするための変換マップ */
+const OUTPUT_TYPE_MAP = { SEED: "INT" };
 
 // ---------------------------------------------------------------------------
 // アイテムファクトリ
@@ -50,8 +46,14 @@ function makeDefaultItem(type, name) {
         case "FLOAT":   return { ...base, value: 0.0,   min: -1_000_000,    max: 1_000_000,    step: 0.1 };
         case "STRING":  return { ...base, value: ""  };
         case "BOOLEAN": return { ...base, value: false };
+        case "SEED":    return { ...base, value: 0,     min: 0,             max: 2 ** 53 - 1,  step: 1, mode: "fixed", timing: "before" };
         default:        return { ...base, value: 0   };
     }
+}
+
+/** 0 ～ max の範囲でランダムシード値を生成する */
+function randomSeed(max) {
+    return Math.floor(Math.random() * ((max ?? 2 ** 53 - 1) + 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +78,7 @@ function syncOutputSlots(node, items) {
     // 各スロットの名前・型を同期
     for (let i = 0; i < items.length; i++) {
         node.outputs[i].name = items[i].name;
-        node.outputs[i].type = items[i].type;
+        node.outputs[i].type = OUTPUT_TYPE_MAP[items[i].type] ?? items[i].type;
     }
 
     // hidden widget に JSON を書き込む（Python への値渡し）
@@ -99,7 +101,7 @@ function syncOutputSlots(node, items) {
 function showAddDialog(node, saveItems) {
     showItemEditDialog({
         title:     "Add Parameter",
-        width:     340,
+        width:     380,
         className: "__sax_pstore_add",
         fields: [
             {
@@ -107,9 +109,10 @@ function showAddDialog(node, saveItems) {
                 label:   "Type",
                 type:    "select",
                 options: Object.entries(TYPE_META).map(([k, v]) => ({
-                    value: k,
-                    label: v.badge,   // 短縮形（"INT","FLT","STR","BOL"）でボタン幅を揃える
-                    color: v.color,
+                    value:   k,
+                    label:   v.badge,
+                    color:   v.color,
+                    tooltip: v.tooltip ?? k,
                 })),
             },
             { key: "name", label: "Name", type: "text" },
@@ -186,19 +189,88 @@ function showStringEditDialog(item, saveItemsFn) {
     });
 }
 
+/** SEED モードのメタデータ */
+const SEED_MODES = [
+    { value: "fixed",  label: "Fixed"  },
+    { value: "random", label: "Random" },
+];
+const SEED_TIMINGS = [
+    { value: "before", label: "Before", tooltip: "実行前にシードを生成" },
+    { value: "after",  label: "After",  tooltip: "実行後にシードを生成（次回用）" },
+];
+
+/** SEED 型の値編集ダイアログ（value + mode/timing セレクタ） */
+function showSeedEditPopup(item, saveItemsFn) {
+    const curMax = item.max ?? 2 ** 53 - 1;
+    showItemEditDialog({
+        title:     item.name,
+        width:     380,
+        className: "__sax_pstore_seed",
+        fields: [
+            { key: "value", label: "Value", type: "number", decimals: 0, step: 1, min: 0, max: curMax },
+            {
+                key: "_randomize", type: "custom",
+                build(row, ed, _close) {
+                    const btn = document.createElement("button");
+                    btn.textContent = "New Random";
+                    btn.style.cssText = (
+                        "flex:1;padding:7px;border-radius:4px;border:none;cursor:pointer;font-weight:bold;" +
+                        "background:var(--primary-background,#0b8ce9);color:var(--button-surface-contrast,#fff);"
+                    );
+                    btn.addEventListener("click", () => {
+                        ed.value = randomSeed(curMax);
+                        const inp = row.parentElement?.querySelector("input");
+                        if (inp) inp.value = String(ed.value);
+                    });
+                    row.appendChild(btn);
+                },
+            },
+            {
+                key:     "mode",
+                label:   "Mode",
+                type:    "select",
+                options: SEED_MODES,
+            },
+            {
+                key:     "timing",
+                label:   "Timing",
+                type:    "select",
+                options: SEED_TIMINGS.map(t => ({ ...t })),
+            },
+        ],
+        data: {
+            value:  item.value ?? 0,
+            mode:   item.mode ?? "fixed",
+            timing: item.timing ?? "before",
+        },
+        onCommit: (ed) => {
+            item.value  = Math.max(0, Math.min(curMax, Math.round(ed.value)));
+            item.mode   = ed.mode;
+            item.timing = ed.timing;
+            saveItemsFn();
+        },
+    });
+}
+
 // ---------------------------------------------------------------------------
 // 型バッジ描画
 // ---------------------------------------------------------------------------
 
 function drawTypeBadge(ctx, item, x, midY, w, h) {
-    const meta  = TYPE_META[item.type] ?? { badge: "???", color: "#555" };
-    // drawParamBox と高さを揃える（h-8 = 16px at ROW_H=24）
-    // 左端は行背景の角丸の内側に収まるよう x+4 に寄せる
+    const meta  = TYPE_META[item.type] ?? PRIMITIVE_BADGE_FALLBACK;
     const bh    = h - 8;
     const bw    = w - 8;
-    rrect(ctx, x + 4, midY - bh / 2, bw, bh, 3, meta.color, meta.color);
+    const bx    = x + 4;
+    const by    = midY - bh / 2;
+    const isRandom = item.type === "SEED" && item.mode === "random";
+
+    // random: アウトライン、fixed/その他: 塗りつぶし
+    rrect(ctx, bx, by, bw, bh, 3,
+        isRandom ? null : meta.color,
+        isRandom ? meta.color : null);
+
     ctx.save();
-    ctx.fillStyle    = "#fff";
+    ctx.fillStyle    = isRandom ? meta.color : PRIMITIVE_BADGE_TEXT_COLOR;
     ctx.font         = `bold 8px sans-serif`;
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
@@ -230,7 +302,11 @@ function makeStoreWidget(node) {
                 key:  "typeBadge",
                 w:    36,
                 draw: (ctx, item, x, midY, w, h) => drawTypeBadge(ctx, item, x, midY, w, h),
-                // 型変更は不可（クリックしても何もしない）
+                onClick: (item) => {
+                    if (item.type !== "SEED") return false;
+                    item.mode = item.mode === "random" ? "fixed" : "random";
+                    return true;
+                },
             },
         ],
 
@@ -241,13 +317,14 @@ function makeStoreWidget(node) {
                 get:  item => item.value,
                 set:  (item, v) => {
                     if (item.type === "BOOLEAN" || item.type === "STRING") return;
-                    const min  = item.min  ?? (item.type === "INT" ? -(2 ** 31) : -1e9);
-                    const max  = item.max  ?? (item.type === "INT" ? 2 ** 31 - 1 : 1e9);
-                    const step = item.step ?? (item.type === "INT" ? 1 : 0.1);
+                    const isInt = item.type === "INT" || item.type === "SEED";
+                    const min  = item.min  ?? (isInt ? 0 : -1e9);
+                    const max  = item.max  ?? (isInt ? 2 ** 53 - 1 : 1e9);
+                    const step = item.step ?? (isInt ? 1 : 0.1);
                     // step スナップ後にクランプ、FLOAT は toFixed で浮動小数点誤差を除去
                     const snapped  = Math.round((v - min) / step) * step + min;
                     const clamped  = Math.max(min, Math.min(max, snapped));
-                    if (item.type === "INT") {
+                    if (isInt) {
                         item.value = Math.round(clamped);
                     } else {
                         const dec  = stepDecimals(step);
@@ -257,12 +334,15 @@ function makeStoreWidget(node) {
                 format: v => {
                     if (typeof v === "boolean") return v ? "ON" : "OFF";
                     if (typeof v === "string")  return v.length > 9 ? v.slice(0, 8) + "…" : (v || "―");
-                    if (typeof v === "number")  return Number.isInteger(v) ? String(v) : v.toFixed(3);
+                    if (typeof v === "number") {
+                        const s = Number.isInteger(v) ? String(v) : v.toFixed(3);
+                        return s.length > 7 ? s.slice(0, 6) + "…" : s;
+                    }
                     return String(v);
                 },
-                // INT は step の半分、FLOAT は step の 1/10、STRING/BOOLEAN は事実上無効
+                // INT/SEED は step の半分、FLOAT は step の 1/10、STRING/BOOLEAN は事実上無効
                 dragScale: item => {
-                    if (item.type === "INT")   return (item.step ?? 1) * 0.5;
+                    if (item.type === "INT" || item.type === "SEED") return (item.step ?? 1) * 0.5;
                     if (item.type === "FLOAT") return (item.step ?? 0.1) * 0.1;
                     return 1e9;
                 },
@@ -276,6 +356,10 @@ function makeStoreWidget(node) {
                         showStringEditDialog(item, () => saveItems(getItems()));
                         return;
                     }
+                    if (item.type === "SEED") {
+                        showSeedEditPopup(item, () => saveItems(getItems()));
+                        return;
+                    }
                     showNumericEditPopup(item, () => saveItems(getItems()));
                 },
             },
@@ -284,7 +368,20 @@ function makeStoreWidget(node) {
         content: {
             draw(ctx, item, x, y, w, h) {
                 const t = getComfyTheme();
-                txt(ctx, item.name, x + 4, y + h / 2, t.inputText ?? t.contentBg, "left", 11);
+                const midY = y + h / 2;
+                txt(ctx, item.name, x + 4, midY, t.inputText ?? t.contentBg, "left", 11);
+                // SEED: mode/timing インジケータを名前の右に表示
+                if (item.type === "SEED" && item.mode === "random") {
+                    const label = item.timing === "after" ? "rnd:aft" : "rnd:bef";
+                    const labelX = x + w - 4;
+                    ctx.save();
+                    ctx.font         = "9px sans-serif";
+                    ctx.fillStyle    = t.border;
+                    ctx.textAlign    = "right";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(label, labelX, midY);
+                    ctx.restore();
+                }
             },
         },
 
@@ -298,11 +395,52 @@ function makeStoreWidget(node) {
 }
 
 // ---------------------------------------------------------------------------
+// SEED 自動生成ヘルパー
+// ---------------------------------------------------------------------------
+
+/** 指定タイミングの SEED アイテムをランダム化し items_json を更新する */
+function randomizeSeedsOnNodes(timing) {
+    for (const node of app.graph._nodes ?? []) {
+        if (node.comfyClass !== NODE_TYPE) continue;
+        const items = node._primitiveItems;
+        if (!items?.length) continue;
+
+        let changed = false;
+        for (const item of items) {
+            if (item.type === "SEED" && item.mode === "random" && item.timing === timing) {
+                item.value = randomSeed(item.max ?? 2 ** 53 - 1);
+                changed = true;
+            }
+        }
+        if (changed) syncOutputSlots(node, items);
+    }
+    app.canvas?.setDirty(true, true);
+}
+
+// ---------------------------------------------------------------------------
 // 拡張登録
 // ---------------------------------------------------------------------------
 
 app.registerExtension({
     name: EXT_NAME,
+
+    setup() {
+        // before: プロンプトキュー直前にシードを生成
+        const origQueuePrompt = app.queuePrompt?.bind(app);
+        if (origQueuePrompt) {
+            app.queuePrompt = async function (...args) {
+                randomizeSeedsOnNodes("before");
+                return origQueuePrompt(...args);
+            };
+        }
+
+        // after: 実行完了後（executing=null）にシードを生成（次回用）
+        api.addEventListener("executing", (e) => {
+            if (e.detail === null) {
+                randomizeSeedsOnNodes("after");
+            }
+        });
+    },
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_TYPE) return;

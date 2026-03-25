@@ -67,6 +67,19 @@ export const SAX_COLORS = {
     primaryText:    "var(--button-surface-contrast, #ffffff)",
 };
 
+/** プリミティブ型バッジの定義（badge: 表示ラベル, color: 背景色） */
+export const PRIMITIVE_TYPE_META = {
+    INT:     { badge: "INT", color: "#3a7bd5", tooltip: "INTEGER" },
+    FLOAT:   { badge: "FLT", color: "#2d9e6b", tooltip: "FLOAT" },
+    STRING:  { badge: "STR", color: "#c47c22", tooltip: "STRING" },
+    BOOLEAN: { badge: "BOL", color: "#8c52c7", tooltip: "BOOLEAN" },
+    SEED:    { badge: "SED", color: "#d4a017", tooltip: "SEED" },
+};
+
+/** バッジ描画用の補助定数 */
+export const PRIMITIVE_BADGE_FALLBACK = { badge: "???", color: "#555" };
+export const PRIMITIVE_BADGE_TEXT_COLOR = "#fff";
+
 // ---------------------------------------------------------------------------
 // ComfyUI テーマ（CSS変数から読み込み・キャッシュ）
 // ---------------------------------------------------------------------------
@@ -612,6 +625,7 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
                         const btn = h("button",
                             "flex:1;padding:6px;border-radius:4px;cursor:pointer;font-size:12px;border:1px solid;",
                             opt.label);
+                        if (opt.tooltip) btn.title = opt.tooltip;
                         btn.addEventListener("click", () => { ed[f.key] = opt.value; refresh(); });
                         group.appendChild(btn);
                         btns.push({ btn, opt });

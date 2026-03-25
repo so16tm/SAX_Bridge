@@ -40,7 +40,7 @@ class SAX_Bridge_Primitive_Store:
     CATEGORY      = "SAX/Bridge/Utility"
     OUTPUT_NODE   = False
     DESCRIPTION   = (
-        "Define and manage common primitive variables (INT, FLOAT, STRING, BOOLEAN) "
+        "Define and manage common primitive variables (INT, FLOAT, STRING, BOOLEAN, SEED) "
         "in one place. Each item becomes an output slot for downstream nodes."
     )
 
@@ -55,7 +55,7 @@ class SAX_Bridge_Primitive_Store:
             t = item.get("type", "INT")
             v = item.get("value", 0)
             try:
-                if t == "INT":
+                if t in ("INT", "SEED"):
                     result[i] = int(round(float(v)))
                 elif t == "FLOAT":
                     result[i] = float(v)
