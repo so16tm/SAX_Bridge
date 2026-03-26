@@ -1232,14 +1232,24 @@ export function restoreOutputLinks(node, items, syncFn, slotOffset = 0) {
 
     // LiteGraph の DOM/グラフ更新を待ってから再接続
     setTimeout(() => {
+        const affectedNodes = new Set();
         for (let i = 0; i < items.length; i++) {
             for (const conn of (items[i]._links ?? [])) {
                 const targetNode = app.graph.getNodeById(conn.targetId);
-                if (targetNode) node.connect(slotOffset + i, targetNode, conn.targetSlot);
+                if (targetNode) {
+                    node.connect(slotOffset + i, targetNode, conn.targetSlot);
+                    affectedNodes.add(targetNode);
+                }
             }
         }
         // 再接続後の状態を _links に反映
         captureOutputLinks(node, items, slotOffset);
+        // 接続先ノードのリンク非表示状態を再適用（link ID が変わるため）
+        for (const targetNode of affectedNodes) {
+            if (targetNode._remoteLinksVisible === false) {
+                applyLinkVisibility(targetNode);
+            }
+        }
         app.canvas?.setDirty(true, true);
     }, 0);
 }
