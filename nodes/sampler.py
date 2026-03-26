@@ -6,9 +6,6 @@ def _empty_conditioning(clip):
     return nodes.CLIPTextEncode().encode(clip, "")[0]
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_KSampler ノード
-# ---------------------------------------------------------------------------
 class SAX_Bridge_KSampler:
     """
     Pipe を受け取り、KSampler を実行して Pipe を返すノード。
@@ -53,7 +50,6 @@ class SAX_Bridge_KSampler:
         if latent is None:
             raise ValueError("[SAX_Bridge] Pipe does not contain a latent.")
 
-        # negative が未設定の場合は空文字列から自動生成
         if negative is None:
             clip = pipe.get("clip")
             if clip is None:
@@ -69,14 +65,12 @@ class SAX_Bridge_KSampler:
         scheduler = settings.get("scheduler", "normal")
         denoise = settings.get("denoise", 1.0)
 
-        # KSampler 実行
         sampled = nodes.common_ksampler(
             model, seed, steps, cfg, sampler_name, scheduler,
             positive, negative, latent, denoise=denoise,
         )
         new_latent = sampled[0]
 
-        # VAE Decode
         if decode_vae:
             if vae is None:
                 raise ValueError("[SAX_Bridge] Pipe does not contain a VAE.")

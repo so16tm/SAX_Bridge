@@ -26,7 +26,6 @@ function getSources(node) {
     return node._remoteSources ?? [];
 }
 
-/** ソース srcIdx の先頭スロットの絶対インデックス（物理スロット数ベース） */
 function getOffset(node, srcIdx) {
     const sources = getSources(node);
     let offset = 0;
@@ -41,7 +40,6 @@ function getTotalSlotCount(node) {
     return getSources(node).reduce((sum, s) => sum + (s.enabledSlots?.length ?? s.slotCount ?? 0), 0);
 }
 
-/** ソースノードの出力構成を表す変化検知用シグネチャ */
 function sourceSignature(srcNode) {
     return (srcNode.outputs ?? []).slice(0, MAX_SLOTS)
         .map(o => `${o.label ?? o.name ?? ""}:${o.type ?? ""}`).join(",");
@@ -101,7 +99,6 @@ function addSource(remoteNode, srcNode, enabledSlots = null) {
     const allCount   = Math.min(srcOutputs.length, remaining);
     if (allCount === 0) return;
 
-    // enabledSlots 未指定 → 全スロット有効
     const effective = enabledSlots
         ? enabledSlots.filter(i => i >= 0 && i < allCount)
         : Array.from({ length: allCount }, (_, i) => i);
@@ -157,7 +154,6 @@ function removeSourceAt(node, idx) {
     sources.splice(idx, 1);
     node._remoteSources = sources;
 
-    // stale な linkId を掃除
     for (const id of [..._hiddenLinkIds]) {
         if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
     }
@@ -168,7 +164,6 @@ function removeSourceAt(node, idx) {
     app.canvas?.setDirty(true, false);
 }
 
-/** ソース idx のスロット構成を再同期する（F: スロット変更追従） */
 function resyncSource(node, srcIdx, srcNode) {
     const sources = getSources(node);
     const src     = sources[srcIdx];
@@ -184,7 +179,7 @@ function resyncSource(node, srcIdx, srcNode) {
         (o, i) => o.label || o.name || o.type || `out_${i}`);
     const newTypes    = srcOutputs.slice(0, newCount).map(o => o.type || "*");
 
-    // enabledSlots を更新（デフォルト有効: 新スロットは有効, 削除スロットは除去）
+    // 新スロットはデフォルト有効、削除スロットは除去
     const oldEnabled = src.enabledSlots ?? Array.from({ length: oldCount }, (_, i) => i);
     let newEnabled;
     if (newCount > oldCount) {
@@ -204,14 +199,11 @@ function resyncSource(node, srcIdx, srcNode) {
     rebuildAllSources(node);
 }
 
-/** 中間ソースのスロット増加時に全ソースを再構築する（下流接続を保存・復元する） */
 function rebuildAllSources(node) {
     const savedSources = [...getSources(node)];
 
-    // 下流リンクを保存
-    // outName: 保存時点の NC 出力ラベル（= ソースの旧スロット名）。
-    // resyncSource から呼ばれた場合、src.slotNames はすでに新順に更新されているため
-    // インデックスではなく名前で復元先を特定する。
+    // 下流リンクを保存。outName で復元先を特定する（resyncSource 呼び出し時は
+    // src.slotNames が既に新順に更新済みのため、インデックスより名前が信頼できる）
     const downstreamMap = [];
     for (let si = 0; si < savedSources.length; si++) {
         const src     = savedSources[si];
@@ -258,8 +250,7 @@ function rebuildAllSources(node) {
         if (newSi < 0) continue;
         const src = getSources(node)[newSi];
 
-        // 名前ベースで新インデックスを解決（ソース内でスロットが並び替えられた場合に対応）
-        // 名前が見つからない場合は旧インデックスにフォールバック
+            // 名前ベースで新インデックスを解決（見つからない場合は旧インデックスにフォールバック）
         let resolvedGlobalIdx = ds.globalSlotIdx;
         if (ds.outName != null) {
             const nameIdx = src.slotNames.indexOf(ds.outName);
@@ -276,7 +267,6 @@ function rebuildAllSources(node) {
     }
 }
 
-/** 全ソースをリセットする（ソース削除・手動クリア用） */
 function resetAllSources(node) {
     for (const id of [..._hiddenLinkIds]) {
         if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
@@ -296,13 +286,11 @@ function resetAllSources(node) {
 }
 
 // ---------------------------------------------------------------------------
-// ソース順入れ替え（スロット再構築付き）
+// ソース順入れ替え
 // ---------------------------------------------------------------------------
 
 function swapSources(node, si, sj) {
     const sources = getSources(node);
-
-    // 下流リンクを保存
     const downstreamMap = [];
     for (let idx = 0; idx < sources.length; idx++) {
         const src     = sources[idx];
@@ -370,7 +358,6 @@ function swapSources(node, si, sj) {
 function applySlotSelection(node, si, newEnabledSlots) {
     const sources = getSources(node);
 
-    // ── 1. 現在の物理スロット（旧 enabledSlots）で全ソースのリンクを保存 ──
     const downstreamMap = [];
     for (let idx = 0; idx < sources.length; idx++) {
         const s       = sources[idx];
@@ -391,10 +378,8 @@ function applySlotSelection(node, si, newEnabledSlots) {
         }
     }
 
-    // ── 2. 対象ソースの enabledSlots を更新 ──
     sources[si].enabledSlots = [...newEnabledSlots].sort((a, b) => a - b);
 
-    // ── 3. 物理スロットをクリアして再構築 ──
     const savedSources = [...sources];
     unhideSourceLinks(node);
     for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
@@ -410,13 +395,13 @@ function applySlotSelection(node, si, newEnabledSlots) {
         if (srcNode) addSource(node, srcNode, src.enabledSlots);
     }
 
-    // ── 4. 下流リンクを復元（非表示になったスロットへの接続は自然に消える） ──
+    // 非表示スロットへの接続は localIdx < 0 で自然にスキップされる
     for (const ds of downstreamMap) {
         const newSi = getSources(node).findIndex(s => s.sourceId === ds.sourceId);
         if (newSi < 0) continue;
         const src      = getSources(node)[newSi];
         const localIdx = (src.enabledSlots ?? []).indexOf(ds.globalSlotIdx);
-        if (localIdx < 0) continue;  // 非表示になったスロット → 復元しない
+        if (localIdx < 0) continue;
         const newAbsIdx = getOffset(node, newSi) + localIdx;
         const tgtNode = app.graph.getNodeById(ds.targetId);
         if (tgtNode && node.outputs?.[newAbsIdx]) node.connect(newAbsIdx, tgtNode, ds.targetSlot);
@@ -448,7 +433,6 @@ function showSlotSelectDialog(node, si) {
         width:     360,
         className: "__sax_slot_select_dlg",
         build(container, close) {
-            // ── 一括ボタン行 ─────────────────────────────────────────────
             const btnRow = h("div", "display:flex;gap:6px;margin-bottom:8px;");
 
             const btnSelectAll = h("button", `
@@ -477,7 +461,6 @@ function showSlotSelectDialog(node, si) {
             btnRow.appendChild(btnClearAll);
             container.appendChild(btnRow);
 
-            // ── スロットリスト ────────────────────────────────────────────
             const list = h("div", `
                 display:flex;flex-direction:column;gap:4px;
                 max-height:320px;overflow-y:auto;
@@ -513,7 +496,6 @@ function showSlotSelectDialog(node, si) {
             }
             container.appendChild(list);
 
-            // ── Cancel / Apply ───────────────────────────────────────────
             const footer = h("div", "display:flex;gap:6px;margin-top:12px;justify-content:flex-end;");
 
             const btnCancel = h("button", `
@@ -567,8 +549,6 @@ function showAddSourcePicker(remoteNode) {
 // ソース選択ウィジェット
 // ---------------------------------------------------------------------------
 
-// HEADER_H, ADD_H は sax_ui_base からインポート済み
-
 function makeSourceWidget(node) {
     let widgetY = 0;
 
@@ -586,7 +566,7 @@ function makeSourceWidget(node) {
             widgetY = y;
             const t = getComfyTheme();
 
-            // C/E/F: ソース状態を毎フレームチェック（後ろから検査して安全に削除）
+            // 後ろから検査して安全に削除
             const sources = getSources(drawNode);
             for (let si = sources.length - 1; si >= 0; si--) {
                 const src     = sources[si];
@@ -616,12 +596,10 @@ function makeSourceWidget(node) {
 
             const linksVisible = drawNode._remoteLinksVisible ?? false;
 
-            // ── ヘッダー行: 目玉トグル pill ──
             const headerMidY = y + HEADER_H / 2;
             drawPill(ctx, PAD + 4, headerMidY, linksVisible);
             txt(ctx, "Show links", PAD + 38, headerMidY, t.contentBg, "left", 10);
 
-            // ── ソース行 ──
             const layout = rowLayout(W, { hasJump: true, hasMoveUpDown: true, hasDelete: true });
             for (let si = 0; si < sources.length; si++) {
                 const src     = sources[si];
@@ -651,7 +629,6 @@ function makeSourceWidget(node) {
                 drawDeleteBtn(ctx, layout.del.x, midY);
             }
 
-            // ── Add ボタン ──
             const btnY   = y + HEADER_H + sources.length * ROW_H;
             const canAdd = getTotalSlotCount(drawNode) < MAX_SLOTS;
             drawAddBtn(ctx, W, btnY,
@@ -666,8 +643,7 @@ function makeSourceWidget(node) {
             const sources = getSources(mouseNode);
             const layout  = rowLayout(W, { hasJump: true, hasMoveUpDown: true, hasDelete: true });
 
-            // ── ヘッダー行: 目玉トグル pill ──
-            if (relY < HEADER_H) {  // HEADER_H: sax_ui_base から import
+            if (relY < HEADER_H) {
                 if (pos[0] >= PAD && pos[0] < PAD + 34) {
                     toggleLinkVisibility(mouseNode);
                     return true;
@@ -677,17 +653,14 @@ function makeSourceWidget(node) {
 
             const localY = relY - HEADER_H;
 
-            // ── ソース行 ──
             for (let si = 0; si < sources.length; si++) {
                 if (localY < si * ROW_H || localY >= (si + 1) * ROW_H) continue;
 
-                // [✕] 削除
                 if (inX(pos, layout.del.x, layout.del.w)) {
                     removeSourceAt(mouseNode, si);
                     return true;
                 }
 
-                // [▲▼] 上下移動
                 if (inX(pos, layout.move.x, layout.move.w)) {
                     const moveUp = (localY - si * ROW_H) < ROW_H / 2;
                     if (moveUp && si > 0) {
@@ -698,7 +671,6 @@ function makeSourceWidget(node) {
                     return true;
                 }
 
-                // [↗] ジャンプ
                 if (inX(pos, layout.jump.x, layout.jump.w)) {
                     const srcNode = app.graph.getNodeById(sources[si].sourceId);
                     if (srcNode) {
@@ -710,7 +682,6 @@ function makeSourceWidget(node) {
                     return true;
                 }
 
-                // コンテンツ領域クリック → スロット選択ダイアログ
                 if (inX(pos, layout.contentX, layout.contentW)) {
                     showSlotSelectDialog(mouseNode, si);
                     return true;
@@ -719,7 +690,6 @@ function makeSourceWidget(node) {
                 return false;
             }
 
-            // ── Add ボタン行 ──
             const btnRowTop = HEADER_H + sources.length * ROW_H;
             if (relY < btnRowTop || relY >= btnRowTop + ADD_H) return false;
 
@@ -745,7 +715,6 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_TYPE) return;
 
-        // --- onNodeCreated ---
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
@@ -755,10 +724,9 @@ app.registerExtension({
             for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
             this.addCustomWidget(makeSourceWidget(this));
             this.size[0] = Math.max(this.size[0], 320);
-            this.size[1] = 1;   // slot 数に基づく ComfyUI デフォルト高さを破棄
+            this.size[1] = 1;
         };
 
-        // --- onSerialize ---
         const onSerialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (data) {
             onSerialize?.apply(this, arguments);
@@ -768,14 +736,13 @@ app.registerExtension({
             };
         };
 
-        // --- onConfigure ---
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (data) {
             onConfigure?.apply(this, arguments);
             if (data.sax_node_collector) {
                 const saved = data.sax_node_collector;
 
-                // 旧フォーマット（v1: sourceId が直接ある）→ sources[] 形式へ移行
+                // 旧フォーマット互換（v1: sourceId が直接ある）→ sources[] 形式へ移行
                 let sources;
                 if (saved.sources) {
                     sources = saved.sources;
@@ -793,7 +760,6 @@ app.registerExtension({
                     sources = [];
                 }
 
-                // 旧フォーマット互換: enabledSlots がない場合は全スロット有効
                 for (const src of sources) {
                     if (!src.enabledSlots) {
                         src.enabledSlots = Array.from({ length: src.slotCount ?? 0 }, (_, i) => i);
@@ -803,7 +769,7 @@ app.registerExtension({
                 this._remoteSources      = sources;
                 this._remoteLinksVisible = saved.linksVisible ?? false;
 
-                // スロット数を非破壊的差分更新（LiteGraph がリンク復元前に呼ぶため）
+                // LiteGraph はリンク復元前に onConfigure を呼ぶためスロット数を先に調整する
                 const total  = getTotalSlotCount(this);
                 const curOut = this.outputs?.length ?? 0;
                 const curIn  = this.inputs?.length ?? 0;
@@ -819,7 +785,6 @@ app.registerExtension({
             }
             this.size[0] = Math.max(this.size[0], 320);
 
-            // ワークフロー読み込み・ペースト後にリンクが確定してから補完
             const self = this;
             setTimeout(() => {
                 const sources = getSources(self);

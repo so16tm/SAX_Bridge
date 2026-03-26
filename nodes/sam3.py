@@ -24,7 +24,6 @@ from comfy.model_patcher import ModelPatcher
 
 logger = logging.getLogger("SAX_Bridge")
 
-# ── folder_paths 登録 ─────────────────────────────────────────────────────────
 try:
     import folder_paths
 
@@ -34,10 +33,6 @@ try:
 except ImportError:
     folder_paths = None
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# SAM3ModelWrapper — ComfyUI VRAM管理統合
-# ═════════════════════════════════════════════════════════════════════════════
 
 class SAM3ModelWrapper(ModelPatcher):
     """
@@ -145,10 +140,6 @@ class SAM3ModelWrapper(ModelPatcher):
                     setattr(fs, attr, val.to(device=device))
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# CustomSam3Processor — presence_weight 可変スコアリング版
-# ═════════════════════════════════════════════════════════════════════════════
-
 try:
     from sam3.model.sam3_image_processor import Sam3Processor
     from sam3.model import box_ops
@@ -241,10 +232,6 @@ class CustomSam3Processor(Sam3Processor):
         return state
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 内部ユーティリティ
-# ═════════════════════════════════════════════════════════════════════════════
-
 _MAX_POOL_STEP = 127  # CUDA max_pool2d のカーネルサイズ上限 (2*127+1=255)
 
 
@@ -322,10 +309,6 @@ def _segment_single(processor, pil_image: Image.Image, prompt: str,
 
     return base_mask, preview_mask
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# SAX_Bridge_Loader_SAM3 — モデルロードノード
-# ═════════════════════════════════════════════════════════════════════════════
 
 class SAX_Bridge_Loader_SAM3:
     """
@@ -456,10 +439,6 @@ class SAX_Bridge_Loader_SAM3:
         return (wrapper,)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# SAX_Bridge_Segmenter_Multi — 複数エントリーセグメンテーションノード
-# ═════════════════════════════════════════════════════════════════════════════
-
 _DEFAULT_SEGMENTS = json.dumps([
     {
         "on": True,
@@ -545,7 +524,6 @@ class SAX_Bridge_Segmenter_Multi:
 
         images = image
 
-        # ── セグメントエントリーのパース ────────────────────────────────────
         try:
             segments = json.loads(segments_json)
             if not isinstance(segments, list):
@@ -557,14 +535,12 @@ class SAX_Bridge_Segmenter_Multi:
 
         img_h, img_w = images.shape[1], images.shape[2]
 
-        # 有効エントリーなし → ゼロマスク出力
         if not enabled:
             logger.info("[SAX_Bridge] Segmenter: no enabled entries, returning zero mask")
             empty_mask = torch.zeros(images.shape[0], img_h, img_w)
             # 画像はそのままプレビューとして返す
             return (empty_mask, images)
 
-        # ── モデルを GPU にロード ───────────────────────────────────────────
         comfy.model_management.load_models_gpu([sam3_model])
         processor    = sam3_model.processor
         device       = sam3_model.current_device
@@ -580,7 +556,6 @@ class SAX_Bridge_Segmenter_Multi:
 
             positive_list = []
             negative_list = []
-            
             p_positive_list = []
 
             for seg in enabled:
@@ -614,7 +589,6 @@ class SAX_Bridge_Segmenter_Multi:
                     positive_list.append(seg_mask)
                     p_positive_list.append(seg_preview_mask)
 
-            # positive OR 合成
             if positive_list:
                 pos = torch.stack(positive_list).max(dim=0)[0]
                 p_pos = torch.stack(p_positive_list).max(dim=0)[0]
@@ -622,13 +596,12 @@ class SAX_Bridge_Segmenter_Multi:
                 pos = torch.zeros(img_h, img_w, device=device)
                 p_pos = torch.zeros(img_h, img_w, device=device)
 
-            # negative OR 合成 → subtract
+            # negative OR → subtract
             if negative_list:
                 neg   = torch.stack(negative_list).max(dim=0)[0]
                 final = (pos - neg).clamp(0.0, 1.0)
                 
-                # プレビューは出力される final マスクエリアのみを残す（ネガティブは完全に除去）
-                p_final = p_pos * final
+                p_final = p_pos * final  # ネガティブ除去後のエリアのみプレビューに残す
             else:
                 final = pos
                 p_final = p_pos
@@ -636,11 +609,9 @@ class SAX_Bridge_Segmenter_Multi:
             batch_masks.append(final)
             batch_preview_masks.append(p_final)
 
-        # [B, H, W]
         result_mask = torch.stack(batch_masks).cpu()
         preview_mask_combined = torch.stack(batch_preview_masks).cpu()
 
-        # ── 入力 mask による ROI 制限 ───────────────────────────────────────
         if mask is not None:
             m = mask
             # バッチ次元を合わせる
@@ -657,16 +628,10 @@ class SAX_Bridge_Segmenter_Multi:
             result_mask = (result_mask * m.cpu()).clamp(0.0, 1.0)
             preview_mask_combined = (preview_mask_combined * m.cpu()).clamp(0.0, 1.0)
 
-        # ── プレビュー用画像の合成 ──
-        # preview_mask_combined: [B, H, W] は 0.0〜1.0 の連続値(一致度スコア)
+        # プレビュー用ヒートマップ合成（一致度スコアを Turbo/Rainbow 風カラーマップで可視化）
+        # スコア範囲が偏っている場合に備え、有効マスク領域内で正規化してダイナミックレンジを広げる
         preview_masks_cpu = preview_mask_combined.unsqueeze(-1)  # [B, H, W, 1]
-        
-        # 疑似ヒートマップ (Turbo/Rainbow風) による色の生成
-        # 一致度 x が 0.0 -> 1.0 に向かって: 青 -> 水色 -> 緑 -> 黄 -> 赤
         x = preview_masks_cpu
-        
-        # 指摘事項1: スコア範囲が偏っている場合に備え、バッチ内で正規化（0.0〜1.0）
-        # 有効なマスク領域(x > 0)の最小・最大を使用してダイナミックレンジを広げる
         mask_any = (result_mask > 0).unsqueeze(-1)
         if mask_any.any():
             x_min = x[mask_any].min()
@@ -681,19 +646,15 @@ class SAX_Bridge_Segmenter_Multi:
         color_b = torch.clamp(1.5 - 2.0 * x, 0.0, 1.0)
         colormap_rgb = torch.cat([color_r, color_g, color_b], dim=-1)  # [B, H, W, 3]
 
-        # ベース透過度
-        preview_base_alpha = 0.6
-        # 透過度は出力マスク(result_mask)を基準にする。これにより出力とプレビュー領域が完全一致する
-        # (result_maskが0.0なら透過度0となり色は乗らない)
-        apply_alpha = result_mask.unsqueeze(-1) * preview_base_alpha
+        # 透過度は result_mask を基準にする（出力マスクとプレビュー領域を完全一致させる）
+        apply_alpha = result_mask.unsqueeze(-1) * 0.6
 
-        base_img = images[..., :3].to(colormap_rgb.device)  # デバイスを統一
+        base_img = images[..., :3].to(colormap_rgb.device)
         preview_images = base_img * (1.0 - apply_alpha) + colormap_rgb * apply_alpha
-        
-        # もし元の画像が RGBA (4ch) だった場合は Alpha を維持
-        if images.shape[-1] == 4:
+
+        if images.shape[-1] == 4:  # RGBA の場合は Alpha ch を維持
             preview_images = torch.cat([preview_images, images[..., 3:]], dim=-1)
-            
+
         preview_images = preview_images.clamp(0.0, 1.0)
 
         gc.collect()
@@ -701,10 +662,6 @@ class SAX_Bridge_Segmenter_Multi:
 
         return (result_mask, preview_images)
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# ノード登録
-# ═════════════════════════════════════════════════════════════════════════════
 
 NODE_CLASS_MAPPINGS = {
     "SAX_Bridge_Loader_SAM3":        SAX_Bridge_Loader_SAM3,

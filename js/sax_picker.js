@@ -124,7 +124,6 @@ export function showPicker({
         return n.category || n.constructor?.category || "Other";
     }
 
-    // ---- 折りたたみセクション ----
     // forceOpen=true のとき collapsed Map を無視して強制展開する（検索絞り込み時に使用）
     function makeSection(key, label, color, childEls, defaultCollapsed = false, forceOpen = false) {
         const isCollapsed = forceOpen ? false : (collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
@@ -149,7 +148,6 @@ export function showPicker({
         return sec;
     }
 
-    // ---- 📍 peek ボタン ----
     function makePeekBtn(onPeek) {
         const btn = h("button",
             "padding:1px 6px;background:var(--comfy-input-bg,#222);" +
@@ -163,7 +161,6 @@ export function showPicker({
         return btn;
     }
 
-    // ---- multi mode: チェックボックス行 ----
     function makeCheckRow(label, checked, indent, onChange, { onPeek, tooltip } = {}) {
         const row = h("div",
             `display:flex;align-items:center;gap:8px;padding:3px 0 3px ${indent ? "16px" : "2px"};`);
@@ -182,7 +179,6 @@ export function showPicker({
         return row;
     }
 
-    // ---- single mode: Select ボタン行 ----
     function makeSelectRow(label, labelColor, isCurrent, tooltip, onPeek, onSelectClick) {
         const row = h("div",
             `display:flex;align-items:center;gap:6px;padding:3px 2px;border-radius:3px;` +
@@ -211,7 +207,6 @@ export function showPicker({
         return row;
     }
 
-    // ---- ノードの peek ハンドラ ----
     function makeNodePeek(n) {
         return () => {
             const savedOffset = [...app.canvas.ds.offset];
@@ -236,7 +231,6 @@ export function showPicker({
         };
     }
 
-    // ---- ノード行を生成（multi / single 共通） ----
     function buildNodeRows(n, titleCountMap, isSub) {
         const nodeTitle = n.title || n.type || `Node#${n.id}`;
         const nKey      = `n:${n.id}`;
@@ -269,7 +263,6 @@ export function showPicker({
                     });
             return [row, ...widgetRows];
         } else {
-            // single mode
             const isCurrent = n.id === currentNodeId;
             const color     = isSub ? SAX_COLORS.subgraph : SAX_COLORS.node;
             const row = makeSelectRow(label, color, isCurrent, tooltip, nPeek, () => {
@@ -294,7 +287,6 @@ export function showPicker({
         }
     }
 
-    // ---- オーバーレイ構造 ----
     const overlay = h("div",
         "position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:10000;" +
         "display:flex;align-items:center;justify-content:center;");
@@ -304,7 +296,6 @@ export function showPicker({
         "color:var(--input-text,#ddd);font:13px/1.5 sans-serif;gap:8px;");
     dlg.appendChild(h("div", "font:bold 14px sans-serif;color:var(--fg-color,#fff);flex-shrink:0;", title));
 
-    // 検索バー
     const searchWrap = h("div",
         "display:flex;align-items:center;gap:6px;background:var(--comfy-input-bg,#222);" +
         "border:1px solid var(--border-color,#4e4e4e);border-radius:4px;padding:5px 10px;flex-shrink:0;");
@@ -322,8 +313,7 @@ export function showPicker({
     const scroll = h("div", "overflow-y:auto;flex:1;");
     dlg.appendChild(scroll);
 
-    // ---- ソートユーティリティ ----
-    // 全アイテムの中で x+y が最小の座標を基準点（左上アンカー）として返す
+    // 全アイテム中で x+y が最小の座標を基準点（左上アンカー）として返す
     function computeAnchor(posArr) {
         let ax = Infinity, ay = Infinity;
         for (const [x, y] of posArr) {
@@ -332,7 +322,6 @@ export function showPicker({
         return ax === Infinity ? [0, 0] : [ax, ay];
     }
 
-    // 名前昇順、同名ならアンカーからのユークリッド距離昇順でソート
     function sortByNameThenDist(arr, nameOf, posOf, anchor) {
         const [ax, ay] = anchor;
         return arr.slice().sort((a, b) => {
@@ -344,12 +333,10 @@ export function showPicker({
         });
     }
 
-    // ---- コンテンツ描画 ----
     const renderContent = (query = "") => {
         const q = query.toLowerCase().trim();
         scroll.innerHTML = "";
 
-        // ── アンカー座標を全候補から計算 ──
         const allPosItems = [];
         for (const g of app.graph._groups ?? [])
             allPosItems.push([g.pos[0], g.pos[1]]);
@@ -359,7 +346,6 @@ export function showPicker({
         }
         const anchor = computeAnchor(allPosItems);
 
-        // ── ノード候補を収集（Groups より前に計算し totalFiltered に使う）──
         const allCandidates = (app.graph._nodes ?? []).filter(n => {
             if (n.id === excludeNodeId) return false;
             if (filterNode && !filterNode(n)) return false;
@@ -373,12 +359,11 @@ export function showPicker({
         const allNodes     = sections.includes("nodes")
             ? allCandidates.filter(n => n.subgraph == null) : [];
 
-        // ── セクション数を計算 → 閾値以下なら全セクション強制展開 ──
+        // セクション数が閾値以下なら全セクションを強制展開
         const AUTO_EXPAND_THRESHOLD = 3;
         const filteredGroupCount = sections.includes("groups")
             ? (app.graph._groups ?? []).filter(g => !q || g.title.toLowerCase().includes(q)).length
             : 0;
-        // ノードカテゴリ数を先算出（Nodes レンダリングでも再利用）
         const typeMap = new Map();
         for (const n of allNodes) {
             const k = typeGroupKey(n);
@@ -390,7 +375,6 @@ export function showPicker({
             + typeMap.size;
         const forceOpen = sectionCount <= AUTO_EXPAND_THRESHOLD;
 
-        // ── Groups ──
         if (sections.includes("groups")) {
             const allGroups = app.graph._groups ?? [];
             const groups    = sortByNameThenDist(
@@ -446,7 +430,6 @@ export function showPicker({
             }
         }
 
-        // ── Subgraphs ──
         if (allSubgraphs.length > 0) {
             const sortedSubs = sortByNameThenDist(
                 allSubgraphs,
@@ -463,14 +446,12 @@ export function showPicker({
             scroll.appendChild(makeSection("__subgraphs", `Subgraphs (${allSubgraphs.length})`, SAX_COLORS.subgraph, rows, true, forceOpen));
         }
 
-        // ── Nodes（カテゴリごと）──
         if (allNodes.length > 0) {
             const nodeTitleCount = new Map();
             for (const n of allNodes) {
                 const t = n.title || n.type || `Node#${n.id}`;
                 nodeTitleCount.set(t, (nodeTitleCount.get(t) ?? 0) + 1);
             }
-            // typeMap は forceOpen 計算時に構築済み
             for (const [typeKey, typeNodes] of [...typeMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
                 const sortedTypeNodes = sortByNameThenDist(
                     typeNodes,
@@ -498,7 +479,6 @@ export function showPicker({
     renderContent();
     searchInput.addEventListener("input", () => renderContent(searchInput.value));
 
-    // ---- フッターボタン ----
     const btnRow = h("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
     const makeBtn = (text, bg, fn, color = "var(--input-text,#ddd)", hoverBg = null) => {
         const b = h("button",

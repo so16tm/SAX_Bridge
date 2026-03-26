@@ -11,9 +11,6 @@ from comfy_api.latest import ComfyExtension, io
 from .io_types import PipeLine
 
 
-# ---------------------------------------------------------------------------
-# Impact Pack ヘルパー（遅延インポート）
-# ---------------------------------------------------------------------------
 def _get_impact_wildcards():
     """
     impact.wildcards モジュールを遅延取得する。
@@ -29,9 +26,6 @@ def _get_impact_wildcards():
         )
 
 
-# ---------------------------------------------------------------------------
-# LoRA 名キャッシュ（フォルダ mtime による自動無効化）
-# ---------------------------------------------------------------------------
 _lora_name_cache = None
 _lora_cache_mtime = 0.0
 
@@ -49,9 +43,6 @@ def _get_lora_folders_mtime() -> float:
         return 0.0
 
 
-# ---------------------------------------------------------------------------
-# GPU 安全 CLIP エンコード
-# ---------------------------------------------------------------------------
 def _encode_with_break(clip, text):
     """
     BREAK 構文をサポートした CLIP エンコード。
@@ -65,7 +56,6 @@ def _encode_with_break(clip, text):
     concat_node = ConditioningConcat()
     chunks = [c.strip() for c in text.split("BREAK") if c.strip()] or [""]
 
-    # 1. 前処理 & モデルロード
     cond_model = clip.cond_stage_model
     cond_model.reset_clip_options()
     if clip.layer_idx is not None:
@@ -88,7 +78,6 @@ def _encode_with_break(clip, text):
             }))
             del m._v
 
-    # 3. 各チャンクのエンコード
     try:
         result = None
         for chunk in chunks:
@@ -99,21 +88,17 @@ def _encode_with_break(clip, text):
 
         return result
     finally:
-        # 4. vbar 復元
+        # vbar 復元
         for m, saved in saved_modules:
             m.__dict__.update(saved)
 
 
-# ---------------------------------------------------------------------------
-# LoRA 適用
-# ---------------------------------------------------------------------------
 def _apply_loras(model, clip, loras):
     """
     extract_lora_values で取得した LoRA リストを適用する。
     loras: [(lora_name, model_weight, clip_weight, lbw, lbw_a, lbw_b, loader), ...]
     """
     for lora_name, model_weight, clip_weight, lbw, lbw_a, lbw_b, loader in loras:
-        # 拡張子補完
         lora_name_ext = lora_name.split(".")
         if ("." + lora_name_ext[-1]) not in folder_paths.supported_pt_extensions:
             lora_name = lora_name + ".safetensors"
@@ -188,9 +173,6 @@ def _resolve_lora_name(name):
     return None
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Prompt ノード（V1 スタイル）
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Prompt:
     """
     Impact Pack の ImpactWildcardEncode を改良したノード。
@@ -203,7 +185,6 @@ class SAX_Bridge_Prompt:
 
     @classmethod
     def INPUT_TYPES(s):
-        # ワイルドカードリストを Impact Pack から取得（遅延インポート）
         wildcard_list = ["Select the Wildcard to add to the text"]
         try:
             import impact.wildcards
@@ -240,7 +221,6 @@ class SAX_Bridge_Prompt:
     def doit(self, pipe, wildcard_text, **kwargs):
         wildcards = _get_impact_wildcards()
 
-        # --- 1. Pipe から model, clip を取得 ---
         model = pipe.get("model")
         clip = pipe.get("clip")
 
@@ -249,22 +229,16 @@ class SAX_Bridge_Prompt:
         if clip is None:
             raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
 
-        # --- 2. ワイルドカード展開 ---
         actual_seed = pipe.get("seed", 0)
         populated = wildcards.process(wildcard_text, actual_seed)
-
-        # --- 3. LoRA タグ解析・除去 ---
         loras = wildcards.extract_lora_values(populated)
         clean_text = wildcards.remove_lora_tags(populated)
 
-        # --- 4. LoRA 適用 ---
         if loras:
             model, clip = _apply_loras(model, clip, loras)
 
-        # --- 5. BREAK 分割 + CLIP エンコード ---
         conditioning = _encode_with_break(clip, clean_text)
 
-        # --- 6. Pipe を更新して出力 ---
         new_pipe = {
             **pipe,
             "model": model,
@@ -290,9 +264,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Prompt_Concat ノード（V3 スタイル）
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Prompt_Concat(io.ComfyNode):
     """
     可変テキスト入力に対応した Wildcard エンコーダー。
@@ -301,7 +272,6 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
 
     @classmethod
     def define_schema(cls):
-        # io.Autogrow.TemplatePrefix で可変テキストポート（min=1, max=10）を定義
         autogrow_template = io.Autogrow.TemplatePrefix(
             io.String.Input("text"),
             prefix="text",
@@ -341,7 +311,6 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
 
         target_type = "positive" if target_positive else "negative"
 
-        # texts は dict[str, str] — 各テキストポートの値
         text_values = []
         for val in texts.values():
             if val is not None and isinstance(val, str) and val.strip():
@@ -349,12 +318,10 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
 
         wildcard_text = "\n".join(text_values)
 
-        # テキストが空の場合は pipe をそのまま返す
         if not wildcard_text.strip():
             empty_cond = pipe.get(target_type)
             return io.NodeOutput(pipe, empty_cond, "")
 
-        # 基礎検証
         model = pipe.get("model")
         clip = pipe.get("clip")
 
@@ -363,7 +330,6 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         if clip is None:
             raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
 
-        # 展開・エンコード処理
         actual_seed = pipe.get("seed", 0)
         populated = wildcards.process(wildcard_text, actual_seed)
         loras = wildcards.extract_lora_values(populated)
@@ -374,7 +340,6 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
 
         conditioning = _encode_with_break(clip, clean_text)
 
-        # Pipe 更新
         new_pipe = {
             **pipe,
             "model": model,
@@ -391,9 +356,6 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         return io.NodeOutput(new_pipe, conditioning, populated)
 
 
-# ---------------------------------------------------------------------------
-# ComfyExtension 登録
-# ---------------------------------------------------------------------------
 class WildcardEncodeExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:

@@ -16,9 +16,6 @@ from .io_types import PipeLine
 logger = logging.getLogger("SAX_Bridge")
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Loader ノード (V3)
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Loader(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -52,27 +49,22 @@ class SAX_Bridge_Loader(io.ComfyNode):
 
     @classmethod
     def execute(cls, ckpt_name, clip_skip, vae_name, lora_name, lora_model_strength, v_pred, seed, steps, cfg, sampler_name, scheduler_name, denoise, width, height, batch_size) -> io.NodeOutput:
-        # 1. Load Checkpoint
         ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
         out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
         model, clip, vae = out[0], out[1], out[2]
 
-        # 2. CLIP Skip
         clip = clip.clone()
         clip.clip_layer(clip_skip)
 
-        # 3. Load VAE if not baked
         if vae_name != "baked_vae":
             vae_path = folder_paths.get_full_path("vae", vae_name)
             vae = comfy.sd.VAE(sd=comfy.utils.load_torch_file(vae_path))
 
-        # 4. Apply LoRA
         if lora_name != "None":
             lora_path = folder_paths.get_full_path("loras", lora_name)
             lora = comfy.utils.load_torch_file(lora_path)
             model, clip = comfy.sd.load_lora_for_models(model, clip, lora, lora_model_strength, lora_model_strength)
 
-        # 5. V-Pred logic
         if v_pred:
             class ModelSamplingAdvanced(comfy.model_sampling.ModelSamplingDiscrete, comfy.model_sampling.V_PREDICTION):
                 pass
@@ -80,11 +72,9 @@ class SAX_Bridge_Loader(io.ComfyNode):
             model_sampling = ModelSamplingAdvanced(model.model.model_config, zsnr=True)
             model.add_object_patch("model_sampling", model_sampling)
 
-        # 6. Empty Latent
         latent = torch.zeros([batch_size, 4, height // 8, width // 8], device="cpu")
         latent_out = {"samples": latent}
 
-        # 7. Create Pipe
         pipe = {
             "model": model,
             "clip": clip,
@@ -110,9 +100,6 @@ class SAX_Bridge_Loader(io.ComfyNode):
         return io.NodeOutput(pipe, seed)
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Loader_Lora ノード
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Loader_Lora:
     """
     Pipe 内の model / clip に複数の LoRA を一括適用するノード。

@@ -18,9 +18,6 @@ import comfy.samplers
 from .io_types import PipeLine
 
 
-# ---------------------------------------------------------------------------
-# ガウシアンカーネル生成（depthwise conv2d 用）
-# ---------------------------------------------------------------------------
 def _make_gaussian_kernel(radius: int, sigma: float, device, dtype) -> torch.Tensor:
     """(2*radius+1) x (2*radius+1) の正規化済みガウシアンカーネルを生成する。"""
     size = 2 * radius + 1
@@ -45,17 +42,11 @@ def _gaussian_blur_latent(x: torch.Tensor, sigma: float, radius: int = 1) -> tor
     )
 
 
-# ---------------------------------------------------------------------------
-# AGC: Adaptive Guidance Clipping（tanh ソフトクリッピング）
-# ---------------------------------------------------------------------------
 def _apply_agc(delta: torch.Tensor, tau: float) -> torch.Tensor:
     """delta を tanh で [-tau, +tau] にソフトクリップする。"""
     return tau * torch.tanh(delta / tau)
 
 
-# ---------------------------------------------------------------------------
-# FDG: Frequency-Decoupled Guidance（帯域分離ゲイン制御）
-# ---------------------------------------------------------------------------
 def _apply_fdg(
     delta: torch.Tensor,
     low_gain: float,
@@ -69,9 +60,6 @@ def _apply_fdg(
     return low * low_gain + high * high_gain
 
 
-# ---------------------------------------------------------------------------
-# strength → 内部パラメータ自動マッピング
-# ---------------------------------------------------------------------------
 _AGC_TAU_RANGE = (4.0, 1.5)        # 弱→強: tau が大きいほど緩い
 _FDG_LOW_GAIN_RANGE = (1.0, 0.4)   # 弱→強: 1.0=無効、0.4=最大抑制
 _FDG_HIGH_GAIN_RANGE = (1.0, 1.6)  # 弱→強: 1.0=無効、1.6=最大強調
@@ -99,9 +87,6 @@ def _strength_to_params(strength: float):
     }
 
 
-# ---------------------------------------------------------------------------
-# cfg_function ファクトリ（高 CFG 向け: sampler_cfg_function）
-# ---------------------------------------------------------------------------
 def _build_cfg_function(
     agc_enable: bool,
     agc_tau: float,
@@ -131,9 +116,6 @@ def _build_cfg_function(
     return cfg_func
 
 
-# ---------------------------------------------------------------------------
-# post_cfg_function ファクトリ（低 CFG 向け: sampler_post_cfg_function）
-# ---------------------------------------------------------------------------
 def _build_post_cfg_function(
     fdg_low_gain: float,
     fdg_high_gain: float,
@@ -154,9 +136,6 @@ def _build_post_cfg_function(
     return post_cfg_func
 
 
-# ---------------------------------------------------------------------------
-# PAG: Perturbed Attention Guidance (post-CFG)
-# ---------------------------------------------------------------------------
 def _build_pag_post_cfg_function(pag_scale: float):
     """
     Self-Attention を劣化させた推論結果との差分をガイダンスとして加算する。
@@ -190,9 +169,6 @@ def _build_pag_post_cfg_function(pag_scale: float):
     return post_cfg_func
 
 
-# ---------------------------------------------------------------------------
-# モデルパッチ適用（detailer.py / SAX_Bridge_Guidance 共通）
-# ---------------------------------------------------------------------------
 def apply_guidance_to_model(model, guidance_mode: str, guidance_strength: float,
                             pag_strength: float = 0.0):
     """
@@ -220,7 +196,6 @@ def apply_guidance_to_model(model, guidance_mode: str, guidance_strength: float,
     pag_params = _strength_to_params(pag_strength)
     patched = model.clone()
 
-    # --- CFG / FDG / AGC / CFG Curve ---
     if has_guidance:
         if guidance_mode == "post_fdg":
             patched.model_options = comfy.model_patcher.set_model_options_post_cfg_function(
@@ -244,7 +219,6 @@ def apply_guidance_to_model(model, guidance_mode: str, guidance_strength: float,
                 disable_cfg1_optimization=True,
             )
 
-    # --- PAG（post-CFG として追加、他モードと併用可能）---
     if has_pag:
         patched.model_options = comfy.model_patcher.set_model_options_post_cfg_function(
             patched.model_options.copy(),
@@ -255,9 +229,6 @@ def apply_guidance_to_model(model, guidance_mode: str, guidance_strength: float,
     return patched
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Guidance ノード
-# ---------------------------------------------------------------------------
 _ALL_MODES = ["off", "agc", "fdg", "agc+fdg", "post_fdg"]
 
 

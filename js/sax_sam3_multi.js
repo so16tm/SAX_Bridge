@@ -28,13 +28,15 @@ const WIDGET_NAME = "__sax_sam3_segments";
 const JSON_WIDGET = "segments_json";
 const MIN_W       = 380;
 
-// ── デフォルトエントリー ──────────────────────────────────────────────────────
 function makeEntry() {
     return { on: true, mode: "positive", prompt: "person",
              threshold: 0.2, presence_weight: 0.5, mask_grow: 0 };
 }
 
-// ── アイテム取得 / 保存 ───────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// JSON ウィジェットアクセサ
+// ---------------------------------------------------------------------------
+
 function getItems(node) {
     const w = node.widgets?.find(w => w.name === JSON_WIDGET);
     if (!w) return [];
@@ -46,14 +48,20 @@ function saveItems(node, items) {
     if (w) { w.value = JSON.stringify(items); w.callback?.(w.value); }
 }
 
-// ── モードバッジ描画 ─────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// 描画ヘルパー
+// ---------------------------------------------------------------------------
+
 function drawModeBadge(ctx, x, midY, w, mode) {
     const bH = 14, bY = midY - 7;
     rrect(ctx, x, bY, w, bH, 3, mode === "positive" ? "#3a8" : "#a33", null);
     txt(ctx, mode === "positive" ? "＋" : "－", x + w / 2, midY, "#fff", "center", 10);
 }
 
-// ── 統合編集ダイアログ ────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// 編集ダイアログ
+// ---------------------------------------------------------------------------
+
 function showEditDialog(node, items, rowIndex) {
     const item = items[rowIndex];
     showItemEditDialog({
@@ -85,9 +93,11 @@ function showEditDialog(node, items, rowIndex) {
     });
 }
 
-// ── UI 構築 ───────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// UI 構築
+// ---------------------------------------------------------------------------
+
 function buildUI(node) {
-    // segments_json ウィジェットを完全に非表示化
     const jsonW = node.widgets?.find(w => w.name === JSON_WIDGET);
     if (jsonW && !jsonW._saxHidden) {
         jsonW._saxHidden  = true;
@@ -97,10 +107,8 @@ function buildUI(node) {
         if (jsonW.element) jsonW.element.style.display = "none";
     }
 
-    // 既存のカスタムウィジェットを除去し segments_json のみ保持
     node.widgets = (node.widgets ?? []).filter(w => w.name === JSON_WIDGET);
 
-    // makeItemListWidget で SAM3 セグメントリスト UI を構築
     node.addCustomWidget(makeItemListWidget({
         widgetName:    WIDGET_NAME,
         getItems:      () => getItems(node),
@@ -179,14 +187,16 @@ function buildUI(node) {
         },
     }));
 
-    // 最小幅・高さを設定
     const [, newH] = node.computeSize();
     node.size[0] = Math.max(node.size[0], MIN_W);
     node.size[1] = Math.max(newH, 80);
     app.graph.setDirtyCanvas(true, false);
 }
 
-// ── エクステンション登録 ──────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// 拡張登録
+// ---------------------------------------------------------------------------
+
 app.registerExtension({
     name: EXT_NAME,
     async nodeCreated(node) {

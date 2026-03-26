@@ -19,10 +19,6 @@ class _AnyType(str):
 ANY = _AnyType("*")
 
 
-# ---------------------------------------------------------------------------
-# 画像処理ユーティリティ
-# ---------------------------------------------------------------------------
-
 def _normalize_channels(frame: torch.Tensor) -> torch.Tensor:
     """[1, H, W, C] → [1, H, W, 3] (RGB) に正規化する。"""
     c = frame.shape[-1]
@@ -66,10 +62,6 @@ def _resize_letterbox(frame: torch.Tensor, target_h: int, target_w: int) -> torc
 
     return x.permute(0, 2, 3, 1)           # BCHW → BHWC
 
-
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Image_Collector ノード
-# ---------------------------------------------------------------------------
 
 class SAX_Bridge_Image_Collector:
     """

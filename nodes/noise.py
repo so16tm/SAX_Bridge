@@ -2,9 +2,6 @@ import torch
 import torch.nn.functional as F
 
 
-# ---------------------------------------------------------------------------
-# SAXNoiseEngine: SAXシリーズ共通ノイズエンジン
-# ---------------------------------------------------------------------------
 class SAXNoiseEngine:
     """
     SAXシリーズ共通のノイズ生成・注入エンジン。
@@ -150,9 +147,6 @@ class SAXNoiseEngine:
         return result.permute(0, 2, 3, 1)  # (B, H, W, C)
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Noise_Image ノード
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Noise_Image:
     @classmethod
     def INPUT_TYPES(s):
@@ -215,9 +209,6 @@ class SAX_Bridge_Noise_Image:
         return (result.permute(0, 2, 3, 1),)
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Noise_Latent ノード
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Noise_Latent:
     @classmethod
     def INPUT_TYPES(s):
@@ -249,7 +240,6 @@ class SAX_Bridge_Noise_Latent:
 
         if mask is not None:
             processed_mask = SAXNoiseEngine.process_mask(mask, shrink=mask_shrink, blur=mask_blur)
-            # Latent空間のサイズ (h, w) に合わせてリサイズ
             if processed_mask.shape[2] != h or processed_mask.shape[3] != w:
                 processed_mask = F.interpolate(processed_mask, size=(h, w), mode="area")
                 processed_mask = torch.clamp(processed_mask, min=0.0, max=1.0)

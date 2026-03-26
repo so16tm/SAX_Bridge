@@ -11,7 +11,6 @@ const THUMB_SZ   = 32;   // グリッドサムネイルサイズ (px)
 const GRID_ROWS  = 3;    // グリッド 1 ページの行数
 const GRID_BTN_H = 24;   // グリッドページボタン高さ
 
-// シークバー寸法
 const SEEK_PAD = 16;
 const PAGE_W   = 44;
 const THUMB_R  = 5;
@@ -27,7 +26,6 @@ function getLayoutParams(node) {
     return { cellW, maxCols };
 }
 
-/** cell_w × max_cols からノード優先幅を計算する */
 function calcNodeWidth(cellW, maxCols) {
     return maxCols * (cellW + GAP) + GAP;
 }
@@ -52,7 +50,6 @@ function calcCellH(images, cellW) {
     return maxH > 0 ? maxH : cellW;
 }
 
-/** グリッドのページレイアウトを計算する（THUMB_SZ px サムネイル、GRID_ROWS 行/ページ） */
 function calcGridLayout(W, imageCount) {
     const cols       = Math.max(1, Math.floor((W - GAP) / (THUMB_SZ + GAP)));
     const perPage    = cols * GRID_ROWS;
@@ -151,7 +148,7 @@ function makePreviewWidget(node) {
 
         computeSize(W) {
             const { cellW: desiredCellW, maxCols } = getLayoutParams(node);
-            // draw() と完全に同一の w を使用（Math.max は使わない）
+            // draw() と同一の w（Math.max を使わない）
             const w = W ?? node.size[0] ?? calcNodeWidth(desiredCellW, maxCols);
             if (widget._images.length === 0) return [w, EMPTY_H];
 
@@ -168,12 +165,9 @@ function makePreviewWidget(node) {
         draw(ctx, drawNode, W, y) {
             widget._lastY = y;
             const { maxCols } = getLayoutParams(drawNode);
-            // 実際のノード幅から cellW を計算（computeSize と同一式）
             const cellW = Math.max(1, Math.floor((W - (maxCols + 1) * GAP) / maxCols));
-            // calcCellH(images, cellW) = max naturalH_i → 任意の画像は幅埋めで必ず cellH 以内
             const cellH = calcCellH(widget._images, cellW);
 
-            // 空のプレースホルダー
             if (widget._images.length === 0) {
                 const t = getComfyTheme();
                 rrect(ctx, GAP, y + 2, W - GAP * 2, EMPTY_H - 4, 4, t.inputBg, t.contentBg);
@@ -188,7 +182,6 @@ function makePreviewWidget(node) {
             ));
             widget._mainPage = Math.max(0, Math.min(widget._mainPage, totalMainPages - 1));
 
-            // ── メインビュー ──
             const mainY  = y + GAP;
             const mStart = widget._mainPage * maxCols;
             const mEnd   = Math.min(mStart + maxCols, effectiveSel.length);
@@ -197,15 +190,13 @@ function makePreviewWidget(node) {
                 const x      = GAP + col * (cellW + GAP);
                 const imgIdx = mStart + col < mEnd ? effectiveSel[mStart + col] : -1;
 
-                // セル背景（画像の下に黒が見える）
                 ctx.fillStyle = "#111";
                 ctx.fillRect(x, mainY, cellW, cellH);
 
                 if (imgIdx >= 0) {
                     const img = widget._images[imgIdx];
                     if (img?.complete && img.naturalWidth > 0) {
-                        // 幅埋め（calcCellH の不変条件: cellH/H ≥ cellW/W → 常に幅が binding）
-                        // → dw = cellW（横黒帯なし）、dh = naturalH ≤ cellH（縦は余白あり）
+                        // 幅埋め（calcCellH の不変条件により横黒帯なし、縦は余白あり）
                         const naturalH = Math.round(cellW * img.naturalHeight / img.naturalWidth);
                         ctx.drawImage(img, x, mainY, cellW, Math.min(naturalH, cellH));
                     }
@@ -218,15 +209,13 @@ function makePreviewWidget(node) {
                     GAP + cellW / 2, mainY + cellH / 2, t.border, "center", 11);
             }
 
-            // ── メインシークバー（常時表示） ──
             const seekbarY    = mainY + cellH + GAP;
             const interactive = effectiveSel.length > maxCols;
             drawMainSeekbar(ctx, W, seekbarY, widget._mainPage, totalMainPages, interactive, t);
             widget._seekbarY = seekbarY;   // mouse() で参照
 
-            // ── トグルバー ──
             const toggleY = seekbarY + MAIN_NAV_H;
-            widget._toggleY = toggleY;   // mouse() で参照
+            widget._toggleY = toggleY;
             ctx.fillStyle = t.inputBg;
             ctx.fillRect(0, toggleY, W, TOGGLE_H);
 
@@ -239,7 +228,6 @@ function makePreviewWidget(node) {
 
             if (!widget._showGrid) return;
 
-            // ── グリッド ──
             const gridTopY = toggleY + TOGGLE_H;
             const { cols, perPage, totalPages } = calcGridLayout(W, widget._images.length);
 
@@ -262,7 +250,6 @@ function makePreviewWidget(node) {
                 ctx.fillStyle = "#111";
                 ctx.fillRect(x, ty, THUMB_SZ, THUMB_SZ);
 
-                // サムネイル: contain-fit（長辺を THUMB_SZ に合わせて縮小、余白は黒背景）
                 if (img?.complete && img.naturalWidth > 0) {
                     const scale = Math.min(THUMB_SZ / img.naturalWidth, THUMB_SZ / img.naturalHeight);
                     const dw    = img.naturalWidth  * scale;
@@ -276,7 +263,6 @@ function makePreviewWidget(node) {
                     ctx.restore();
                 }
 
-                // 選択中ハイライト枠（画像の上に重ねて描画・赤色）
                 if (widget._selected.has(i)) {
                     ctx.strokeStyle = "#e04040";
                     ctx.lineWidth   = 2;
@@ -284,7 +270,6 @@ function makePreviewWidget(node) {
                 }
             }
 
-            // ── グリッドページボタン ◀ n/total ▶ ──
             const gridBtnY = gridTopY + GAP + GRID_ROWS * (THUMB_SZ + GAP);
             widget._gridBtnY = gridBtnY;
 
@@ -307,14 +292,12 @@ function makePreviewWidget(node) {
             if (event.type !== "pointerdown" && event.type !== "mousedown") return false;
             if (widget._images.length === 0) return false;
 
-            // draw() で保存した Y 位置を使用（再計算によるズレを防ぐ）
             const seekbarY = widget._seekbarY;
             const toggleY  = widget._toggleY;
             if (seekbarY === undefined || toggleY === undefined) return false;
 
             const { maxCols } = getLayoutParams(mouseNode);
 
-            // ── メインシークバー ──
             if (pos[1] >= seekbarY && pos[1] < seekbarY + MAIN_NAV_H) {
                 const effectiveSel = getEffectiveSelected(widget);
                 if (effectiveSel.length > maxCols) {
@@ -355,10 +338,9 @@ function makePreviewWidget(node) {
                 return true;   // 非インタラクティブでもイベントを消費
             }
 
-            // ── トグルバー ──
             if (pos[1] >= toggleY && pos[1] < toggleY + TOGGLE_H) {
                 widget._showGrid = !widget._showGrid;
-                widget._mainPage = 0;   // 有効選択プールが変わるのでリセット
+                widget._mainPage = 0;   // 有効選択プールが変わるためリセット
                 node.size[1] = 1;
                 app.graph.setDirtyCanvas(true, true);
                 return true;
@@ -373,7 +355,6 @@ function makePreviewWidget(node) {
 
             const { cols, perPage, totalPages } = calcGridLayout(W, widget._images.length);
 
-            // ── グリッドページボタン ──
             if (pos[1] >= gridBtnY && pos[1] < gridBtnY + GRID_BTN_H) {
                 if (pos[0] < W / 2) {
                     widget._gridPage = Math.max(0, widget._gridPage - 1);
@@ -384,7 +365,6 @@ function makePreviewWidget(node) {
                 return true;
             }
 
-            // ── グリッドサムネイル（選択トグル） ──
             if (pos[1] >= gridTopY && pos[1] < gridBtnY) {
                 const relX = pos[0] - GAP;
                 const relY = pos[1] - gridTopY - GAP;
@@ -401,7 +381,6 @@ function makePreviewWidget(node) {
                             } else {
                                 widget._selected.add(idx);
                             }
-                            // 選択変更でメインページをクランプ
                             const eff = getEffectiveSelected(widget);
                             const totalMP = Math.max(1, Math.ceil(
                                 Math.max(eff.length, 1) / maxCols,
@@ -430,11 +409,10 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_TYPE) return;
 
-        // --- onNodeCreated ---
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
-            // imgs を常に空配列に固定して ComfyUI 標準プレビューを完全抑制
+            // imgs を常に空配列に固定して ComfyUI 標準プレビューを抑制
             Object.defineProperty(this, "imgs", {
                 get() { return []; },
                 set(_v) { /* noop */ },
@@ -447,7 +425,6 @@ app.registerExtension({
             this.size[0] = calcNodeWidth(cellW, maxCols);
         };
 
-        // --- onWidgetChanged ---
         nodeType.prototype.onWidgetChanged = function (name) {
             if (!["cell_w", "max_cols"].includes(name)) return;
             const { cellW, maxCols } = getLayoutParams(this);
@@ -456,7 +433,6 @@ app.registerExtension({
             app.graph.setDirtyCanvas(true, true);
         };
 
-        // --- onExecuted ---
         nodeType.prototype.onExecuted = function (output) {
             const images = output?.images ?? [];
             const w      = this._previewWidget;
@@ -470,7 +446,7 @@ app.registerExtension({
             const self = this;
             const resizeNode = () => {
                 const { cellW, maxCols } = getLayoutParams(self);
-                // 優先幅を下回る場合のみ拡張。手動リサイズ後の幅は維持する。
+                // 優先幅を下回る場合のみ拡張（手動リサイズ後の幅は維持）
                 self.size[0] = Math.max(self.size[0], calcNodeWidth(cellW, maxCols));
                 self.size[1] = 1;
                 app.graph.setDirtyCanvas(true, true);
@@ -489,7 +465,6 @@ app.registerExtension({
                     rand:      Math.random(),
                 });
                 const img = new Image();
-                // 画像が 1 枚ロードされるたびに cellH を再計算してノードをリサイズ
                 img.onload = () => resizeNode();
                 img.src = `/api/view?${params}`;
                 w._images.push(img);

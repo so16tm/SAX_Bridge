@@ -18,60 +18,33 @@ from .nodes.finisher import SAX_Bridge_Finisher
 from .nodes.sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
 from .nodes.schedulers import register_schedulers
 
-# AYS スケジューラをグローバル登録（ドロップダウンに表示される）
 register_schedulers()
 
-# V3 API ノード
 from .nodes import prompt as prompt_node
 from .nodes import pipe as pipe_node
 from .nodes import loader as loader_node
 
 NODE_CLASS_MAPPINGS = {
-    # Detailer 系列
     "SAX_Bridge_Detailer": SAX_Bridge_Detailer,
     "SAX_Bridge_Detailer_Enhanced": SAX_Bridge_Detailer_Enhanced,
-
-    # Noise 系列
     "SAX_Bridge_Noise_Image": SAX_Bridge_Noise_Image,
     "SAX_Bridge_Noise_Latent": SAX_Bridge_Noise_Latent,
-
-    # Upscaler
     "SAX_Bridge_Upscaler": SAX_Bridge_Upscaler,
-
-    # Cache
     "SAX_Bridge_Cache": SAX_Bridge_Cache,
-
-    # Output
-    "SAX_Bridge_Output":        SAX_Bridge_Output,
-    "SAX_Bridge_Image_Preview": SAX_Bridge_Image_Preview,
-
-    # Collector 系列
+    "SAX_Bridge_Output":          SAX_Bridge_Output,
+    "SAX_Bridge_Image_Preview":   SAX_Bridge_Image_Preview,
     "SAX_Bridge_Image_Collector": SAX_Bridge_Image_Collector,
     "SAX_Bridge_Node_Collector":  SAX_Bridge_Node_Collector,
     "SAX_Bridge_Pipe_Collector":  SAX_Bridge_Pipe_Collector,
-
-    # Loader 系列（旧API）
-    "SAX_Bridge_Loader_Lora": SAX_Bridge_Loader_Lora,
-
-    # Utility 系列
+    "SAX_Bridge_Loader_Lora":     SAX_Bridge_Loader_Lora,
     "SAX_Bridge_Primitive_Store": SAX_Bridge_Primitive_Store,
     "SAX_Bridge_Toggle_Manager":  SAX_Bridge_Toggle_Manager,
-
-    # Segment 系列
     "SAX_Bridge_Loader_SAM3":     SAX_Bridge_Loader_SAM3,
     "SAX_Bridge_Segmenter_Multi": SAX_Bridge_Segmenter_Multi,
-
-    # Sampler 系列
-    "SAX_Bridge_KSampler": SAX_Bridge_KSampler,
-
-    # Guidance 系列
-    "SAX_Bridge_Guidance": SAX_Bridge_Guidance,
-
-    # Finisher 系列
-    "SAX_Bridge_Finisher": SAX_Bridge_Finisher,
-
-    # Prompt 系列 (Class Implementations)
-    "SAX_Bridge_Prompt": prompt_node.SAX_Bridge_Prompt,
+    "SAX_Bridge_KSampler":        SAX_Bridge_KSampler,
+    "SAX_Bridge_Guidance":        SAX_Bridge_Guidance,
+    "SAX_Bridge_Finisher":        SAX_Bridge_Finisher,
+    "SAX_Bridge_Prompt":          prompt_node.SAX_Bridge_Prompt,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -97,7 +70,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SAX_Bridge_Prompt": "SAX Prompt",
 }
 
-# V3 API ノードの登録 (Loader, Pipe, Switch Pipe, Prompt Concat)
 for v3_node in [
     loader_node.SAX_Bridge_Loader,
     pipe_node.SAX_Bridge_Pipe,

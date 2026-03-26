@@ -54,7 +54,7 @@ def blur_context_boundary(
 
 
 def _align_bbox_8px(y_min, x_min, y_max, x_max, image_h, image_w):
-    """bbox を8ピクセルアライメントする（VAEのダウンサンプリングに合わせる）"""
+    """bbox を 8px アライメントする（VAE ダウンサンプリング互換）"""
     h_c = y_max - y_min + 1
     w_c = x_max - x_min + 1
     h_aligned = ((h_c + 7) // 8) * 8
@@ -170,9 +170,6 @@ def uncrop_and_blend(original: torch.Tensor, cropped: torch.Tensor, mask: torch.
     return result
 
 
-# ---------------------------------------------------------------------------
-# _run_detail_loop: Detailer / Enhanced Detailer 共通ループ処理
-# ---------------------------------------------------------------------------
 _GRAIN_SEED_OFFSET = 10000  # shadow grain と latent noise のシード分離用オフセット
 
 
@@ -194,7 +191,6 @@ def _run_detail_loop(
     Detailer / Enhanced Detailer 共通のディテーリングループ。
     マスク領域が存在しない場合は None を返す。
     """
-    # マスク準備
     if mask is None:
         b, h, w, c = images.shape
         mask = torch.ones((b, h, w), dtype=torch.float32, device=images.device)
@@ -206,7 +202,6 @@ def _run_detail_loop(
             align_corners=False,
         ).squeeze(1)
 
-    # bbox 計算
     tight_bbox = get_bbox_from_mask(mask, padding=0)
     if tight_bbox is None:
         return None
@@ -216,7 +211,7 @@ def _run_detail_loop(
     y_min, x_min, y_max, x_max = bbox
     mask_in_bbox = mask[:, y_min:y_max+1, x_min:x_max+1]
 
-    # モデルパッチ（ループ前に 1 回だけ clone して設定）
+    # ループ前に 1 回だけ clone してパッチを設定
     guided_model = apply_guidance_to_model(model, guidance_mode, guidance_strength, pag_strength)
     base_model = guided_model if guided_model is not None else model
 
@@ -237,7 +232,6 @@ def _run_detail_loop(
 
         cropped_images = crop_bbox(result_images, bbox)
 
-        # 暗部ディテール強調（Enhanced のみ有効）
         if shadow_enhance > 0:
             current_shadow = shadow_enhance * 0.2 * max(0.0, 1.0 - i * shadow_decay / cycle)
             if current_shadow > 0:
@@ -257,7 +251,6 @@ def _run_detail_loop(
                     [crop_rgb.permute(0, 2, 3, 1), cropped_images[:, :, :, 3:]], dim=3
                 )
 
-        # エッジ強調（Enhanced のみ有効）
         if edge_weight > 0:
             rgb_bchw = cropped_images[:, :, :, :3].permute(0, 3, 1, 2)
             rgb_bchw = unsharp_mask(rgb_bchw, edge_weight, edge_blur_sigma)
@@ -265,7 +258,6 @@ def _run_detail_loop(
                 [rgb_bchw.permute(0, 2, 3, 1), cropped_images[:, :, :, 3:]], dim=3
             )
 
-        # コンテキスト境界ぼかし
         if context_blur_sigma > 0:
             crop_rgb = cropped_images[:, :, :, :3].permute(0, 3, 1, 2)
             crop_rgb = blur_context_boundary(
@@ -275,10 +267,8 @@ def _run_detail_loop(
                 [crop_rgb.permute(0, 2, 3, 1), cropped_images[:, :, :, 3:]], dim=3
             )
 
-        # VAE Encode
         t = vae.encode(cropped_images[:, :, :, :3])
 
-        # noise_mask 準備（latent 解像度）
         h_lat, w_lat = t.shape[2], t.shape[3]
         noise_mask = F.interpolate(
             mask_in_bbox.unsqueeze(1).float().to(t.device),
@@ -287,7 +277,6 @@ def _run_detail_loop(
             align_corners=False,
         ).squeeze(1)
 
-        # Latent Noise Injection（Enhanced のみ有効）
         if latent_noise_intensity > 0:
             generator = torch.Generator(device='cpu')
             generator.manual_seed(current_seed)
@@ -298,7 +287,6 @@ def _run_detail_loop(
 
             t = t + lat_noise.to(t.device) * latent_noise_intensity * noise_mask.unsqueeze(1)
 
-        # noise_mask feathering
         if noise_mask_feather > 0:
             noise_mask = SAXNoiseEngine.gaussian_blur(
                 noise_mask.unsqueeze(1), float(noise_mask_feather) / 3.0
@@ -348,9 +336,6 @@ def _ensure_negative(p):
         p["negative"] = nodes.CLIPTextEncode().encode(p["clip"], "")[0]
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Detailer ノード
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Detailer:
     @classmethod
     def INPUT_TYPES(s):
@@ -426,9 +411,6 @@ class SAX_Bridge_Detailer:
         return (new_pipe, result_images)
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Detailer_Enhanced ノード
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Detailer_Enhanced:
     @classmethod
     def INPUT_TYPES(s):

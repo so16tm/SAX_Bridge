@@ -8,7 +8,6 @@ logger = logging.getLogger("SAX_Bridge")
 def _get_sax_cache():
     """SAX_Cache モジュールへの参照を遅延取得する（循環インポート回避）"""
     try:
-        # custom_nodes/ ディレクトリを検索パスに追加
         custom_nodes_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if custom_nodes_dir not in sys.path:
             sys.path.insert(0, custom_nodes_dir)
@@ -22,9 +21,6 @@ def _get_sax_cache():
         )
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Cache ノード
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Cache:
     """
     Pipe 内のモデルに DeepCache / TGate をワンタッチ適用するノード。
@@ -49,8 +45,7 @@ class SAX_Bridge_Cache:
                         "tooltip": "When False, returns the pipe as-is without applying any cache.",
                     },
                 ),
-                # --- DeepCache ---
-                "deepcache_interval": (
+                        "deepcache_interval": (
                     "INT",
                     {
                         "default": 3,
@@ -71,7 +66,6 @@ class SAX_Bridge_Cache:
                 ),
             },
             "optional": {
-                # --- TGate ---
                 "tgate_enabled": (
                     "BOOLEAN",
                     {
@@ -118,7 +112,6 @@ class SAX_Bridge_Cache:
 
         SAX_Cache_DeepCache, SAX_Cache_TGate = _get_sax_cache()
 
-        # --- DeepCache 適用 ---
         if deepcache_interval > 1:
             model, = SAX_Cache_DeepCache().apply(
                 model=model,
@@ -133,7 +126,6 @@ class SAX_Bridge_Cache:
                 f"start={deepcache_start_percent:.0%})"
             )
 
-        # --- TGate 適用 ---
         if tgate_enabled:
             model, = SAX_Cache_TGate().apply(
                 model=model,

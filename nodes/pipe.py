@@ -79,10 +79,8 @@ class SAX_Bridge_Pipe(io.ComfyNode):
                 }
             }
 
-        # 既存のpipeを壊さないよう、シャローコピーを作成
         new_pipe = pipe.copy()
 
-        # Input (上書き処理)
         if model is not None:
             new_pipe["model"] = model
         if pos is not None:
@@ -100,7 +98,6 @@ class SAX_Bridge_Pipe(io.ComfyNode):
         if seed is not None:
             new_pipe["seed"] = seed
 
-        # loader_settings を取得し、修正用にコピーを作成
         loader_settings = new_pipe.get("loader_settings", {}).copy()
 
         if steps is not None:
@@ -118,10 +115,8 @@ class SAX_Bridge_Pipe(io.ComfyNode):
         if optional_sigmas is not None:
             loader_settings["optional_sigmas"] = optional_sigmas
 
-        # 更新した loader_settings を再セット
         new_pipe["loader_settings"] = loader_settings
 
-        # Output (展開処理)
         out_model = new_pipe.get("model")
         out_pos = new_pipe.get("positive")
         out_neg = new_pipe.get("negative")
@@ -141,10 +136,6 @@ class SAX_Bridge_Pipe(io.ComfyNode):
 
         return io.NodeOutput(new_pipe, out_model, out_pos, out_neg, out_latent, out_vae, out_clip, out_image, out_seed, out_steps, out_cfg, out_sampler, out_scheduler, out_denoise, out_optional_sampler, out_optional_sigmas)
 
-
-# ---------------------------------------------------------------------------
-# SAX Switch Pipe
-# ---------------------------------------------------------------------------
 
 N_SWITCH_PIPES = 5
 
@@ -186,19 +177,17 @@ class SAX_Bridge_Pipe_Switcher(io.ComfyNode):
     def execute(cls, slot=None, **kwargs) -> io.NodeOutput:
         pipes = [kwargs.get(f"pipe{i}") for i in range(1, N_SWITCH_PIPES + 1)]
 
-        # 1. 指定スロットを最優先で試みる（1 始まり）
         selected = None
         if slot is not None and 1 <= slot <= N_SWITCH_PIPES:
             selected = pipes[slot - 1]
 
-        # 2. フォールバック: スロット順に最初の非 None を採用
+        # 指定スロットが空ならスロット順に最初の非 None を採用
         if selected is None:
             for p in pipes:
                 if p is not None:
                     selected = p
                     break
 
-        # 3. 全スロットが None → 空 Pipe として展開
         if selected is None:
             selected = {}
 

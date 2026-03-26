@@ -12,31 +12,24 @@ const EXT_NAME  = "SAX.PrimitiveStore";
 const NODE_TYPE = "SAX_Bridge_Primitive_Store";
 const MAX_ITEMS = 32;
 
-/** step の小数桁数を返す（浮動小数点丸め用）*/
 function stepDecimals(step) {
     const s = step.toFixed(10).replace(/0+$/, "");
     const d = s.indexOf(".");
     return d === -1 ? 0 : s.length - d - 1;
 }
 
-// ---------------------------------------------------------------------------
-// ウィジェット非表示ユーティリティ
-// ---------------------------------------------------------------------------
-
-/** ウィジェットを視覚的に完全非表示にする。
- *  type は変更しない（変更すると ComfyUI がプロンプト収集でスキップする）。 */
+/** type を変更すると ComfyUI がプロンプト収集でスキップするため、描画のみ無効化する */
 function hideWidget(widget) {
     widget.computeSize = () => [0, -4];
     widget.draw        = () => {};
 }
 
 const TYPE_META = PRIMITIVE_TYPE_META;
-
-/** SEED 型 → 出力スロットでは INT として接続互換にするための変換マップ */
+/** SEED → INT 変換（下流ノードとの接続互換） */
 const OUTPUT_TYPE_MAP = { SEED: "INT" };
 
 // ---------------------------------------------------------------------------
-// アイテムファクトリ
+// アイテムファクトリ・ストア
 // ---------------------------------------------------------------------------
 
 function makeDefaultItem(type, name) {
@@ -51,14 +44,9 @@ function makeDefaultItem(type, name) {
     }
 }
 
-/** 0 ～ max の範囲でランダムシード値を生成する */
 function randomSeed(max) {
     return Math.floor(Math.random() * ((max ?? 2 ** 53 - 1) + 1));
 }
-
-// ---------------------------------------------------------------------------
-// アイテムストア（アクセサ）
-// ---------------------------------------------------------------------------
 
 function getNodeItems(node) {
     return node._primitiveItems ?? [];
@@ -69,20 +57,17 @@ function getNodeItems(node) {
 // ---------------------------------------------------------------------------
 
 function syncOutputSlots(node, items) {
-    // スロット数を items.length に合わせる
     while ((node.outputs?.length ?? 0) > items.length)
         node.removeOutput(node.outputs.length - 1);
     while ((node.outputs?.length ?? 0) < items.length)
         node.addOutput("", "*");
 
-    // 各スロットの名前・型を同期
     for (let i = 0; i < items.length; i++) {
         node.outputs[i].name = items[i].name;
         node.outputs[i].type = OUTPUT_TYPE_MAP[items[i].type] ?? items[i].type;
     }
 
-    // hidden widget に JSON を書き込む（Python への値渡し）
-    // _links は内部管理用プロパティのため JSON から除外する
+    // _links は接続維持用の内部プロパティのため JSON から除外
     const w = node.widgets?.find(w => w.name === "items_json");
     if (w) {
         const serializable = items.map(({ _links, ...rest }) => rest);
@@ -97,7 +82,6 @@ function syncOutputSlots(node, items) {
 // ダイアログ
 // ---------------------------------------------------------------------------
 
-/** アイテム追加ダイアログ */
 function showAddDialog(node, saveItems) {
     showItemEditDialog({
         title:     "Add Parameter",
@@ -127,7 +111,6 @@ function showAddDialog(node, saveItems) {
     });
 }
 
-/** 数値型（INT / FLOAT）の値・min/max/step 編集ポップアップ */
 function showNumericEditPopup(item, saveItemsFn) {
     const isInt = item.type === "INT";
     const dec   = isInt ? 0 : 4;
@@ -135,8 +118,6 @@ function showNumericEditPopup(item, saveItemsFn) {
         title:     item.name,
         width:     300,
         className: "__sax_pstore_edit",
-        // ダイアログを開く時点の min/max でクランプ（ダイアログ内で変更しても動的に追従しないが
-        // onCommit でも再クランプするため問題なし）
         fields: (() => {
             const curMin  = item.min  ?? (isInt ? -(2 ** 31)  : -1_000_000);
             const curMax  = item.max  ?? (isInt ? 2 ** 31 - 1 :  1_000_000);
@@ -159,7 +140,6 @@ function showNumericEditPopup(item, saveItemsFn) {
                 item.min   = Math.round(ed.min);
                 item.max   = Math.round(ed.max);
                 item.step  = Math.max(1, Math.round(ed.step));
-                // value を新しい min/max でクランプ
                 item.value = Math.max(item.min, Math.min(item.max, Math.round(ed.value)));
             } else {
                 item.min   = ed.min;
@@ -172,7 +152,6 @@ function showNumericEditPopup(item, saveItemsFn) {
     });
 }
 
-/** STRING 型の値編集ダイアログ */
 function showStringEditDialog(item, saveItemsFn) {
     showItemEditDialog({
         title:     item.name,
@@ -189,7 +168,6 @@ function showStringEditDialog(item, saveItemsFn) {
     });
 }
 
-/** SEED モードのメタデータ */
 const SEED_MODES = [
     { value: "fixed",  label: "Fixed"  },
     { value: "random", label: "Random" },
@@ -199,7 +177,6 @@ const SEED_TIMINGS = [
     { value: "after",  label: "After",  tooltip: "実行後にシードを生成（次回用）" },
 ];
 
-/** SEED 型の値編集ダイアログ（value + mode/timing セレクタ） */
 function showSeedEditPopup(item, saveItemsFn) {
     const curMax = item.max ?? 2 ** 53 - 1;
     showItemEditDialog({
@@ -264,7 +241,6 @@ function drawTypeBadge(ctx, item, x, midY, w, h) {
     const by    = midY - bh / 2;
     const isRandom = item.type === "SEED" && item.mode === "random";
 
-    // random: アウトライン、fixed/その他: 塗りつぶし
     rrect(ctx, bx, by, bw, bh, 3,
         isRandom ? null : meta.color,
         isRandom ? meta.color : null);
@@ -283,7 +259,7 @@ function drawTypeBadge(ctx, item, x, midY, w, h) {
 // ---------------------------------------------------------------------------
 
 function makeStoreWidget(node) {
-    // node._primitiveItems を正規ストアとして直接参照する（クロージャの stale 問題を回避）
+    // node._primitiveItems を直接参照（クロージャの stale 回避）
     const getItems  = () => node._primitiveItems ?? [];
     const saveItems = (newItems) => {
         node._primitiveItems = newItems;
@@ -321,7 +297,6 @@ function makeStoreWidget(node) {
                     const min  = item.min  ?? (isInt ? 0 : -1e9);
                     const max  = item.max  ?? (isInt ? 2 ** 53 - 1 : 1e9);
                     const step = item.step ?? (isInt ? 1 : 0.1);
-                    // step スナップ後にクランプ、FLOAT は toFixed で浮動小数点誤差を除去
                     const snapped  = Math.round((v - min) / step) * step + min;
                     const clamped  = Math.max(min, Math.min(max, snapped));
                     if (isInt) {
@@ -340,7 +315,6 @@ function makeStoreWidget(node) {
                     }
                     return String(v);
                 },
-                // INT/SEED は step の半分、FLOAT は step の 1/10、STRING/BOOLEAN は事実上無効
                 dragScale: item => {
                     if (item.type === "INT" || item.type === "SEED") return (item.step ?? 1) * 0.5;
                     if (item.type === "FLOAT") return (item.step ?? 0.1) * 0.1;
@@ -370,7 +344,6 @@ function makeStoreWidget(node) {
                 const t = getComfyTheme();
                 const midY = y + h / 2;
                 txt(ctx, item.name, x + 4, midY, t.inputText ?? t.contentBg, "left", 11);
-                // SEED: mode/timing インジケータを名前の右に表示
                 if (item.type === "SEED" && item.mode === "random") {
                     const label = item.timing === "after" ? "rnd:aft" : "rnd:bef";
                     const labelX = x + w - 4;
@@ -395,10 +368,9 @@ function makeStoreWidget(node) {
 }
 
 // ---------------------------------------------------------------------------
-// SEED 自動生成ヘルパー
+// SEED 自動ランダム化
 // ---------------------------------------------------------------------------
 
-/** 指定タイミングの SEED アイテムをランダム化し items_json を更新する */
 function randomizeSeedsOnNodes(timing) {
     for (const node of app.graph._nodes ?? []) {
         if (node.comfyClass !== NODE_TYPE) continue;
@@ -425,7 +397,7 @@ app.registerExtension({
     name: EXT_NAME,
 
     setup() {
-        // before: プロンプトキュー直前にシードを生成
+        // キュー登録時: 初回実行用に seed を生成
         const origQueuePrompt = app.queuePrompt?.bind(app);
         if (origQueuePrompt) {
             app.queuePrompt = async function (...args) {
@@ -434,9 +406,7 @@ app.registerExtension({
             };
         }
 
-        // 実行完了後（executing=null）にシードを生成
-        // - "after" : 次回の手動実行用
-        // - "before": 次のキューアイテム用（複数キュー登録時に毎回異なる seed を保証）
+        // 実行完了時: 両タイミングを生成（複数キュー時に次の実行で異なる seed を保証）
         api.addEventListener("executing", (e) => {
             if (e.detail === null) {
                 randomizeSeedsOnNodes("after");
@@ -448,18 +418,14 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_TYPE) return;
 
-        // --- onNodeCreated ---
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
             this._primitiveItems = [];
 
-            // Python が定義する "items_json" hidden widget を探して hidden に設定
-            // （ComfyUI が INPUT_TYPES から自動生成する STRING ウィジェット）
             const hw = this.widgets?.find(w => w.name === "items_json");
             if (hw) hideWidget(hw);
 
-            // 出力スロットは最初なし（アイテム追加で増える）
             for (let i = (this.outputs?.length ?? 0) - 1; i >= 0; i--)
                 this.removeOutput(i);
 
@@ -468,12 +434,10 @@ app.registerExtension({
             this.size[1] = 1;
         };
 
-        // --- onConfigure ---
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (data) {
             onConfigure?.apply(this, arguments);
 
-            // hidden widget から items を復元
             const hw = this.widgets?.find(w => w.name === "items_json");
             if (hw) hideWidget(hw);
 
@@ -485,8 +449,7 @@ app.registerExtension({
 
             this._primitiveItems = items;
 
-            // ウィジェットを再生成（getItems が node._primitiveItems を参照するため
-            // 既存ウィジェットを削除して新規作成することでクロージャを刷新する）
+            // ウィジェット再生成（クロージャが新しい _primitiveItems を参照するようにする）
             if (this.widgets) {
                 const idx = this.widgets.findIndex(w => w.name === "__sax_pstore_widget");
                 if (idx !== -1) this.widgets.splice(idx, 1);
@@ -494,7 +457,7 @@ app.registerExtension({
             this.addCustomWidget(makeStoreWidget(this));
             this.size[0] = Math.max(this.size[0], 260);
 
-            // 出力スロットを items に合わせて同期し、LiteGraph 復元後のリンクを記録
+            // LiteGraph のリンク復元完了後にスロット同期・リンク記録
             setTimeout(() => {
                 syncOutputSlots(this, items);
                 captureOutputLinks(this, items);

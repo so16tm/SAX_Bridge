@@ -56,12 +56,9 @@ async function getLoraList() {
 function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = null } = {}) {
     document.querySelectorAll(".__sax_lora_picker").forEach(e => e.remove());
 
-    // 折りたたみ状態（セクションキー → collapsed boolean）
     const collapsed = new Map();
-    // multi モードの選択状態
-    const selection = new Set();
+    const selection = new Set();  // multi モードの選択状態
 
-    // ---- LoRA 行 ----
     function makeLoraRow(fullName, isCurrent, close) {
         const label = displayName(fullName);
 
@@ -90,7 +87,6 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
             return row;
         }
 
-        // single モード（既存の Select ボタン）
         const row = h("div",
             `display:flex;align-items:center;gap:6px;padding:3px 2px;border-radius:3px;` +
             `${isCurrent ? "background:var(--comfy-menu-secondary-bg,#303030);" : ""}`);
@@ -124,8 +120,7 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
         return row;
     }
 
-    // ---- 折りたたみセクション（ノードピッカーの makeSection と同じ構造） ----
-    // alwaysOpen=true のとき折りたたみ状態を無視して常に展開（検索中に使用）
+    // alwaysOpen=true のとき折りたたみ状態を無視して展開（検索中に使用）
     function makeSection(key, label, childEls, defaultCollapsed, alwaysOpen = false) {
         const isCollapsed = alwaysOpen ? false : (collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
         const sec    = h("div", "margin-bottom:4px;");
@@ -149,9 +144,7 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
         return sec;
     }
 
-    // ---- フォルダツリー構築 ----
     function buildTree(names) {
-        // node = { children: Map<string, node>, items: string[] }
         const root = { children: new Map(), items: [] };
         for (const name of names) {
             const parts = name.split(/[\\/]/);
@@ -172,14 +165,12 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
             [...node.children.values()].reduce((s, c) => s + countAll(c), 0);
     }
 
-    // filterFn を適用したときのマッチ数
     function countFiltered(node, filterFn) {
         const own = node.items.filter(filterFn).length;
         return own + [...node.children.values()].reduce((s, c) => s + countFiltered(c, filterFn), 0);
     }
 
-    // アイテムを直接含むフォルダセクション数を再帰的に集計
-    // 中間フォルダ（サブフォルダのみ・直接アイテムなし）はカウントしない
+    // 直接アイテムを含むフォルダセクション数を再帰的に集計（中間フォルダは除く）
     function countSections(node, filterFn) {
         let count = 0;
         for (const child of node.children.values()) {
@@ -192,7 +183,6 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
         return count;
     }
 
-    // current が node のサブツリー内にあるか（pathPrefix はセクションキー）
     function containsCurrent(node, pathPrefix) {
         if (!currentName) return false;
         const norm = currentName.replace(/\\/g, "/");
@@ -202,17 +192,14 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
                 containsCurrent(child, (pathPrefix ? pathPrefix + "/" : "") + name));
     }
 
-    // ---- ツリーを再帰的に DOM 化 ----
-    // filterFn: null のとき全件表示、関数のとき条件一致のみ表示（空フォルダは非表示）
-    // alwaysOpen: true のとき折りたたみ状態を無視して全セクションを展開
+    // filterFn: null のとき全件、関数のとき条件一致のみ（空フォルダは非表示）
+    // alwaysOpen: true のとき折りたたみを無視して全セクションを展開
     function renderTree(node, pathPrefix, close, filterFn = null, alwaysOpen = false) {
         const els = [];
-        // このレベルのアイテム（サブフォルダなし）
         for (const name of [...node.items].sort()) {
             if (filterFn && !filterFn(name)) continue;
             els.push(makeLoraRow(name, name === currentName, close));
         }
-        // サブフォルダ
         for (const [folderName, child] of [...node.children.entries()].sort(([a], [b]) => a.localeCompare(b))) {
             const key      = (pathPrefix ? pathPrefix + "/" : "") + folderName;
             const childEls = renderTree(child, key, close, filterFn, alwaysOpen);
@@ -270,11 +257,9 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
             dlg.appendChild(scroll);
             dlg.appendChild(btnRow);
 
-            // ---- リスト描画 ----
             const render = (q) => {
                 scroll.innerHTML = "";
                 const lower    = q.toLowerCase().trim();
-                // 検索時はフルパス（拡張子なし）を対象にフィルタ
                 const filterFn = lower
                     ? (name) => name.replace(/\.safetensors$/i, "").toLowerCase().includes(lower)
                     : null;
@@ -287,8 +272,7 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
                         return;
                     }
 
-                    // 検索の有無に関わらず常に階層ツリーで表示
-                    // 表示されるアコーディオン（フォルダセクション）数が閾値以下なら強制展開
+                    // セクション数が閾値以下なら強制展開
                     const AUTO_EXPAND_THRESHOLD = 3;
                     const tree         = buildTree(list);
                     const sectionCount = countSections(tree, filterFn);
@@ -301,7 +285,6 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
                         return;
                     }
                     for (const el of els) scroll.appendChild(el);
-                    // 非検索時: 現在選択中アイテムへスクロール
                     if (!filterFn) {
                         requestAnimationFrame(() => {
                             const cur = scroll.querySelector("[data-current='true']");
@@ -384,7 +367,6 @@ function showLoraEditDialog(node, items, rowIndex) {
 // ---------------------------------------------------------------------------
 
 function buildUI(node) {
-    // loras_json / enabled ウィジェットを非表示化
     for (const name of [WIDGET_JSON, "enabled"]) {
         const w = node.widgets?.find(w => w.name === name);
         if (w && !w._saxHidden) {
@@ -396,12 +378,10 @@ function buildUI(node) {
         }
     }
 
-    // 既存のカスタム UI ウィジェットを除去して再構築
     node.widgets = (node.widgets ?? []).filter(w =>
         w.name === WIDGET_JSON || w.name === "enabled"
     );
 
-    // makeItemListWidget を使って LoRA リスト UI を追加
     const widget = makeItemListWidget({
         widgetName:    "__sax_lora_list",
 
@@ -425,7 +405,6 @@ function buildUI(node) {
             step:       0.01,
             dragScale:  0.01,
             format:     (v)      => v.toFixed(2),
-            // クリック（非ドラッグ）→ 統合編集ダイアログ
             onPopup(item, index, node) {
                 const entries = getEntries(node);
                 showLoraEditDialog(node, entries, index);
@@ -433,7 +412,6 @@ function buildUI(node) {
         },
 
         content: {
-            // LoRA 名を描画。未設定時はプレースホルダー
             draw(ctx, item, x, y, w, h, on) {
                 const t       = getComfyTheme();
                 const name    = item.lora || "";
@@ -446,7 +424,6 @@ function buildUI(node) {
                 txt(ctx, display, x + 4, y + h / 2, color, "left", 11);
                 ctx.restore();
             },
-            // クリックで統合編集ダイアログを表示
             onClick(item, index, node) {
                 const entries = getEntries(node);
                 showLoraEditDialog(node, entries, index);

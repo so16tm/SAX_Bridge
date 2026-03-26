@@ -20,8 +20,8 @@ class SAX_Bridge_Primitive_Store:
     一か所で定義・管理するノード。
 
     アイテムを追加するたびに出力スロットが増え、
-    INT / FLOAT / STRING / BOOLEAN 値を下流ノードへ配布する。
-    入力スロットはなく、すべての値はノード内で完結する。
+    INT / FLOAT / STRING / BOOLEAN / SEED 値を下流ノードへ配布する。
+    SEED(mode=random) は実行ごとに Python 側でランダム生成する。
     """
 
     @classmethod
@@ -29,8 +29,7 @@ class SAX_Bridge_Primitive_Store:
         return {
             "required": {},
             "optional": {
-                # JS 側がアイテムリストを JSON 文字列として書き込む hidden widget
-                # 注意: __ プレフィックスは Python 名前マングリングで破壊されるため使用不可
+                # __ プレフィックスは Python 名前マングリングで壊れるため使用不可
                 "items_json": ("STRING", {"default": "[]"}),
             },
         }

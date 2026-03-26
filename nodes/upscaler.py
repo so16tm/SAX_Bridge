@@ -10,9 +10,6 @@ from .detailer import _extract_pipe, _ensure_negative
 
 logger = logging.getLogger("SAX_Bridge")
 
-# ---------------------------------------------------------------------------
-# アップスケール手法マッピング
-# ---------------------------------------------------------------------------
 # comfy.utils.common_upscale が受け付けるメソッド名
 _PIXEL_METHODS = ["lanczos", "bilinear", "bicubic", "nearest-exact", "area"]
 
@@ -43,9 +40,6 @@ def _esrgan_upscale(upscale_model, images: torch.Tensor, target_h: int, target_w
     return upscaled
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Pipe_Upscaler ノード
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Upscaler:
     """
     Pipe 内の images をアップスケールし、オプションで軽量 i2i を適用するノード。
@@ -139,11 +133,10 @@ class SAX_Bridge_Upscaler:
         b, h, w, c = images.shape
         target_h = max(8, int(h * scale_by))
         target_w = max(8, int(w * scale_by))
-        # 8px アライメント（VAE ダウンサンプリング互換）
+        # VAE ダウンサンプリングに合わせて 8px アライメント
         target_h = (target_h // 8) * 8
         target_w = (target_w // 8) * 8
 
-        # --- 1. アップスケール ---
         if upscale_model_name != "None":
             logger.info(f"[SAX_Bridge] Upscaler: ESRGAN mode / model={upscale_model_name} / {w}x{h} -> {target_w}x{target_h}")
             from comfy_extras.nodes_upscale_model import UpscaleModelLoader
@@ -159,7 +152,6 @@ class SAX_Bridge_Upscaler:
 
         upscaled = torch.clamp(upscaled, 0.0, 1.0)
 
-        # --- 2. 軽量 i2i（denoise > 0 のとき） ---
         if denoise > 0:
             p = _extract_pipe(pipe)
             if p["model"] is None or p["vae"] is None or p["positive"] is None:

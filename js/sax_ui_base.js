@@ -86,8 +86,7 @@ export const PRIMITIVE_BADGE_TEXT_COLOR = "#fff";
 
 let _themeCache = null;
 
-// ComfyUI がパレットを変更した際にキャッシュを自動無効化する。
-// パレット変更は documentElement の style 属性、または head への style 要素追加で行われる。
+// パレット変更（documentElement の style 変更 or head への style 追加）を検知してキャッシュを無効化する
 {
     const _inv = () => { _themeCache = null; };
     const _obs = new MutationObserver(_inv);
@@ -168,12 +167,10 @@ export function drawPill(ctx, x, midY, on) {
     const t  = getComfyTheme();
     const pW = 26, pH = 14;
     const pY = midY - pH / 2;
-    // ON: コンテンツグレー背景 + 明るいボーダー / OFF: 最暗背景 + 通常ボーダー
     rrect(ctx, x, pY, pW, pH, 7,
         on ? t.contentBg : t.menuBg,
         on ? t.inputText : t.border);
     const kX = on ? x + pW - 12 : x + 2;
-    // ON: 白ノブ / OFF: ボーダー色ノブ（暗く = 明確にオフ）
     rrect(ctx, kX, pY + 3, 8, 8, 4, on ? t.fg : t.border, null);
 }
 
@@ -219,8 +216,7 @@ export function drawAddBtn(ctx, W, y, label, canAdd) {
  */
 export function drawParamBox(ctx, x, y, w, h, text, active) {
     const t = getComfyTheme();
-    // 背景色 = 行枠線と同色 (contentBg) → 枠線から自然につながる埋め込み表現
-    // y+4 / h-8 で行枠線の内側に 1px のマージンを確保
+    // contentBg と同色にすることで行枠線から自然につながる埋め込み表現になる
     rrect(ctx, x + 1, y + 4, w - 2, h - 8, 4,
         t.contentBg, null);
     txt(ctx, text, x + w / 2, y + h / 2,
@@ -263,7 +259,6 @@ export function rowLayout(W, opts = {}) {
         }
         layout.contentX = lx;
 
-        // 右側: right 配列を順に右から積む
         let rx = W - PAD;
         for (const el of right) {
             rx -= el.w;
@@ -274,7 +269,6 @@ export function rowLayout(W, opts = {}) {
         return layout;
     }
 
-    // 旧 API（後方互換）: フラグ方式
     const {
         hasToggle     = false,
         hasParam      = false,
@@ -285,16 +279,14 @@ export function rowLayout(W, opts = {}) {
 
     const layout = {};
 
-    // 左側: pill があれば確保し、content の開始 X を決める
     let lx = PAD;
     if (hasToggle) {
-        lx += 4;   // 行枠線の内側マージン（枠線との重なりを回避）
+        lx += 4;
         layout.pill = { x: lx, w: 26 };
-        lx += 26 + 4;   // pill 幅 + ギャップ
+        lx += 26 + 4;
     }
     layout.contentX = lx;
 
-    // 右側: 内側に向かって del → move → jump → param を積む
     let rx = W - PAD;
 
     if (hasDelete) {
@@ -353,14 +345,12 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
         "font:13px/1.5 sans-serif;color:var(--input-text,#ddd);" +
         "box-shadow:0 4px 20px rgba(0,0,0,.7);min-width:200px;");
 
-    // ラベル — showDialog のタイトル行と同じスタイル
     if (cfg.label) {
         box.appendChild(h("div",
             "font:bold 14px sans-serif;color:var(--input-text,#ddd);flex-shrink:0;",
             cfg.label));
     }
 
-    // ±ボタン + 入力欄 行
     const btnRow = h("div", "display:flex;align-items:stretch;gap:4px;");
 
     const btnStyle =
@@ -386,12 +376,11 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
     btnRow.appendChild(plusBtn);
     box.appendChild(btnRow);
 
-    // ヒント
     box.appendChild(h("div",
         "font-size:10px;color:var(--border-color,#4e4e4e);text-align:center;",
         `${cfg.min ?? "−∞"} – ${cfg.max ?? "+∞"}  ·  Enter to confirm`));
 
-    // append 前に概算位置を設定（二重クリック時の即閉じ防止）
+    // 二重クリック時の即閉じを防ぐため append 前に概算位置を設定
     const approxW = 220, approxH = 110;
     box.style.left = `${Math.max(4, Math.min(screenX - approxW / 2, window.innerWidth  - approxW - 4))}px`;
     box.style.top  = `${Math.max(4, Math.min(screenY - approxH - 6, window.innerHeight - approxH - 4))}px`;
@@ -401,7 +390,6 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
     input.focus();
     input.select();
 
-    // レイアウト確定後に正確な位置へ調整
     requestAnimationFrame(() => {
         const bw = box.offsetWidth;
         const bh = box.offsetHeight;
@@ -413,7 +401,6 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
         box.style.top  = `${top}px`;
     });
 
-    // 値変更
     const applyDelta = (d) => {
         let val = parseFloat(input.value);
         if (isNaN(val)) val = currentVal;
@@ -425,7 +412,6 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
         input.select();
     };
 
-    // 長押し auto-repeat
     let _holdTimer = null, _holdInterval = null;
     const stopHold = () => {
         clearTimeout(_holdTimer);
@@ -447,7 +433,6 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
     minusBtn.addEventListener("pointerdown", e => { e.preventDefault(); startHold(-step); });
     plusBtn.addEventListener( "pointerdown", e => { e.preventDefault(); startHold(+step); });
 
-    // confirm / cancel
     const close = () => { stopHold(); overlay.remove(); };
     const commit = () => {
         stopHold();
@@ -468,13 +453,12 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
         if (e.key === "ArrowRight" || e.key === "ArrowUp")    { e.preventDefault(); applyDelta(+step); }
     });
 
-    // ホイールで値増減
     overlay.addEventListener("wheel", e => {
         e.preventDefault();
         applyDelta((e.deltaY < 0 ? 1 : -1) * step);
     }, { passive: false });
 
-    // 開いた直後の pointerdown では閉じない（二重クリック対策）
+    // 二重クリック対策: 開いた直後の pointerdown では閉じない
     let closeEnabled = false;
     requestAnimationFrame(() => { closeEnabled = true; });
     overlay.addEventListener("pointerdown", e => {
@@ -587,7 +571,7 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
     );
 
     let firstInput = null;
-    let okBtn      = null;  // keydown ハンドラから参照（代入後に発火）
+    let okBtn      = null;
 
     showDialog({
         title, width, gap: 10, className: cls,
@@ -646,7 +630,7 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
                     const set = (v) => {
                         if (f.min != null) v = Math.max(f.min, v);
                         if (f.max != null) v = Math.min(f.max, v);
-                        // toFixed で桁丸めしてから parseFloat に通すことで浮動小数点誤差を除去
+                        // toFixed → parseFloat で浮動小数点誤差を除去
                         v = dec === 0
                             ? Math.round(v)
                             : parseFloat((Math.round(v / step) * step).toFixed(dec));
@@ -658,7 +642,6 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
                         set(isNaN(v) ? (ed[f.key] ?? 0) : v);
                     });
 
-                    // 長押し auto-repeat
                     let _ht = null, _hi = null;
                     const stopHold = () => {
                         clearTimeout(_ht); clearInterval(_hi); _ht = _hi = null;
@@ -799,24 +782,21 @@ export function makeItemListWidget(spec) {
         enabledWidget = null,
     } = spec;
 
-    // 後方互換: hasParam + param → _params[0] に正規化
+    // hasParam + param → _params[0] に正規化（後方互換）
     const _params    = params  ?? (hasParam ? [{ w: 42, ...param }] : []);
     const _leftElems = leftElements ?? [];
 
     const addBtnH = addButton ? ADD_H : 0;
 
-    // ヘッダー高さ: enabledWidget あり → HEADER_H、param ラベルのみ → COLUMN_HEADER_H、なし → 0
     const hasAnyParamLabel = _params.some(p => p.label);
     const hdrH = enabledWidget   ? HEADER_H
                : hasAnyParamLabel ? COLUMN_HEADER_H
                : 0;
 
-    // ドラッグ状態（クロージャで保持）
-    let _activeDrag  = null;  // { paramKey: string, rowIndex: number } | null
+    let _activeDrag  = null;
     let _dragged     = false;
-    let _moveCleanup = null;  // 外部から強制終了できるクリーンアップ関数
+    let _moveCleanup = null;
 
-    // レイアウト計算（W に依存するため都度呼ぶ）
     function buildLayout(W) {
         const right = [];
         if (hasDelete)     right.push({ key: "del",  w: 20 });
@@ -837,7 +817,7 @@ export function makeItemListWidget(spec) {
         name:  widgetName,
         type:  widgetName,
         value: null,
-        _y:    0,   // draw() で更新 → mouse() の相対 Y 計算に使用
+        _y:    0,
 
         computeSize(W) {
             const items = getItems();
@@ -850,7 +830,6 @@ export function makeItemListWidget(spec) {
             const layout = buildLayout(W);
             const t      = getComfyTheme();
 
-            // ヘッダー行
             if (hdrH > 0) {
                 const headerMidY = y + hdrH / 2;
                 if (enabledWidget) {
@@ -873,21 +852,17 @@ export function makeItemListWidget(spec) {
                 const midY = rowY + ROW_H / 2;
                 const on   = hasToggle ? (item.on ?? true) : true;
 
-                // 行背景
                 drawRowBg(ctx, W, rowY);
 
-                // Toggle pill
                 if (layout.pill) {
                     drawPill(ctx, layout.pill.x, midY, on);
                 }
 
-                // leftElements（モードバッジ等）
                 for (const le of _leftElems) {
                     const area = layout[le.key];
                     if (area) le.draw?.(ctx, item, area.x, midY, area.w, ROW_H, on);
                 }
 
-                // Content（ノード固有の描画 — クリップ済み）
                 ctx.save();
                 ctx.beginPath();
                 ctx.rect(layout.contentX, rowY, layout.contentW, ROW_H);
@@ -895,7 +870,6 @@ export function makeItemListWidget(spec) {
                 content.draw(ctx, item, layout.contentX, rowY, layout.contentW, ROW_H, on);
                 ctx.restore();
 
-                // Param ボックス群
                 for (const p of _params) {
                     const area = layout[p.key];
                     if (!area) continue;
@@ -905,24 +879,20 @@ export function makeItemListWidget(spec) {
                     drawParamBox(ctx, area.x, rowY, area.w, ROW_H, text, active);
                 }
 
-                // Move arrows
                 if (layout.move) {
                     drawMoveArrows(ctx, layout.move.x, rowY, ROW_H,
                         i > 0, i < items.length - 1);
                 }
 
-                // Delete ボタン
                 if (layout.del) {
                     drawDeleteBtn(ctx, layout.del.x, midY);
                 }
 
-                // Jump ボタン
                 if (layout.jump) {
                     drawJumpBtn(ctx, layout.jump.x, midY);
                 }
             });
 
-            // Add ボタン
             if (addButton) {
                 const btnY   = itemsY + items.length * ROW_H;
                 const canAdd = items.length < maxItems;
@@ -940,7 +910,6 @@ export function makeItemListWidget(spec) {
             const rawY   = pos[1] - this._y;
             const localY = rawY - hdrH;
 
-            // ── ヘッダー行クリック（enabledWidget トグル） ──
             if (rawY < hdrH) {
                 if (enabledWidget && inX(pos, PAD, 30)) {
                     const ew = node.widgets?.find(w => w.name === enabledWidget.name);
@@ -957,7 +926,6 @@ export function makeItemListWidget(spec) {
             if (localY < 0) return false;
             const rowIndex = Math.floor(localY / ROW_H);
 
-            // ── Add ボタン ──
             if (addButton && rowIndex === items.length) {
                 if (items.length >= maxItems) return true;
                 if (addButton.onAdd) {
@@ -977,7 +945,6 @@ export function makeItemListWidget(spec) {
 
             const item = items[rowIndex];
 
-            // ── Delete ──
             if (layout.del && inX(pos, layout.del.x, layout.del.w)) {
                 beforeModify?.(items);
                 items.splice(rowIndex, 1);
@@ -986,7 +953,6 @@ export function makeItemListWidget(spec) {
                 return true;
             }
 
-            // ── Move arrows ──
             if (layout.move && inX(pos, layout.move.x, layout.move.w)) {
                 const relY   = localY - rowIndex * ROW_H;
                 const moveUp = relY < ROW_H / 2;
@@ -1006,13 +972,11 @@ export function makeItemListWidget(spec) {
                 return true;
             }
 
-            // ── Jump ──
             if (layout.jump && inX(pos, layout.jump.x, layout.jump.w)) {
                 content.onJump?.(item, rowIndex, node);
                 return true;
             }
 
-            // ── Param ボックス（ドラッグ or クリック） ──
             for (const p of _params) {
                 const area = layout[p.key];
                 if (!area || !inX(pos, area.x, area.w)) continue;
@@ -1026,7 +990,6 @@ export function makeItemListWidget(spec) {
                 const startVal = p.get(item);
                 const scale    = (typeof p.dragScale === "function" ? p.dragScale(item) : p.dragScale) ?? (p.step ?? 0.01);
 
-                // endCalled フラグで idempotent なクリーンアップを保証
                 let endCalled = false;
 
                 const onMove = (e) => {
@@ -1073,9 +1036,7 @@ export function makeItemListWidget(spec) {
                     }
                 };
 
-                // window + { capture: true } で登録する理由:
-                //   LiteGraph がキャンバスに setPointerCapture している場合でも
-                //   キャプチャフェーズ先頭で必ず発火する
+                // { capture: true } で登録することで LiteGraph の setPointerCapture より先に発火する
                 window.addEventListener("pointermove",   onMove);
                 window.addEventListener("pointerup",     endDrag, { capture: true });
                 window.addEventListener("pointercancel", endDrag, { capture: true });
@@ -1084,7 +1045,6 @@ export function makeItemListWidget(spec) {
                 return true;
             }
 
-            // ── leftElements クリック ──
             for (const le of _leftElems) {
                 const area = layout[le.key];
                 if (!area || !inX(pos, area.x, area.w)) continue;
@@ -1096,7 +1056,6 @@ export function makeItemListWidget(spec) {
                 return true;
             }
 
-            // ── Toggle pill ──
             if (layout.pill && hasToggle && inX(pos, layout.pill.x, layout.pill.w + 6)) {
                 item.on = !(item.on ?? true);
                 saveItems(items);
@@ -1104,7 +1063,6 @@ export function makeItemListWidget(spec) {
                 return true;
             }
 
-            // ── Content クリック ──
             if (content.onClick && inX(pos, layout.contentX, layout.contentW)) {
                 content.onClick(item, rowIndex, node);
                 return true;

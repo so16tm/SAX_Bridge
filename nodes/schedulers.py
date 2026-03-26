@@ -17,9 +17,6 @@ import comfy.samplers
 logger = logging.getLogger("SAX_Bridge")
 
 
-# ---------------------------------------------------------------------------
-# AYS ノイズレベル定義（論文 Table 1 / NVIDIA 公式実装より）
-# ---------------------------------------------------------------------------
 _AYS_NOISE_LEVELS = {
     "sd1": [
         14.6146412293, 6.4745760956, 3.8636745985, 2.6946151520,
@@ -57,9 +54,6 @@ def _ays_scheduler(model_type: str):
     return handler
 
 
-# ---------------------------------------------------------------------------
-# ComfyUI スケジューラハンドラに登録
-# ---------------------------------------------------------------------------
 _AYS_HANDLERS = {
     "ays_sd1": comfy.samplers.SchedulerHandler(_ays_scheduler("sd1")),
     "ays_sdxl": comfy.samplers.SchedulerHandler(_ays_scheduler("sdxl")),

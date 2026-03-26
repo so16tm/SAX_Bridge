@@ -25,7 +25,6 @@ function getSources(node) {
     return node._remoteSources ?? [];
 }
 
-/** ソース srcIdx の先頭スロットの絶対インデックス */
 function getOffset(node, srcIdx) {
     const sources = getSources(node);
     let offset = 0;
@@ -39,7 +38,6 @@ function getTotalSlotCount(node) {
     return getSources(node).reduce((sum, s) => sum + (s.slotCount ?? 0), 0);
 }
 
-/** ソースノードの出力構成を表す変化検知用シグネチャ */
 function sourceSignature(srcNode) {
     return (srcNode.outputs ?? [])
         .map(o => `${o.label ?? o.name ?? ""}:${o.type ?? ""}`).join(",");
@@ -58,7 +56,7 @@ function autoResize(node) {
 }
 
 // ---------------------------------------------------------------------------
-// スロットラベル同期（入力のみ — Collector は出力スロットを JS 管理しない）
+// スロットラベル同期
 // ---------------------------------------------------------------------------
 
 function syncSlotLabels(node) {
@@ -147,11 +145,6 @@ function removeSourceAt(node, idx) {
     app.canvas?.setDirty(true, false);
 }
 
-/**
- * 全ソースを入力スロットから再構築する。
- * Collector は出力スロットを JS 管理しないため、Remote Get の
- * downstream 追跡は不要。
- */
 function rebuildAllSources(node) {
     const savedSources = [...getSources(node)];
 
@@ -169,13 +162,11 @@ function rebuildAllSources(node) {
     }
 }
 
-/** ソースノードの出力が変化した場合に再同期する。 */
+// addSource が IMAGE 出力を再フィルタするため、全体再構築で正しく同期できる
 function resyncSource(node, srcNode) {
-    // addSource が IMAGE 出力を再フィルタするため、全体再構築で正しく同期できる
     rebuildAllSources(node);
 }
 
-/** 全ソースをリセットする。 */
 function resetAllSources(node) {
     for (const id of [..._hiddenLinkIds]) {
         if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
@@ -246,8 +237,6 @@ function showAddSourcePicker(collectorNode) {
 // ソース選択ウィジェット
 // ---------------------------------------------------------------------------
 
-// HEADER_H, ADD_H は sax_ui_base からインポート済み
-
 function makeSourceWidget(node) {
     let widgetY = 0;
 
@@ -295,12 +284,10 @@ function makeSourceWidget(node) {
 
             const linksVisible = drawNode._remoteLinksVisible ?? false;
 
-            // ── ヘッダー行: リンク表示トグル pill ──
             const headerMidY = y + HEADER_H / 2;
             drawPill(ctx, PAD + 4, headerMidY, linksVisible);
             txt(ctx, "Show links", PAD + 38, headerMidY, t.contentBg, "left", 10);
 
-            // ── ソース行 ──
             const layout = rowLayout(W, { hasJump: true, hasMoveUpDown: true, hasDelete: true });
             for (let si = 0; si < sources.length; si++) {
                 const src  = sources[si];
@@ -327,7 +314,6 @@ function makeSourceWidget(node) {
                 drawDeleteBtn(ctx, layout.del.x, midY);
             }
 
-            // ── Add ボタン ──
             const btnY   = y + HEADER_H + sources.length * ROW_H;
             const canAdd = getTotalSlotCount(drawNode) < MAX_SLOTS;
             drawAddBtn(ctx, W, btnY,
@@ -342,8 +328,7 @@ function makeSourceWidget(node) {
             const sources = getSources(mouseNode);
             const layout  = rowLayout(W, { hasJump: true, hasMoveUpDown: true, hasDelete: true });
 
-            // ── ヘッダー行: リンク表示トグル ──
-            if (relY < HEADER_H) {  // HEADER_H: sax_ui_base から import
+            if (relY < HEADER_H) {
                 if (pos[0] >= PAD && pos[0] < PAD + 34) {
                     toggleLinkVisibility(mouseNode);
                     return true;
@@ -353,17 +338,14 @@ function makeSourceWidget(node) {
 
             const localY = relY - HEADER_H;
 
-            // ── ソース行 ──
             for (let si = 0; si < sources.length; si++) {
                 if (localY < si * ROW_H || localY >= (si + 1) * ROW_H) continue;
 
-                // [✕] 削除
                 if (inX(pos, layout.del.x, layout.del.w)) {
                     removeSourceAt(mouseNode, si);
                     return true;
                 }
 
-                // [▲▼] 上下移動
                 if (inX(pos, layout.move.x, layout.move.w)) {
                     const moveUp = (localY - si * ROW_H) < ROW_H / 2;
                     if (moveUp && si > 0) swapSources(mouseNode, si - 1, si);
@@ -371,7 +353,6 @@ function makeSourceWidget(node) {
                     return true;
                 }
 
-                // [↗] ジャンプ
                 if (inX(pos, layout.jump.x, layout.jump.w)) {
                     const srcNode = app.graph.getNodeById(sources[si].sourceId);
                     if (srcNode) {
@@ -386,7 +367,6 @@ function makeSourceWidget(node) {
                 return false;
             }
 
-            // ── Add ボタン行 ──
             const btnRowTop = HEADER_H + sources.length * ROW_H;
             if (relY < btnRowTop || relY >= btnRowTop + ADD_H) return false;
 
@@ -412,21 +392,19 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_TYPE) return;
 
-        // --- onNodeCreated ---
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
             this._remoteSources      = [];
             this._remoteLinksVisible = false;
-            // Python が定義する optional slot_* 入力をクリア（JS で動的管理する）
+            // Python 定義の slot_* 入力をクリア（JS で動的管理する）
             for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
             // 出力スロット（"images" IMAGE）は Python 定義のまま維持する
             this.addCustomWidget(makeSourceWidget(this));
             this.size[0] = Math.max(this.size[0], 280);
-            this.size[1] = 1;   // slot 数に基づく ComfyUI デフォルト高さを破棄
+            this.size[1] = 1;
         };
 
-        // --- onSerialize ---
         const onSerialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (data) {
             onSerialize?.apply(this, arguments);
@@ -436,7 +414,6 @@ app.registerExtension({
             };
         };
 
-        // --- onConfigure ---
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (data) {
             onConfigure?.apply(this, arguments);
@@ -445,7 +422,7 @@ app.registerExtension({
                 this._remoteSources      = saved.sources ?? [];
                 this._remoteLinksVisible = saved.linksVisible ?? false;
 
-                // 入力スロット数を保存値に合わせる（LiteGraph がリンク復元前に呼ぶため）
+                // LiteGraph はリンク復元前に onConfigure を呼ぶためスロット数を先に調整する
                 const total = getTotalSlotCount(this);
                 const curIn = this.inputs?.length ?? 0;
                 for (let i = curIn - 1; i >= total; i--) this.removeInput(i);
@@ -458,7 +435,6 @@ app.registerExtension({
             }
             this.size[0] = Math.max(this.size[0], 280);
 
-            // ワークフロー読み込み後にリンクが確定してから再接続
             const self = this;
             setTimeout(() => {
                 const sources = getSources(self);

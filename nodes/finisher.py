@@ -11,9 +11,6 @@ from .noise import SAXNoiseEngine
 from .io_types import PipeLine
 
 
-# ---------------------------------------------------------------------------
-# Smooth: 帯域選択スムージング（高周波抑制）
-# ---------------------------------------------------------------------------
 def _apply_smooth(rgb: torch.Tensor, strength: float, sigma: float = 1.0) -> torch.Tensor:
     """高周波（ジャギー・過剰エッジ）を strength 分抑制する。(B, C, H, W)"""
     low = SAXNoiseEngine.gaussian_blur(rgb, sigma)
@@ -21,9 +18,6 @@ def _apply_smooth(rgb: torch.Tensor, strength: float, sigma: float = 1.0) -> tor
     return low + high * (1.0 - strength)
 
 
-# ---------------------------------------------------------------------------
-# Bloom: 明部からの光の滲み
-# ---------------------------------------------------------------------------
 def _apply_bloom(rgb: torch.Tensor, intensity: float, threshold: float = 0.7,
                  radius: float = 8.0) -> torch.Tensor:
     """
@@ -33,37 +27,25 @@ def _apply_bloom(rgb: torch.Tensor, intensity: float, threshold: float = 0.7,
     threshold  : 抽出する明度の閾値 (0.0-1.0)
     radius     : 光の滲みの広がり（ぼかし sigma）
     """
-    # 明部抽出: threshold 以上の輝度を持つ領域
     luminance = 0.299 * rgb[:, 0:1] + 0.587 * rgb[:, 1:2] + 0.114 * rgb[:, 2:3]
     bright_mask = (luminance - threshold).clamp(0.0, 1.0) / (1.0 - threshold + 1e-6)
     bright = rgb * bright_mask
 
-    # 大きくぼかして光の滲みを作る
     glow = SAXNoiseEngine.gaussian_blur(bright, radius)
-
-    # Screen 合成: 1 - (1 - base) * (1 - glow * intensity)
-    return 1.0 - (1.0 - rgb) * (1.0 - glow * intensity)
+    return 1.0 - (1.0 - rgb) * (1.0 - glow * intensity)  # Screen 合成
 
 
-# ---------------------------------------------------------------------------
-# Vignette: 画面端の減光
-# ---------------------------------------------------------------------------
 def _apply_vignette(rgb: torch.Tensor, strength: float) -> torch.Tensor:
     """画面端を暗くして視線を中央に集める。(B, C, H, W)"""
     _, _, h, w = rgb.shape
-    # 中心からの距離マップ（正規化）
     y = torch.linspace(-1, 1, h, device=rgb.device, dtype=rgb.dtype)
     x = torch.linspace(-1, 1, w, device=rgb.device, dtype=rgb.dtype)
     yy, xx = torch.meshgrid(y, x, indexing="ij")
     dist = (xx * xx + yy * yy).sqrt()
-    # 減光マスク: 中心=1.0, 端=1.0-strength
     vignette = (1.0 - strength * dist.clamp(0.0, 1.0)).unsqueeze(0).unsqueeze(0)
     return rgb * vignette
 
 
-# ---------------------------------------------------------------------------
-# Color Temperature: 色温度シフト
-# ---------------------------------------------------------------------------
 def _apply_color_correction(rgb: torch.Tensor, reference: torch.Tensor, strength: float) -> torch.Tensor:
     """
     画像の色分布を参照画像に合わせる（チャネルごとの mean/std マッチング）。(B, C, H, W)
@@ -88,16 +70,12 @@ def _apply_color_temp(rgb: torch.Tensor, temperature: float) -> torch.Tensor:
     temperature: -1.0(寒色)〜+1.0(暖色), 0=無効
     """
     t = temperature * 0.1  # 控えめにスケーリング
-    # 暖色: R+, B-  / 寒色: R-, B+
-    r = (rgb[:, 0:1] + t).clamp(0.0, 1.0)
+    r = (rgb[:, 0:1] + t).clamp(0.0, 1.0)  # 暖色: R+, B- / 寒色: R-, B+
     g = rgb[:, 1:2]
     b = (rgb[:, 2:3] - t).clamp(0.0, 1.0)
     return torch.cat([r, g, b], dim=1)
 
 
-# ---------------------------------------------------------------------------
-# SAX_Bridge_Finisher ノード
-# ---------------------------------------------------------------------------
 class SAX_Bridge_Finisher:
     """
     画像にポストエフェクトを適用する仕上げノード。
@@ -146,13 +124,12 @@ class SAX_Bridge_Finisher:
         if images is None:
             return (pipe, None)
 
-        # すべて無効ならパススルー
         if smooth <= 0 and bloom <= 0 and vignette <= 0 and color_temp == 0 and color_correction <= 0:
             return (pipe, images)
 
         rgb = images[:, :, :, :3].permute(0, 3, 1, 2)  # (B, C, H, W)
 
-        # Color Correction（他の効果より先に適用して元の色調を基準にする）
+        # 他の効果より先に適用して元の色調を基準にする
         if color_correction > 0 and reference_image is not None:
             ref_rgb = reference_image[:, :, :, :3].permute(0, 3, 1, 2)
             rgb = _apply_color_correction(rgb, ref_rgb, color_correction)

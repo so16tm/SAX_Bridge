@@ -160,7 +160,6 @@ def _save_image(
         pnginfo = PngImagePlugin.PngInfo()
         if metadata_str:
             pnginfo.add_text("parameters", metadata_str)
-        # ComfyUI ワークフロー復元用メタデータ
         if prompt is not None:
             pnginfo.add_text("prompt", json.dumps(prompt))
         if extra_pnginfo is not None:
@@ -171,8 +170,8 @@ def _save_image(
         save_kwargs: dict = {"format": "WEBP", "quality": webp_quality, "lossless": webp_lossless}
         exif = pil_img.getexif()
         if metadata_str:
-            exif[0x010E] = metadata_str  # ImageDescription タグ
-        # ComfyUI ワークフロー復元用 EXIF（ComfyUI 標準の WebP 保存と同形式）
+            exif[0x010E] = metadata_str
+        # ComfyUI 標準の WebP ワークフロー埋め込み形式（EXIF Model/Make タグ）
         if prompt is not None:
             exif[0x0110] = "prompt:" + json.dumps(prompt)
         if extra_pnginfo is not None:
@@ -355,7 +354,6 @@ class SAX_Bridge_Output:
         prompt=None,
         extra_pnginfo=None,
     ):
-        # --- 0. 画像ソース解決 ---
         if image is not None:
             src = image
         elif pipe is not None and pipe.get("images") is not None:
@@ -365,14 +363,11 @@ class SAX_Bridge_Output:
                 "[SAX_Bridge] Output: no image found. Connect image or pipe.images."
             )
 
-        # --- 1. シャープ化 ---
         result = _apply_sharpen(src, sharpen_strength, sharpen_sigma)
 
-        # --- 2. グレースケール ---
         if grayscale:
             result = _apply_grayscale(result)
 
-        # --- 3. 保存 ---
         if save:
             now = datetime.datetime.now()
             p = _pipe_to_meta(pipe) if pipe is not None else {}
@@ -385,12 +380,10 @@ class SAX_Bridge_Output:
             batch_size = len(imgs_np)
             for i, img_np in enumerate(imgs_np):
                 name = _build_indexed_name(template_result, filename_index, index_digits, index_position)
-                # バッチが複数枚の場合はバッチ内位置を付加して区別する
                 if batch_size > 1:
                     name = f"{name}_{i:02d}"
                 filepath = os.path.join(resolved_dir, name + ext)
 
-                # 同名ファイルが存在する場合は連番を付加
                 counter = 1
                 while os.path.exists(filepath):
                     filepath = os.path.join(resolved_dir, f"{name}_{counter:04d}{ext}")
@@ -470,7 +463,6 @@ class SAX_Bridge_Image_Preview:
         import glob
         temp_dir = folder_paths.get_temp_directory()
 
-        # 前回実行分のプレビューファイルを削除してディスク圧迫を防ぐ
         for old in glob.glob(os.path.join(temp_dir, "sax_preview_*.webp")):
             try:
                 os.remove(old)
@@ -481,7 +473,7 @@ class SAX_Bridge_Image_Preview:
         results = []
 
         for i in range(images.shape[0]):
-            frame  = images[i]   # [H, W, C]
+            frame  = images[i]
             img_np = (frame.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
 
             if img_np.shape[-1] == 1:
@@ -489,7 +481,6 @@ class SAX_Bridge_Image_Preview:
             else:
                 pil_img = Image.fromarray(img_np)
 
-            # 長辺を max_px にクリップ（high の場合はそのまま）
             if max_px is not None:
                 w, h = pil_img.size
                 long_edge = max(w, h)
