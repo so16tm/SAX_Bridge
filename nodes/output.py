@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -149,6 +150,8 @@ def _save_image(
     webp_lossless: bool,
     metadata_str: str,
     grayscale: bool,
+    prompt=None,
+    extra_pnginfo=None,
 ) -> None:
     """PIL を使って画像を保存する。"""
     pil_img = Image.fromarray(img_np[..., 0], mode="L") if grayscale else Image.fromarray(img_np)
@@ -157,13 +160,27 @@ def _save_image(
         pnginfo = PngImagePlugin.PngInfo()
         if metadata_str:
             pnginfo.add_text("parameters", metadata_str)
+        # ComfyUI ワークフロー復元用メタデータ
+        if prompt is not None:
+            pnginfo.add_text("prompt", json.dumps(prompt))
+        if extra_pnginfo is not None:
+            for key in extra_pnginfo:
+                pnginfo.add_text(key, json.dumps(extra_pnginfo[key]))
         pil_img.save(path, format="PNG", pnginfo=pnginfo)
     else:
         save_kwargs: dict = {"format": "WEBP", "quality": webp_quality, "lossless": webp_lossless}
+        exif = pil_img.getexif()
         if metadata_str:
-            exif = pil_img.getexif()
             exif[0x010E] = metadata_str  # ImageDescription タグ
-            save_kwargs["exif"] = exif.tobytes()
+        # ComfyUI ワークフロー復元用 EXIF（ComfyUI 標準の WebP 保存と同形式）
+        if prompt is not None:
+            exif[0x0110] = "prompt:" + json.dumps(prompt)
+        if extra_pnginfo is not None:
+            tag = 0x010F
+            for key, value in extra_pnginfo.items():
+                exif[tag] = key + ":" + json.dumps(value)
+                tag -= 1
+        save_kwargs["exif"] = exif.tobytes()
         pil_img.save(path, **save_kwargs)
 
 
@@ -302,6 +319,10 @@ class SAX_Bridge_Output:
                     },
                 ),
             },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -331,6 +352,8 @@ class SAX_Bridge_Output:
         image: torch.Tensor = None,
         pipe=None,
         prompt_text: str = "",
+        prompt=None,
+        extra_pnginfo=None,
     ):
         # --- 0. 画像ソース解決 ---
         if image is not None:
@@ -373,7 +396,7 @@ class SAX_Bridge_Output:
                     filepath = os.path.join(resolved_dir, f"{name}_{counter:04d}{ext}")
                     counter += 1
 
-                _save_image(img_np, filepath, format, webp_quality, webp_lossless, metadata_str, grayscale)
+                _save_image(img_np, filepath, format, webp_quality, webp_lossless, metadata_str, grayscale, prompt, extra_pnginfo)
                 logger.info(f"[SAX_Bridge] Output: saved → {filepath}")
 
         next_index = filename_index + 1 if save else filename_index
