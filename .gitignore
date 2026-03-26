@@ -6,3 +6,6 @@ __pycache__/
 
 # IDE 設定（ローカル開発環境向け）
 pyrightconfig.json
+
+# 内部管理ドキュメント（公開リポジトリではGitHub Issuesへ移行予定）
+ISSUES.md
