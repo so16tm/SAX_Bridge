@@ -1,4 +1,5 @@
 import json
+import random
 from typing import Any
 
 
@@ -44,6 +45,18 @@ class SAX_Bridge_Primitive_Store:
         "in one place. Each item becomes an output slot for downstream nodes."
     )
 
+    @classmethod
+    def IS_CHANGED(cls, items_json="[]", **kwargs):
+        """SEED(random) が含まれる場合は毎回再実行する。"""
+        try:
+            items = json.loads(items_json) if isinstance(items_json, str) else []
+        except (json.JSONDecodeError, TypeError):
+            return items_json
+        for item in items:
+            if item.get("type") == "SEED" and item.get("mode") == "random":
+                return float("nan")
+        return items_json
+
     def execute(self, items_json="[]", **kwargs):
         try:
             items = json.loads(items_json) if isinstance(items_json, str) else []
@@ -55,7 +68,11 @@ class SAX_Bridge_Primitive_Store:
             t = item.get("type", "INT")
             v = item.get("value", 0)
             try:
-                if t in ("INT", "SEED"):
+                if t == "SEED":
+                    if item.get("mode") == "random":
+                        v = random.randint(0, 2**53 - 1)
+                    result[i] = int(round(float(v)))
+                elif t == "INT":
                     result[i] = int(round(float(v)))
                 elif t == "FLOAT":
                     result[i] = float(v)

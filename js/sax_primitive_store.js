@@ -434,10 +434,13 @@ app.registerExtension({
             };
         }
 
-        // after: 実行完了後（executing=null）にシードを生成（次回用）
+        // 実行完了後（executing=null）にシードを生成
+        // - "after" : 次回の手動実行用
+        // - "before": 次のキューアイテム用（複数キュー登録時に毎回異なる seed を保証）
         api.addEventListener("executing", (e) => {
             if (e.detail === null) {
                 randomizeSeedsOnNodes("after");
+                randomizeSeedsOnNodes("before");
             }
         });
     },
