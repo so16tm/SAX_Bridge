@@ -129,7 +129,7 @@ def _build_metadata_str(p: dict, prompt_text: str) -> str:
     params = []
     for label, key in [
         ("Seed", "seed"), ("Steps", "steps"), ("CFG scale", "cfg"),
-        ("Sampler", "sampler_name"), ("Scheduler", "scheduler_name"),
+        ("Sampler", "sampler_name"), ("Scheduler", "scheduler"),
     ]:
         v = p.get(key)
         if v is not None:

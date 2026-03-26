@@ -322,7 +322,7 @@ def _extract_pipe(pipe):
         "steps":          max(1, loader_settings.get("steps", 20)),
         "cfg":            loader_settings.get("cfg", 8.0),
         "sampler_name":   loader_settings.get("sampler_name", "euler"),
-        "scheduler_name": loader_settings.get("scheduler", "normal"),
+        "scheduler": loader_settings.get("scheduler", "normal"),
     }
 
 
@@ -394,7 +394,7 @@ class SAX_Bridge_Detailer:
 
         result_images = _run_detail_loop(
             p["model"], p["vae"], p["images"], positive, p["negative"], p["seed"],
-            steps_eff, cfg_eff, p["sampler_name"], p["scheduler_name"],
+            steps_eff, cfg_eff, p["sampler_name"], p["scheduler"],
             denoise, 0.0, cycle,
             noise_mask_feather, blend_feather, crop_factor,
             0.0, 48,
@@ -488,7 +488,7 @@ class SAX_Bridge_Detailer_Enhanced:
 
         result_images = _run_detail_loop(
             p["model"], p["vae"], p["images"], positive, p["negative"], p["seed"],
-            steps_eff, cfg_eff, p["sampler_name"], p["scheduler_name"],
+            steps_eff, cfg_eff, p["sampler_name"], p["scheduler"],
             denoise, denoise_decay, cycle,
             noise_mask_feather, blend_feather, crop_factor,
             context_blur_sigma, context_blur_radius,

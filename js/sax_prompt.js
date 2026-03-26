@@ -63,9 +63,11 @@ app.registerExtension({
             if (!currentValues || currentValues.length <= 1) {
                 const list = await loadWildcardsFromAPI();
                 if (list && list.length > 0) {
+                    let _wcValues = list;
                     Object.defineProperty(wcCombo.options, "values", {
-                        set: () => { },
-                        get: () => list,
+                        set: (v) => { if (Array.isArray(v) && v.length > 1) _wcValues = v; },
+                        get: () => _wcValues,
+                        configurable: true,
                     });
                 }
             }

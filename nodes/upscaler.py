@@ -173,7 +173,7 @@ class SAX_Bridge_Upscaler:
                     steps_eff,
                     cfg_eff,
                     p["sampler_name"],
-                    p["scheduler_name"],
+                    p["scheduler"],
                     p["positive"],
                     p["negative"],
                     samples_dict,

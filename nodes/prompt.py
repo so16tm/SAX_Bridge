@@ -11,19 +11,24 @@ from comfy_api.latest import ComfyExtension, io
 from .io_types import PipeLine
 
 
+logger = logging.getLogger(__name__)
+
+
 def _get_impact_wildcards():
     """
     impact.wildcards モジュールを遅延取得する。
-    ノード実行時には Impact Pack は必ず初期化済みなので安全にインポートできる。
+    Impact Pack はオプション依存のため、未インストール時は None を返す。
+    呼び出し側で None の場合はワイルドカード展開をスキップしてテキストをそのまま使う。
     """
     try:
         import impact.wildcards
         return impact.wildcards
     except ImportError:
-        raise RuntimeError(
+        logger.warning(
             "[SAX_Bridge] ComfyUI-Impact-Pack is not installed. "
-            "Impact Pack is required to use Wildcard nodes."
+            "Wildcard expansion will be skipped."
         )
+        return None
 
 
 _lora_name_cache = None
@@ -56,6 +61,8 @@ def _encode_with_break(clip, text):
     concat_node = ConditioningConcat()
     chunks = [c.strip() for c in text.split("BREAK") if c.strip()] or [""]
 
+    # INTERNAL API: cond_stage_model / load_model / patcher.load_device は
+    # ComfyUI 内部 API。バージョン更新時に要確認。
     cond_model = clip.cond_stage_model
     cond_model.reset_clip_options()
     if clip.layer_idx is not None:
@@ -230,9 +237,14 @@ class SAX_Bridge_Prompt:
             raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
 
         actual_seed = pipe.get("seed", 0)
-        populated = wildcards.process(wildcard_text, actual_seed)
-        loras = wildcards.extract_lora_values(populated)
-        clean_text = wildcards.remove_lora_tags(populated)
+        if wildcards is not None:
+            populated = wildcards.process(wildcard_text, actual_seed)
+            loras = wildcards.extract_lora_values(populated)
+            clean_text = wildcards.remove_lora_tags(populated)
+        else:
+            populated = wildcard_text
+            loras = []
+            clean_text = wildcard_text
 
         if loras:
             model, clip = _apply_loras(model, clip, loras)
@@ -246,9 +258,10 @@ class SAX_Bridge_Prompt:
             "positive": conditioning,
         }
 
-        if "loader_settings" in new_pipe:
+        loader_settings = new_pipe.get("loader_settings")
+        if isinstance(loader_settings, dict):
             new_pipe["loader_settings"] = {
-                **new_pipe["loader_settings"],
+                **loader_settings,
                 "positive": clean_text,
             }
 
@@ -331,9 +344,14 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
             raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
 
         actual_seed = pipe.get("seed", 0)
-        populated = wildcards.process(wildcard_text, actual_seed)
-        loras = wildcards.extract_lora_values(populated)
-        clean_text = wildcards.remove_lora_tags(populated)
+        if wildcards is not None:
+            populated = wildcards.process(wildcard_text, actual_seed)
+            loras = wildcards.extract_lora_values(populated)
+            clean_text = wildcards.remove_lora_tags(populated)
+        else:
+            populated = wildcard_text
+            loras = []
+            clean_text = wildcard_text
 
         if loras:
             model, clip = _apply_loras(model, clip, loras)
@@ -347,9 +365,10 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
             target_type: conditioning,
         }
 
-        if "loader_settings" in new_pipe:
+        loader_settings = new_pipe.get("loader_settings")
+        if isinstance(loader_settings, dict):
             new_pipe["loader_settings"] = {
-                **new_pipe["loader_settings"],
+                **loader_settings,
                 target_type: clean_text,
             }
 

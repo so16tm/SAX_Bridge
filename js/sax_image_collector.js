@@ -256,6 +256,7 @@ function makeSourceWidget(node) {
 
             // ソース状態を毎フレームチェック（ノード削除・タイトル変更・出力変更を検知）
             const sources = getSources(drawNode);
+            const changedSources = [];
             for (let si = sources.length - 1; si >= 0; si--) {
                 const src     = sources[si];
                 const srcNode = app.graph.getNodeById(src.sourceId);
@@ -271,15 +272,19 @@ function makeSourceWidget(node) {
                 const sig = sourceSignature(srcNode);
                 if (sig !== src.sig) {
                     src.sig = sig;
-                    const capturedId = src.sourceId;
-                    setTimeout(() => {
-                        const still = getSources(drawNode).find(s => s.sourceId === capturedId);
-                        if (still && app.graph.getNodeById(capturedId)) {
-                            resyncSource(drawNode, app.graph.getNodeById(capturedId));
-                        }
-                    }, 0);
-                    return;
+                    changedSources.push(src.sourceId);
                 }
+            }
+            if (changedSources.length > 0) {
+                setTimeout(() => {
+                    for (const id of changedSources) {
+                        const still = getSources(drawNode).find(s => s.sourceId === id);
+                        if (still && app.graph.getNodeById(id)) {
+                            resyncSource(drawNode, app.graph.getNodeById(id));
+                        }
+                    }
+                }, 0);
+                return;
             }
 
             const linksVisible = drawNode._remoteLinksVisible ?? false;

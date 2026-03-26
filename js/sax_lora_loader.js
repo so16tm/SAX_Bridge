@@ -70,18 +70,14 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
             cb.type = "checkbox";
             cb.checked = selection.has(fullName);
             cb.style.cssText = "cursor:pointer;flex-shrink:0;accent-color:#4a9;";
-            const toggle = () => {
-                cb.checked = !cb.checked;
-                if (cb.checked) selection.add(fullName); else selection.delete(fullName);
-            };
             cb.addEventListener("change", () => {
                 if (cb.checked) selection.add(fullName); else selection.delete(fullName);
             });
-            const lbl = h("label",
+            const lbl = h("span",
                 "cursor:pointer;user-select:none;flex:1;overflow:hidden;text-overflow:ellipsis;" +
                 "white-space:nowrap;font-size:11px;color:var(--input-text,#ddd);");
             lbl.textContent = label;
-            lbl.addEventListener("click", toggle);
+            lbl.addEventListener("click", () => { cb.click(); });
             row.appendChild(cb);
             row.appendChild(lbl);
             return row;
@@ -377,10 +373,6 @@ function buildUI(node) {
             if (w.element) w.element.style.display = "none";
         }
     }
-
-    node.widgets = (node.widgets ?? []).filter(w =>
-        w.name === WIDGET_JSON || w.name === "enabled"
-    );
 
     const widget = makeItemListWidget({
         widgetName:    "__sax_lora_list",
