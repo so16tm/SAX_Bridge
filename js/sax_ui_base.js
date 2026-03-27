@@ -16,6 +16,7 @@
  *   rowLayout(W, opts)
  *   showParamPopup(screenX, screenY, currentVal, cfg, onCommit)
  *   makeItemListWidget(node, spec)
+ *   makeSourceListWidget(spec) — Collector ノード共通ソースリストウィジェット
  *
  * 出力スロット接続維持ユーティリティ:
  *   captureOutputLinks(node, items, slotOffset?)
@@ -1070,6 +1071,584 @@ export function makeItemListWidget(spec) {
 
             return false;
         },
+    };
+}
+
+// ---------------------------------------------------------------------------
+// makeSourceListWidget — Collector ノード共通ソースリストウィジェット
+//
+// Image Collector / Pipe Collector / Node Collector が持つ「ソースノード管理」
+// ウィジェットの共通実装。各 Collector はコールバック経由で差異を注入する。
+// ---------------------------------------------------------------------------
+
+/**
+ * Collector ノード用の汎用ソースリストウィジェットを生成する。
+ *
+ * @param {{
+ *   widgetName:        string,
+ *   serializeKey:      string,           // onSerialize/onConfigure のデータキー
+ *   maxSlots?:         number,           // デフォルト 64
+ *
+ *   filterSourceNode:  (srcNode) => boolean,
+ *   buildSource:       (srcNode, collectorNode, offset, remaining) => object|null,
+ *   connectSource:     (srcNode, src, collectorNode, offset) => void,
+ *   showAddPicker:     (collectorNode, existingIds, onConfirm) => void,
+ *
+ *   formatInfo?:       (src) => string,
+ *   onContentClick?:   (src, srcIdx, node) => void,
+ *
+ *   getSlotCount?:     (src) => number,
+ *   getOffset?:        (sources, srcIdx) => number,
+ *
+ *   hasOutputSlots?:   boolean,  — true の場合、buildSource が返す src に enabledSlots を必ず初期化すること
+ *   buildOutputSlots?: (src, absIdx, localIdx, collectorNode) => void,
+ *
+ *   migrateData?:      (savedData) => object[]|null,
+ *   syncSlotLabels?:   (node, sources) => void,
+ * }} spec
+ *
+ * @returns {{
+ *   createWidget:  (ownerNode: object) => object,
+ *   onNodeCreated: function,  — this にノードがバインドされた状態で呼ぶ
+ *   onSerialize:   function,  — this にノードがバインドされた状態で呼ぶ
+ *   onConfigure:   function,  — this にノードがバインドされた状態で呼ぶ
+ *   addSource:     function,
+ *   getSources:    function,
+ *   modifySource:  function,  — (node, srcIdx, updater) source 変更+rebuild+下流リンク復元
+ * }}
+ */
+export function makeSourceListWidget(spec) {
+    const {
+        widgetName,
+        serializeKey,
+        maxSlots       = 64,
+
+        filterSourceNode,
+        buildSource,
+        connectSource,
+        showAddPicker,
+
+        formatInfo     = null,
+        onContentClick = null,
+
+        getSlotCount   = (src) => src.slotCount ?? 0,
+        getOffset      = null,   // null の場合は累積和
+        hasOutputSlots = false,
+        buildOutputSlots = null,
+
+        migrateData    = null,
+        syncSlotLabels = null,
+    } = spec;
+
+    // 必須コールバックの検証
+    if (typeof filterSourceNode !== "function") {
+        throw new Error(`makeSourceListWidget [${widgetName}]: filterSourceNode は必須です`);
+    }
+    if (typeof buildSource !== "function") {
+        throw new Error(`makeSourceListWidget [${widgetName}]: buildSource は必須です`);
+    }
+    if (typeof connectSource !== "function") {
+        throw new Error(`makeSourceListWidget [${widgetName}]: connectSource は必須です`);
+    }
+    if (typeof showAddPicker !== "function") {
+        throw new Error(`makeSourceListWidget [${widgetName}]: showAddPicker は必須です`);
+    }
+    if (hasOutputSlots && typeof buildOutputSlots !== "function") {
+        throw new Error(`makeSourceListWidget [${widgetName}]: hasOutputSlots=true の場合 buildOutputSlots は必須です`);
+    }
+
+    // ----------------------------------------------------------------
+    // 内部ヘルパー
+    // ----------------------------------------------------------------
+
+    function _getSources(node) {
+        return node._remoteSources ?? [];
+    }
+
+    function _getOffset(node, srcIdx) {
+        if (getOffset) return getOffset(_getSources(node), srcIdx);
+        const sources = _getSources(node);
+        let offset = 0;
+        for (let i = 0; i < srcIdx; i++) offset += getSlotCount(sources[i]);
+        return offset;
+    }
+
+    function _getTotalSlotCount(node) {
+        return _getSources(node).reduce((sum, s) => sum + getSlotCount(s), 0);
+    }
+
+    function _sourceSignature(srcNode) {
+        return (srcNode.outputs ?? [])
+            .map(o => `${o.label ?? o.name ?? ""}:${o.type ?? ""}`).join(",");
+    }
+
+    function _autoResize(node) {
+        const sz = node.computeSize?.();
+        if (sz && node.size[1] !== sz[1]) {
+            node.size[1] = sz[1];
+            app.canvas?.setDirty(true, true);
+        }
+    }
+
+    function _defaultSyncSlotLabels(node) {
+        const sources = _getSources(node);
+        let absIdx = 0;
+        for (const src of sources) {
+            const count = getSlotCount(src);
+            for (let li = 0; li < count; li++) {
+                if (node.inputs[absIdx]) {
+                    node.inputs[absIdx].name = `slot_${absIdx}`;
+                    node.inputs[absIdx].type = "*";
+                }
+                absIdx++;
+            }
+        }
+        app.canvas?.setDirty(true, true);
+    }
+
+    function _syncSlotLabels(node) {
+        if (syncSlotLabels) {
+            try { syncSlotLabels(node, _getSources(node)); } catch (e) { console.warn(`[${widgetName}] syncSlotLabels error:`, e); }
+        } else {
+            _defaultSyncSlotLabels(node);
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // 下流リンク保存（hasOutputSlots 時）
+    // ----------------------------------------------------------------
+
+    function _captureDownstream(node) {
+        if (!hasOutputSlots) return [];
+        const sources     = _getSources(node);
+        const downstream  = [];
+        for (let si = 0; si < sources.length; si++) {
+            const src    = sources[si];
+            const offset = _getOffset(node, si);
+            const count  = getSlotCount(src);
+            for (let li = 0; li < count; li++) {
+                const absIdx = offset + li;
+                const out    = node.outputs?.[absIdx];
+                if (!out?.links?.length) continue;
+                for (const lid of out.links) {
+                    const lnk = app.graph.links?.[lid];
+                    if (lnk) downstream.push({
+                        sourceId:      src.sourceId,
+                        globalSlotIdx: src.enabledSlots?.[li] ?? li,
+                        outName:       out.label ?? out.name ?? null,
+                        localSlot:     li,
+                        targetId:      lnk.target_id,
+                        targetSlot:    lnk.target_slot,
+                    });
+                }
+            }
+        }
+        return downstream;
+    }
+
+    function _restoreDownstream(node, downstream) {
+        if (!hasOutputSlots || !downstream.length) return;
+        for (const ds of downstream) {
+            const si = _getSources(node).findIndex(s => s.sourceId === ds.sourceId);
+            if (si < 0) continue;
+            const src = _getSources(node)[si];
+
+            let resolvedLocalSlot = -1;
+            if (ds.outName != null && src.slotNames) {
+                const nameIdx = src.slotNames.indexOf(ds.outName);
+                if (nameIdx >= 0) {
+                    const localIdx = (src.enabledSlots ?? []).indexOf(nameIdx);
+                    if (localIdx >= 0) resolvedLocalSlot = localIdx;
+                }
+            }
+            if (resolvedLocalSlot < 0 && ds.globalSlotIdx != null && src.enabledSlots) {
+                const localIdx = src.enabledSlots.indexOf(ds.globalSlotIdx);
+                if (localIdx >= 0) resolvedLocalSlot = localIdx;
+            }
+            if (resolvedLocalSlot < 0) continue;
+
+            const newAbsIdx = _getOffset(node, si) + resolvedLocalSlot;
+            const tgtNode   = app.graph.getNodeById(ds.targetId);
+            if (tgtNode && node.outputs?.[newAbsIdx]) {
+                node.connect(newAbsIdx, tgtNode, ds.targetSlot);
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // ソース操作
+    // ----------------------------------------------------------------
+
+    function addSource(collectorNode, srcNode) {
+        const sources   = collectorNode._remoteSources ?? [];
+        const offset    = _getTotalSlotCount(collectorNode);
+        const remaining = maxSlots - offset;
+        if (remaining <= 0) return;
+
+        let src;
+        try {
+            src = buildSource(srcNode, collectorNode, offset, remaining);
+        } catch (e) {
+            console.warn(`[${widgetName}] buildSource error:`, e);
+            return;
+        }
+        if (!src) return;
+
+        src.sig = _sourceSignature(srcNode);
+
+        const physCount = getSlotCount(src);
+        for (let li = 0; li < physCount; li++) {
+            collectorNode.addInput(`slot_${offset + li}`, "*");
+            if (hasOutputSlots && buildOutputSlots) {
+                try { buildOutputSlots(src, offset + li, li, collectorNode); } catch (e) { console.warn(`[${widgetName}] buildOutputSlots error:`, e); }
+            }
+        }
+
+        try {
+            connectSource(srcNode, src, collectorNode, offset);
+        } catch (e) {
+            console.warn(`[${widgetName}] connectSource error:`, e);
+        }
+
+        sources.push(src);
+        collectorNode._remoteSources = sources;
+
+        _syncSlotLabels(collectorNode);
+        applyLinkVisibility(collectorNode);
+        _autoResize(collectorNode);
+    }
+
+    function removeSourceAt(node, idx) {
+        const sources = _getSources(node);
+        if (idx < 0 || idx >= sources.length) return;
+
+        const offset    = _getOffset(node, idx);
+        const physCount = getSlotCount(sources[idx]);
+
+        unhideSourceLinks(node);
+        for (let i = offset + physCount - 1; i >= offset; i--) {
+            const linkId = node.inputs[i]?.link;
+            if (linkId != null) app.graph.removeLink(linkId);
+            if (hasOutputSlots) node.removeOutput(i);
+            node.removeInput(i);
+        }
+        sources.splice(idx, 1);
+        node._remoteSources = sources;
+
+        for (const id of [..._hiddenLinkIds]) {
+            if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
+        }
+
+        _syncSlotLabels(node);
+        applyLinkVisibility(node);
+        _autoResize(node);
+        app.canvas?.setDirty(true, false);
+    }
+
+    function rebuildAllSources(node, preDownstream = null) {
+        const savedSources = [..._getSources(node)];
+        const downstream   = preDownstream ?? _captureDownstream(node);
+
+        unhideSourceLinks(node);
+        for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
+            const linkId = node.inputs[i]?.link;
+            if (linkId != null) app.graph.removeLink(linkId);
+            node.removeInput(i);
+        }
+        if (hasOutputSlots) {
+            for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
+        }
+        node._remoteSources = [];
+
+        for (const src of savedSources) {
+            const srcNode = app.graph.getNodeById(src.sourceId);
+            if (srcNode) addSource(node, srcNode);
+        }
+
+        _restoreDownstream(node, downstream);
+    }
+
+    function swapSources(node, si, sj) {
+        const sources    = _getSources(node);
+        const downstream = _captureDownstream(node);
+        [sources[si], sources[sj]] = [sources[sj], sources[si]];
+        rebuildAllSources(node, downstream);
+        applyLinkVisibility(node);
+        _autoResize(node);
+        app.canvas?.setDirty(true, false);
+    }
+
+    function resetAllSources(node) {
+        for (const id of [..._hiddenLinkIds]) {
+            if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
+        }
+        unhideSourceLinks(node);
+        for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
+            const linkId = node.inputs[i]?.link;
+            if (linkId != null) app.graph.removeLink(linkId);
+            node.removeInput(i);
+        }
+        if (hasOutputSlots) {
+            for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
+        }
+        node._remoteSources = [];
+        _autoResize(node);
+        app.canvas?.setDirty(true, false);
+    }
+
+    // ----------------------------------------------------------------
+    // ウィジェット本体（ノードごとにインスタンス化）
+    // ----------------------------------------------------------------
+
+    // ownerNode: computeSize でノード参照が必要（LiteGraph が引数に渡さないため）
+    // draw/mouse は LiteGraph が正しいノードを引数に渡すため、引数の drawNode/mouseNode を使用する
+    function _createWidget(ownerNode) {
+        let _widgetY = 0;
+
+        return {
+            name:  widgetName,
+            type:  widgetName,
+            value: null,
+
+            computeSize(W) {
+                const n = _getSources(ownerNode).length;
+                return [W, HEADER_H + n * ROW_H + ADD_H + BOTTOM_PAD];
+            },
+
+            draw(ctx, drawNode, W, y) {
+                _widgetY = y;
+            const t = getComfyTheme();
+
+            // 毎フレーム: ソース生存確認・タイトル変更・sig 変化の検知
+            const sources = _getSources(drawNode);
+            let sigChangedDetected = false;
+            for (let si = sources.length - 1; si >= 0; si--) {
+                const src     = sources[si];
+                const srcNode = app.graph.getNodeById(src.sourceId);
+                if (!srcNode) {
+                    removeSourceAt(drawNode, si);
+                    return;
+                }
+                const currentTitle = srcNode.title || srcNode.type || `Node#${srcNode.id}`;
+                if (currentTitle !== src.sourceTitle) {
+                    src.sourceTitle = currentTitle;
+                    app.canvas?.setDirty(true, false);
+                }
+                const sig = _sourceSignature(srcNode);
+                if (sig !== src.sig) {
+                    src.sig = sig;
+                    sigChangedDetected = true;
+                }
+            }
+            if (sigChangedDetected) {
+                setTimeout(() => rebuildAllSources(drawNode), 0);
+                return;
+            }
+
+            // ヘッダー: Show links pill
+            const linksVisible = drawNode._remoteLinksVisible ?? false;
+            const headerMidY   = y + HEADER_H / 2;
+            drawPill(ctx, PAD + 4, headerMidY, linksVisible);
+            txt(ctx, "Show links", PAD + 38, headerMidY, t.contentBg, "left", 10);
+
+            // ソース行
+            const layout = rowLayout(W, { hasJump: true, hasMoveUpDown: true, hasDelete: true });
+            for (let si = 0; si < sources.length; si++) {
+                const src  = sources[si];
+                const rowY = y + HEADER_H + si * ROW_H;
+                const midY = rowY + ROW_H / 2;
+
+                drawRowBg(ctx, W, rowY);
+
+                const icon  = src.isSub ? "▣" : "◈";
+                const color = src.isSub ? SAX_COLORS.subgraph : SAX_COLORS.node;
+                let info    = "";
+                if (formatInfo) {
+                    try { info = formatInfo(src); } catch (e) { console.warn(`[${widgetName}] formatInfo error:`, e); }
+                }
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(layout.contentX, rowY, layout.contentW, ROW_H);
+                ctx.clip();
+                txt(ctx, `${icon}  ${src.sourceTitle}`, layout.contentX + 4, midY, color, "left", 11);
+                if (info) txt(ctx, info, layout.contentX + layout.contentW, midY, t.contentBg, "right", 10);
+                ctx.restore();
+
+                drawJumpBtn(ctx, layout.jump.x, midY);
+                drawMoveArrows(ctx, layout.move.x, rowY, ROW_H, si > 0, si < sources.length - 1);
+                drawDeleteBtn(ctx, layout.del.x, midY);
+            }
+
+            // Add ボタン
+            const btnY   = y + HEADER_H + sources.length * ROW_H;
+            const canAdd = _getTotalSlotCount(drawNode) < maxSlots;
+            drawAddBtn(ctx, W, btnY,
+                sources.length === 0 ? "Select source…" : "+ Add Source",
+                canAdd);
+        },
+
+        mouse(event, pos, mouseNode) {
+            if (event.type !== "pointerdown") return false;
+            const W       = mouseNode.size[0];
+            const relY    = pos[1] - _widgetY;
+            const sources = _getSources(mouseNode);
+            const layout  = rowLayout(W, { hasJump: true, hasMoveUpDown: true, hasDelete: true });
+
+            // ヘッダー領域
+            if (relY < HEADER_H) {
+                if (pos[0] >= PAD && pos[0] < PAD + 34) {
+                    toggleLinkVisibility(mouseNode);
+                    return true;
+                }
+                return false;
+            }
+
+            const localY = relY - HEADER_H;
+
+            // ソース行
+            for (let si = 0; si < sources.length; si++) {
+                if (localY < si * ROW_H || localY >= (si + 1) * ROW_H) continue;
+
+                if (inX(pos, layout.del.x, layout.del.w)) {
+                    removeSourceAt(mouseNode, si);
+                    return true;
+                }
+
+                if (inX(pos, layout.move.x, layout.move.w)) {
+                    const moveUp = (localY - si * ROW_H) < ROW_H / 2;
+                    if (moveUp && si > 0) swapSources(mouseNode, si - 1, si);
+                    else if (!moveUp && si < sources.length - 1) swapSources(mouseNode, si, si + 1);
+                    return true;
+                }
+
+                if (inX(pos, layout.jump.x, layout.jump.w)) {
+                    const srcNode = app.graph.getNodeById(sources[si].sourceId);
+                    if (srcNode) {
+                        import("./sax_picker.js").then(({ panCanvasTo }) => {
+                            panCanvasTo(
+                                srcNode.pos[0] + (srcNode.size?.[0] ?? 0) / 2,
+                                srcNode.pos[1] + (srcNode.size?.[1] ?? 0) / 2
+                            );
+                        }).catch(e => console.warn(`[${widgetName}] panCanvasTo error:`, e));
+                    }
+                    return true;
+                }
+
+                if (onContentClick && inX(pos, layout.contentX, layout.contentW)) {
+                    try { onContentClick(sources[si], si, mouseNode); } catch (e) { console.warn(`[${widgetName}] onContentClick error:`, e); }
+                    return true;
+                }
+
+                return false;
+            }
+
+            // Add ボタン領域
+            const btnRowTop = HEADER_H + sources.length * ROW_H;
+            if (relY < btnRowTop || relY >= btnRowTop + ADD_H) return false;
+
+            if (_getTotalSlotCount(mouseNode) < maxSlots) {
+                const existingIds = new Set([mouseNode.id, ..._getSources(mouseNode).map(s => s.sourceId)]);
+                try {
+                    showAddPicker(mouseNode, existingIds, (items) => {
+                        for (const item of items) {
+                            if (item.type !== "node") continue;
+                            const n = app.graph.getNodeById(item.id);
+                            if (n) addSource(mouseNode, n);
+                        }
+                    });
+                } catch (e) { console.warn(`[${widgetName}] showAddPicker error:`, e); }
+            }
+            return true;
+        },
+    };
+    }
+
+    // ----------------------------------------------------------------
+    // ノードフック
+    // ----------------------------------------------------------------
+
+    function onNodeCreated() {
+        this._remoteSources      = [];
+        this._remoteLinksVisible = false;
+        this.addCustomWidget(_createWidget(this));
+    }
+
+    function onSerialize(data) {
+        data[serializeKey] = {
+            sources:      _getSources(this),
+            linksVisible: this._remoteLinksVisible ?? false,
+        };
+    }
+
+    function onConfigure(data) {
+        const saved = data[serializeKey];
+        if (saved) {
+            let sources = null;
+            if (migrateData) {
+                try {
+                    sources = migrateData(saved);
+                } catch (e) {
+                    console.warn(`[${widgetName}] migrateData error:`, e);
+                    sources = [];
+                }
+            }
+            if (sources == null) sources = saved.sources ?? [];
+
+            this._remoteSources      = sources;
+            this._remoteLinksVisible = saved.linksVisible ?? false;
+
+            // LiteGraph はリンク復元前に onConfigure を呼ぶため、スロット数のみ同期する
+            const total  = _getTotalSlotCount(this);
+            const curIn  = this.inputs?.length ?? 0;
+            for (let i = curIn - 1; i >= total; i--) this.removeInput(i);
+            for (let i = curIn; i < total; i++) this.addInput(`slot_${i}`, "*");
+            if (hasOutputSlots) {
+                const curOut = this.outputs?.length ?? 0;
+                for (let i = curOut - 1; i >= total; i--) this.removeOutput(i);
+                for (let i = curOut; i < total; i++) this.addOutput(`out_${i}`, "*");
+            }
+            _syncSlotLabels(this);
+        }
+
+        if (!this.widgets?.some(w => w.name === widgetName)) {
+            this.addCustomWidget(_createWidget(this));
+        }
+
+        const node = this;
+        setTimeout(() => {
+            const sources = _getSources(node);
+            for (let si = 0; si < sources.length; si++) {
+                const src     = sources[si];
+                const srcNode = app.graph.getNodeById(src.sourceId);
+                if (!srcNode) continue;
+                const offset = _getOffset(node, si);
+                try {
+                    connectSource(srcNode, src, node, offset);
+                } catch (e) { console.warn(`[${widgetName}] connectSource (configure) error:`, e); }
+                src.sig = _sourceSignature(srcNode);
+            }
+            applyLinkVisibility(node);
+            _autoResize(node);
+        }, 0);
+    }
+
+    function modifySource(node, srcIdx, updater) {
+        const sources = _getSources(node);
+        if (srcIdx < 0 || srcIdx >= sources.length) return;
+        const downstream = _captureDownstream(node);
+        try { updater(sources[srcIdx]); } catch (e) { console.warn(`[${widgetName}] modifySource updater error:`, e); return; }
+        rebuildAllSources(node, downstream);
+    }
+
+    return {
+        createWidget: _createWidget,
+        onNodeCreated,
+        onSerialize,
+        onConfigure,
+        addSource,
+        getSources: _getSources,
+        modifySource,
     };
 }
 
