@@ -191,7 +191,7 @@ def _pipe_to_meta(pipe: dict) -> dict:
         if isinstance(extracted, dict):
             p.update(extracted)
     except Exception:
-        pass
+        logger.warning("[SAX_Bridge] Failed to extract pipe metadata", exc_info=True)
     settings = pipe.get("loader_settings", {})
     p["ckpt_name"] = settings.get("ckpt_name", p.get("ckpt_name", ""))
     return p

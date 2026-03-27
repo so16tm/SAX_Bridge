@@ -4,9 +4,7 @@ import os
 import folder_paths
 import nodes
 from nodes import ConditioningConcat
-from typing_extensions import override
-
-from comfy_api.latest import ComfyExtension, io
+from comfy_api.latest import io
 
 from .io_types import PipeLine
 
@@ -375,11 +373,3 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         return io.NodeOutput(new_pipe, conditioning, populated)
 
 
-class WildcardEncodeExtension(ComfyExtension):
-    @override
-    async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [SAX_Bridge_Prompt_Concat]
-
-
-async def comfy_entrypoint() -> WildcardEncodeExtension:
-    return WildcardEncodeExtension()

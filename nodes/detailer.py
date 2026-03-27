@@ -382,7 +382,7 @@ class SAX_Bridge_Detailer:
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
-            return (pipe, p["images"])
+            return (pipe, p["images"] if p["images"] is not None else pipe.get("images"))
         _ensure_negative(p)
 
         steps_eff = steps_override if steps_override > 0 else p["steps"]
@@ -403,7 +403,7 @@ class SAX_Bridge_Detailer:
         )
 
         if result_images is None:
-            return (pipe, p["images"])
+            return (pipe, p["images"] if p["images"] is not None else pipe.get("images"))
 
         new_pipe = pipe.copy()
         new_pipe["images"] = result_images
@@ -476,7 +476,7 @@ class SAX_Bridge_Detailer_Enhanced:
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
-            return (pipe, p["images"])
+            return (pipe, p["images"] if p["images"] is not None else pipe.get("images"))
         _ensure_negative(p)
 
         steps_eff = steps_override if steps_override > 0 else p["steps"]
@@ -503,7 +503,7 @@ class SAX_Bridge_Detailer_Enhanced:
         )
 
         if result_images is None:
-            return (pipe, p["images"])
+            return (pipe, p["images"] if p["images"] is not None else pipe.get("images"))
 
         new_pipe = pipe.copy()
         new_pipe["images"] = result_images

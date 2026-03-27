@@ -552,7 +552,7 @@ class SAX_Bridge_Segmenter_Multi:
 
         for b in range(batch_size):
             img_np    = (images[b].cpu().numpy() * 255).astype(np.uint8)
-            pil_image = Image.fromarray(img_np)
+            pil_image = Image.fromarray(img_np[..., :3])
 
             positive_list = []
             negative_list = []

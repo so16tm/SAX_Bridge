@@ -903,7 +903,9 @@ app.registerExtension({
         const config = getConfig(node);
         if (config.managed.length > 0) applyScene(config);
 
-        _managerNode = node;
+        if (!_managerNode || !app.graph.getNodeById(_managerNode.id)) {
+            _managerNode = node;
+        }
         showBackButton();
 
         const origOnRemoved = node.onRemoved;
