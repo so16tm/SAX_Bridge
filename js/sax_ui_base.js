@@ -68,6 +68,10 @@ export const SAX_COLORS = {
     node:           "#bc8",   // ノード
     widget:         "#cb8",   // Boolean ウィジェット（トグル）
 
+    // フィードバック
+    flash:          "#ffe066",  // シーン切替フラッシュ
+    capture:        "#7d7",     // キーキャプチャ中
+
     // プライマリアクション（Apply ボタン等）— DOM インラインスタイル用 CSS 変数文字列
     primaryBg:      "var(--primary-background,      #0b8ce9)",
     primaryHoverBg: "var(--primary-background-hover,#31b9f4)",
@@ -936,6 +940,7 @@ export function makeItemListWidget(spec) {
 
             if (addButton && rowIndex === items.length) {
                 if (items.length >= maxItems) return true;
+                beforeModify?.(items);
                 if (addButton.onAdd) {
                     addButton.onAdd(node, items, saveItems);
                 } else {
@@ -1533,12 +1538,20 @@ export function makeSourceListWidget(spec) {
                     const srcNode = app.graph.getNodeById(sources[si].sourceId);
                     if (srcNode) {
                         const savedOffset = [...app.canvas.ds.offset];
-                        import("./sax_picker.js").then(({ panCanvasTo, showReturnButton }) => {
+                        import("./sax_picker.js").then(({ panCanvasTo, showReturnButton, clearPickerHighlight }) => {
                             panCanvasTo(
                                 srcNode.pos[0] + (srcNode.size?.[0] ?? 0) / 2,
                                 srcNode.pos[1] + (srcNode.size?.[1] ?? 0) / 2
                             );
+                            setTimeout(() => {
+                                app.canvas.deselectAllNodes?.();
+                                app.canvas.selected_nodes = { [srcNode.id]: srcNode };
+                                srcNode.is_selected = true;
+                                app.canvas.setDirty(true, true);
+                            }, 100);
                             showReturnButton(() => {
+                                srcNode.is_selected = false;
+                                clearPickerHighlight();
                                 app.canvas.ds.offset[0] = savedOffset[0];
                                 app.canvas.ds.offset[1] = savedOffset[1];
                                 app.canvas.setDirty(true, true);

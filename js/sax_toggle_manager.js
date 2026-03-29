@@ -296,6 +296,16 @@ function showBackButton() {
     _backBtn = btn;
 }
 
+function _highlightTarget(target) {
+    if (!target) return;
+    setTimeout(() => {
+        app.canvas.deselectAllNodes?.();
+        app.canvas.selected_nodes = { [target.id]: target };
+        target.is_selected = true;
+        app.canvas.setDirty(true, true);
+    }, 100);
+}
+
 function navigateToItem(item) {
     try {
         const savedOffset = [...app.canvas.ds.offset];
@@ -308,6 +318,7 @@ function navigateToItem(item) {
                     n.pos[0] + (n.size?.[0] ?? 0) / 2,
                     n.pos[1] + (n.size?.[1] ?? 0) / 2
                 );
+                _highlightTarget(n);
                 jumped = true;
             }
         } else if (item.type === "group") {
@@ -319,6 +330,7 @@ function navigateToItem(item) {
         }
         if (jumped) {
             showReturnButton(() => {
+                clearPickerHighlight();
                 app.canvas.ds.offset[0] = savedOffset[0];
                 app.canvas.ds.offset[1] = savedOffset[1];
                 app.canvas.setDirty(true, true);
@@ -486,7 +498,7 @@ function makeSceneWidget(node) {
             txt(ctx, "◀", p.prevX + 9, midY, canPrev ? t.inputText : t.contentBg, "center", 9);
 
             const flashing   = Date.now() < _sceneFlashUntil;
-            const sceneColor = flashing ? "#ffe066" : t.fg;
+            const sceneColor = flashing ? SAX_COLORS.flash : t.fg;
             ctx.save();
             ctx.beginPath();
             ctx.rect(p.nameX, y + 2, p.nameW, H - 4);
@@ -716,7 +728,7 @@ function showSceneManager(node) {
         "✎");
     keyEditBtn.addEventListener("click", () => {
         keyDisplay.textContent = "…";
-        keyDisplay.style.color = "#7d7";
+        keyDisplay.style.color = SAX_COLORS.capture;
         _capturingBackKey = true;
         const capture = (e) => {
             e.preventDefault(); e.stopPropagation();
