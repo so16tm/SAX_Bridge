@@ -282,12 +282,13 @@ function showBackButton() {
     const posStyle = BACK_POS_STYLES[pos] ?? BACK_POS_STYLES["bottom-left"];
 
     const btn = document.createElement("button");
-    btn.textContent = "↩ Back";
+    const name = _managerNode?.title || _managerNode?.type || "Toggle Manager";
+    btn.textContent = `↩ ${name}`;
     btn.style.cssText =
         `position:fixed;${posStyle}z-index:9999;padding:9px 22px;` +
-        `background:var(--comfy-menu-bg,#171718);border:1px solid var(--border-color,#4e4e4e);border-radius:6px;` +
+        `background:var(--comfy-menu-bg,#171718);border:1px solid rgba(74,153,153,.6);border-radius:6px;` +
         `color:var(--input-text,#ddd);cursor:pointer;font-size:13px;font-family:sans-serif;font-weight:bold;` +
-        `box-shadow:0 2px 16px rgba(0,0,0,.5);`;
+        `box-shadow:0 0 12px rgba(74,153,153,.4),0 2px 16px rgba(0,0,0,.5);`;
     btn.addEventListener("mouseenter", () => { btn.style.background = "var(--comfy-menu-secondary-bg,#303030)"; });
     btn.addEventListener("mouseleave", () => { btn.style.background = "var(--comfy-menu-bg,#171718)"; });
     btn.addEventListener("click", goBack);
@@ -297,16 +298,31 @@ function showBackButton() {
 
 function navigateToItem(item) {
     try {
+        const savedOffset = [...app.canvas.ds.offset];
+        let jumped = false;
         if (item.type === "node" || item.type === "widget") {
             const nId = item.type === "widget" ? item.nodeId : item.id;
             const n = app.graph.getNodeById(nId);
-            if (n) panCanvasTo(
-                n.pos[0] + (n.size?.[0] ?? 0) / 2,
-                n.pos[1] + (n.size?.[1] ?? 0) / 2
-            );
+            if (n) {
+                panCanvasTo(
+                    n.pos[0] + (n.size?.[0] ?? 0) / 2,
+                    n.pos[1] + (n.size?.[1] ?? 0) / 2
+                );
+                jumped = true;
+            }
         } else if (item.type === "group") {
             const g = findGroup(item);
-            if (g) panCanvasTo(g.pos[0] + g.size[0] / 2, g.pos[1] + g.size[1] / 2);
+            if (g) {
+                panCanvasTo(g.pos[0] + g.size[0] / 2, g.pos[1] + g.size[1] / 2);
+                jumped = true;
+            }
+        }
+        if (jumped) {
+            showReturnButton(() => {
+                app.canvas.ds.offset[0] = savedOffset[0];
+                app.canvas.ds.offset[1] = savedOffset[1];
+                app.canvas.setDirty(true, true);
+            });
         }
     } catch (e) {
         console.warn("[SAX Toggle] navigateToItem error:", e);
@@ -661,7 +677,7 @@ function showSceneManager(node) {
         "font:bold 11px sans-serif;color:var(--content-bg,#4e4e4e);letter-spacing:.5px;", "SETTINGS"));
 
     const posRow = h("div", "display:flex;align-items:center;gap:8px;");
-    posRow.appendChild(h("span", "font-size:12px;color:var(--input-text,#ddd);flex:1;", "Back button"));
+    posRow.appendChild(h("span", "font-size:12px;color:var(--input-text,#ddd);flex:1;", "Navigate button"));
     const posSelect = document.createElement("select");
     posSelect.style.cssText =
         "background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#4e4e4e);" +
@@ -687,7 +703,7 @@ function showSceneManager(node) {
     sep.appendChild(posRow);
 
     const keyRow = h("div", "display:flex;align-items:center;gap:8px;");
-    keyRow.appendChild(h("span", "font-size:12px;color:var(--input-text,#ddd);flex:1;", "Back key"));
+    keyRow.appendChild(h("span", "font-size:12px;color:var(--input-text,#ddd);flex:1;", "Navigate key"));
     const curKey     = getConfig(node).backKey ?? "m";
     const keyDisplay = h("span",
         "padding:2px 10px;background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#4e4e4e);" +
