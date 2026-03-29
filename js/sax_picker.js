@@ -29,7 +29,13 @@
  */
 
 import { app } from "../../scripts/app.js";
-import { h, SAX_COLORS } from "./sax_ui_base.js";
+import {
+    h,
+    SAX_COLORS,
+    buildPickerContent,
+    makePickerSection,
+    AUTO_EXPAND_THRESHOLD,
+} from "./sax_ui_base.js";
 
 // ---------------------------------------------------------------------------
 // キャンバスナビゲーション
@@ -60,16 +66,17 @@ export function clearPickerHighlight() {
 
 let _returnBtn = null;
 
-export function showReturnButton(restoreOverlay) {
+export function showReturnButton(restoreOverlay, label = "↩ Return") {
     if (_returnBtn) _returnBtn.remove();
     const btn = document.createElement("button");
-    btn.textContent = "↩ Return to picker";
+    btn.textContent = label;
     btn.style.cssText =
         "position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;" +
         "padding:9px 22px;background:var(--comfy-menu-bg,#171718);" +
-        "border:1px solid var(--border-color,#4e4e4e);border-radius:6px;" +
+        "border:1px solid rgba(74,153,153,.6);border-radius:6px;" +
         "color:var(--input-text,#ddd);cursor:pointer;font-size:13px;" +
-        "font-family:sans-serif;font-weight:bold;box-shadow:0 2px 16px rgba(0,0,0,.5);";
+        "font-family:sans-serif;font-weight:bold;" +
+        "box-shadow:0 0 12px rgba(74,153,153,.4),0 2px 16px rgba(0,0,0,.5);";
     btn.addEventListener("mouseenter", () => { btn.style.background = "var(--comfy-menu-secondary-bg,#303030)"; });
     btn.addEventListener("mouseleave", () => { btn.style.background = "var(--comfy-menu-bg,#171718)"; });
     btn.addEventListener("click", () => {
@@ -124,30 +131,6 @@ export function showPicker({
         return n.category || n.constructor?.category || "Other";
     }
 
-    // forceOpen=true のとき collapsed Map を無視して強制展開する（検索絞り込み時に使用）
-    function makeSection(key, label, color, childEls, defaultCollapsed = false, forceOpen = false) {
-        const isCollapsed = forceOpen ? false : (collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
-        const sec    = h("div", "margin-bottom:4px;");
-        const header = h("div",
-            `display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 4px;` +
-            `background:var(--comfy-input-bg,#222);border-radius:4px;` +
-            `color:${color};font-weight:bold;font-size:12px;`);
-        const arrow  = h("span", "font-size:10px;flex-shrink:0;", isCollapsed ? "▶" : "▼");
-        header.appendChild(arrow);
-        header.appendChild(h("span", "flex:1;", label));
-        const body = h("div", `padding-left:6px;${isCollapsed ? "display:none;" : ""}`);
-        for (const c of childEls) body.appendChild(c);
-        header.addEventListener("click", () => {
-            const now = !(collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
-            collapsed.set(key, now);
-            arrow.textContent = now ? "▶" : "▼";
-            body.style.display = now ? "none" : "";
-        });
-        sec.appendChild(header);
-        sec.appendChild(body);
-        return sec;
-    }
-
     function makePeekBtn(onPeek) {
         const btn = h("button",
             "padding:1px 6px;background:var(--comfy-input-bg,#222);" +
@@ -164,6 +147,7 @@ export function showPicker({
     function makeCheckRow(label, checked, indent, onChange, { onPeek, tooltip } = {}) {
         const row = h("div",
             `display:flex;align-items:center;gap:8px;padding:3px 0 3px ${indent ? "16px" : "2px"};`);
+        if (!indent) row.classList.add("sax-picker-item");
         if (tooltip) row.title = tooltip;
         const cb = document.createElement("input");
         cb.type = "checkbox"; cb.checked = checked;
@@ -296,23 +280,6 @@ export function showPicker({
         "color:var(--input-text,#ddd);font:13px/1.5 sans-serif;gap:8px;");
     dlg.appendChild(h("div", "font:bold 14px sans-serif;color:var(--fg-color,#fff);flex-shrink:0;", title));
 
-    const searchWrap = h("div",
-        "display:flex;align-items:center;gap:6px;background:var(--comfy-input-bg,#222);" +
-        "border:1px solid var(--border-color,#4e4e4e);border-radius:4px;padding:5px 10px;flex-shrink:0;");
-    searchWrap.appendChild(h("span", "color:var(--content-bg,#4e4e4e);", "🔍"));
-    const searchInput = document.createElement("input");
-    searchInput.placeholder = mode === "single"
-        ? "Search node name…"
-        : "Search by group or node name…";
-    searchInput.style.cssText =
-        "flex:1;background:none;border:none;outline:none;" +
-        "color:var(--input-text,#ddd);font-size:12px;";
-    searchWrap.appendChild(searchInput);
-    dlg.appendChild(searchWrap);
-
-    const scroll = h("div", "overflow-y:auto;flex:1;");
-    dlg.appendChild(scroll);
-
     // 全アイテム中で x+y が最小の座標を基準点（左上アンカー）として返す
     function computeAnchor(posArr) {
         let ax = Infinity, ay = Infinity;
@@ -333,7 +300,7 @@ export function showPicker({
         });
     }
 
-    const renderContent = (query = "") => {
+    const renderContentFn = (query, scroll) => {
         const q = query.toLowerCase().trim();
         scroll.innerHTML = "";
 
@@ -360,7 +327,6 @@ export function showPicker({
             ? allCandidates.filter(n => n.subgraph == null) : [];
 
         // セクション数が閾値以下なら全セクションを強制展開
-        const AUTO_EXPAND_THRESHOLD = 3;
         const filteredGroupCount = sections.includes("groups")
             ? (app.graph._groups ?? []).filter(g => !q || g.title.toLowerCase().includes(q)).length
             : 0;
@@ -426,7 +392,7 @@ export function showPicker({
                 });
                 const lbl = `Groups (${groups.length}${groups.length < allGroups.length ? `/${allGroups.length}` : ""})`;
                 if (rows.length > 0)
-                    scroll.appendChild(makeSection("__groups", lbl, SAX_COLORS.group, rows, false, forceOpen));
+                    scroll.appendChild(makePickerSection(collapsed, "__groups", lbl, SAX_COLORS.group, rows, false, forceOpen, mode));
             }
         }
 
@@ -443,7 +409,7 @@ export function showPicker({
                 subTitleCount.set(t, (subTitleCount.get(t) ?? 0) + 1);
             }
             const rows = sortedSubs.flatMap(n => buildNodeRows(n, subTitleCount, true));
-            scroll.appendChild(makeSection("__subgraphs", `Subgraphs (${allSubgraphs.length})`, SAX_COLORS.subgraph, rows, true, forceOpen));
+            scroll.appendChild(makePickerSection(collapsed, "__subgraphs", `Subgraphs (${allSubgraphs.length})`, SAX_COLORS.subgraph, rows, true, forceOpen, mode));
         }
 
         if (allNodes.length > 0) {
@@ -460,10 +426,11 @@ export function showPicker({
                     anchor
                 );
                 const rows = sortedTypeNodes.flatMap(n => buildNodeRows(n, nodeTitleCount, false));
-                scroll.appendChild(makeSection(
+                scroll.appendChild(makePickerSection(
+                    collapsed,
                     `__node_${typeKey}`,
                     `${typeKey}  (${typeNodes.length})`,
-                    SAX_COLORS.node, rows, true, forceOpen
+                    SAX_COLORS.node, rows, true, forceOpen, mode
                 ));
             }
         }
@@ -476,40 +443,24 @@ export function showPicker({
         }
     };
 
-    renderContent();
-    searchInput.addEventListener("input", () => renderContent(searchInput.value));
-
-    const btnRow = h("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
-    const makeBtn = (text, bg, fn, color = "var(--input-text,#ddd)", hoverBg = null) => {
-        const b = h("button",
-            `padding:6px 14px;background:${bg};border:1px solid var(--content-bg,#4e4e4e);` +
-            `border-radius:4px;color:${color};cursor:pointer;font-size:12px;`);
-        b.textContent = text;
-        b.addEventListener("click", fn);
-        if (hoverBg) {
-            b.addEventListener("mouseenter", () => { b.style.background = hoverBg; });
-            b.addEventListener("mouseleave", () => { b.style.background = bg; });
-        }
-        return b;
-    };
-
     function closeAll() {
         clearPickerHighlight();
         hideReturnButton();
+        pickerCleanup();
         overlay.remove();
     }
 
-    btnRow.appendChild(makeBtn("Cancel", "var(--comfy-input-bg,#222)", closeAll));
-    if (mode === "multi") {
-        btnRow.appendChild(makeBtn("Apply", SAX_COLORS.primaryBg, () => {
-            closeAll();
-            onConfirm?.([...selection.values()]);
-        }, SAX_COLORS.primaryText, SAX_COLORS.primaryHoverBg));
-    }
-    dlg.appendChild(btnRow);
+    const { element, focusSearch, cleanup: pickerCleanup } = buildPickerContent({
+        mode,
+        placeholder: mode === "single" ? "Search node name…" : "Search by group or node name…",
+        renderContent: renderContentFn,
+        onApply: mode === "multi" ? () => { closeAll(); onConfirm?.([...selection.values()]); } : null,
+        onCancel: closeAll,
+    });
 
+    dlg.appendChild(element);
     overlay.appendChild(dlg);
     overlay.addEventListener("click", e => { if (e.target === overlay) closeAll(); });
     document.body.appendChild(overlay);
-    requestAnimationFrame(() => searchInput.focus());
+    focusSearch();
 }

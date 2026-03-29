@@ -15,6 +15,9 @@ import {
     makeItemListWidget,
     getComfyTheme,
     SAX_COLORS,
+    buildPickerContent,
+    makePickerSection,
+    AUTO_EXPAND_THRESHOLD,
 } from "./sax_ui_base.js";
 
 // LoRA 表示名（パス・拡張子なし）— モジュールスコープで共有
@@ -24,7 +27,7 @@ const displayName = (full) =>
 const EXT_NAME   = "SAX.LoraLoader";
 const NODE_TYPE  = "SAX_Bridge_Loader_Lora";
 const WIDGET_JSON = "loras_json";
-const MAX_LORAS  = 10;
+const MAX_LORAS  = 20;
 
 // ---------------------------------------------------------------------------
 // LoRA リスト取得（キャッシュ）
@@ -53,11 +56,11 @@ async function getLoraList() {
 // LoRA ピッカーオーバーレイ
 // ---------------------------------------------------------------------------
 
-function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = null } = {}) {
+function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = null, selection: initSelection = new Set() } = {}) {
     document.querySelectorAll(".__sax_lora_picker").forEach(e => e.remove());
 
     const collapsed = new Map();
-    const selection = new Set();  // multi モードの選択状態
+    const selection = new Set(initSelection);
 
     function makeLoraRow(fullName, isCurrent, close) {
         const label = displayName(fullName);
@@ -65,6 +68,7 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
         if (mode === "multi") {
             const row = h("div",
                 "display:flex;align-items:center;gap:8px;padding:3px 0 3px 2px;");
+            row.classList.add("sax-picker-item");
             row.title = fullName;
             const cb = document.createElement("input");
             cb.type = "checkbox";
@@ -114,30 +118,6 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
         row.appendChild(selBtn);
         if (isCurrent) row.dataset.current = "true";
         return row;
-    }
-
-    // alwaysOpen=true のとき折りたたみ状態を無視して展開（検索中に使用）
-    function makeSection(key, label, childEls, defaultCollapsed, alwaysOpen = false) {
-        const isCollapsed = alwaysOpen ? false : (collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
-        const sec    = h("div", "margin-bottom:4px;");
-        const header = h("div",
-            `display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 4px;` +
-            `background:var(--comfy-input-bg,#222);border-radius:4px;` +
-            `color:${SAX_COLORS.node};font-weight:bold;font-size:12px;`);
-        const arrow  = h("span", "font-size:10px;flex-shrink:0;", isCollapsed ? "▶" : "▼");
-        header.appendChild(arrow);
-        header.appendChild(h("span", "flex:1;", label));
-        const body = h("div", `padding-left:8px;${isCollapsed ? "display:none;" : ""}`);
-        for (const c of childEls) body.appendChild(c);
-        header.addEventListener("click", () => {
-            const now = !(collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
-            collapsed.set(key, now);
-            arrow.textContent  = now ? "▶" : "▼";
-            body.style.display = now ? "none" : "";
-        });
-        sec.appendChild(header);
-        sec.appendChild(body);
-        return sec;
     }
 
     function buildTree(names) {
@@ -204,56 +184,21 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
             const matched  = filterFn ? countFiltered(child, filterFn) : total;
             const countStr = filterFn && matched < total ? `${matched}/${total}` : String(total);
             const hasCur   = containsCurrent(child, key);
-            els.push(makeSection(key, `${folderName}  (${countStr})`, childEls, !hasCur, alwaysOpen));
+            els.push(makePickerSection(collapsed, key, `${folderName}  (${countStr})`, SAX_COLORS.node, childEls, !hasCur, alwaysOpen, mode));
         }
         return els;
     }
 
+    let pickerCleanup = null;
     showDialog({
-        title:     mode === "multi" ? "Add LoRAs" : "Select LoRA",
+        title:     mode === "multi" ? "Add / Remove Items" : "Select LoRA",
         width:     480,
         className: "__sax_lora_picker",
+        onClose:   () => { pickerCleanup?.(); },
         build(dlg, close) {
-            // ---- 検索バー ----
-            const searchWrap = h("div",
-                "display:flex;align-items:center;gap:6px;" +
-                "background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#4e4e4e);" +
-                "border-radius:4px;padding:5px 10px;flex-shrink:0;");
-            const searchInput = h("input");
-            searchInput.placeholder = "Search LoRA name…";
-            searchInput.style.cssText =
-                "flex:1;background:none;border:none;outline:none;" +
-                "color:var(--input-text,#ddd);font-size:12px;";
-            searchWrap.appendChild(h("span", "color:var(--content-bg,#4e4e4e);", "🔍"));
-            searchWrap.appendChild(searchInput);
+            const closeFn = () => { pickerCleanup?.(); close(); };
 
-            const scroll = h("div", "overflow-y:auto;flex:1;");
-
-            const cancelBtn = h("button",
-                "padding:6px 14px;background:var(--comfy-input-bg,#222);" +
-                "border:1px solid var(--border-color,#4e4e4e);" +
-                "border-radius:4px;color:var(--input-text,#ddd);cursor:pointer;font-size:12px;",
-                "Cancel");
-            cancelBtn.addEventListener("click", close);
-            const btnRow = h("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
-            btnRow.appendChild(cancelBtn);
-            if (mode === "multi") {
-                const applyBtn = h("button",
-                    `padding:6px 14px;background:${SAX_COLORS.primaryBg};` +
-                    `border:1px solid var(--content-bg,#4e4e4e);border-radius:4px;` +
-                    `color:${SAX_COLORS.primaryText};cursor:pointer;font-size:12px;`,
-                    "Apply");
-                applyBtn.addEventListener("mouseenter", () => { applyBtn.style.background = SAX_COLORS.primaryHoverBg; });
-                applyBtn.addEventListener("mouseleave", () => { applyBtn.style.background = SAX_COLORS.primaryBg; });
-                applyBtn.addEventListener("click", () => { close(); onConfirm?.([...selection]); });
-                btnRow.appendChild(applyBtn);
-            }
-
-            dlg.appendChild(searchWrap);
-            dlg.appendChild(scroll);
-            dlg.appendChild(btnRow);
-
-            const render = (q) => {
+            const renderContentFn = (q, scroll) => {
                 scroll.innerHTML = "";
                 const lower    = q.toLowerCase().trim();
                 const filterFn = lower
@@ -269,11 +214,10 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
                     }
 
                     // セクション数が閾値以下なら強制展開
-                    const AUTO_EXPAND_THRESHOLD = 3;
                     const tree         = buildTree(list);
                     const sectionCount = countSections(tree, filterFn);
                     const forceOpen    = sectionCount <= AUTO_EXPAND_THRESHOLD;
-                    const els          = renderTree(tree, "", close, filterFn, forceOpen);
+                    const els          = renderTree(tree, "", closeFn, filterFn, forceOpen);
                     if (els.length === 0) {
                         scroll.appendChild(h("div",
                             "color:var(--content-bg,#4e4e4e);padding:20px;text-align:center;font-size:12px;",
@@ -290,9 +234,17 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
                 });
             };
 
-            render("");
-            searchInput.addEventListener("input", () => render(searchInput.value));
-            requestAnimationFrame(() => searchInput.focus());
+            const { element, focusSearch, cleanup } = buildPickerContent({
+                mode,
+                placeholder: "Search LoRA name…",
+                renderContent: renderContentFn,
+                onApply: mode === "multi" ? () => { closeFn(); onConfirm?.([...selection]); } : null,
+                onCancel: closeFn,
+            });
+            pickerCleanup = cleanup;
+
+            dlg.appendChild(element);
+            focusSearch();
         },
     });
 }
@@ -426,15 +378,22 @@ function buildUI(node) {
             onAdd(node, items, saveItems) {
                 showLoraPicker("", null, {
                     mode: "multi",
+                    selection: new Set(items.map(i => i.lora)),
                     onConfirm(names) {
-                        const remaining = MAX_LORAS - items.length;
-                        const toAdd = names.slice(0, remaining);
-                        for (const name of toAdd)
-                            items.push({ on: true, lora: name, strength: 1.0 });
-                        if (toAdd.length > 0) {
-                            saveItems(items);
-                            app.graph.setDirtyCanvas(true, false);
+                        const newSet = new Set(names);
+                        // 除去（逆順でインデックスずれを防止）
+                        for (let i = items.length - 1; i >= 0; i--) {
+                            if (!newSet.has(items[i].lora)) items.splice(i, 1);
                         }
+                        // 追加（既存にないもののみ）
+                        const existing = new Set(items.map(i => i.lora));
+                        for (const name of names) {
+                            if (existing.has(name)) continue;
+                            if (items.length >= MAX_LORAS) break;
+                            items.push({ on: true, lora: name, strength: 1.0 });
+                        }
+                        saveItems(items);
+                        app.graph.setDirtyCanvas(true, false);
                     },
                 });
             },

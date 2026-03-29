@@ -22,6 +22,12 @@
  *   captureOutputLinks(node, items, slotOffset?)
  *   restoreOutputLinks(node, items, syncFn, slotOffset?)
  *
+ * ピッカー共通ユーティリティ:
+ *   AUTO_EXPAND_THRESHOLD       — セクション強制展開の閾値定数
+ *   makePickerSection(collapsed, key, label, color, childEls, defaultCollapsed?, forceOpen?)
+ *   buildPickerContent({ mode, placeholder, renderContent, onApply, onCancel })
+ *     → { element, focusSearch, cleanup }
+ *
  * DOM UI ヘルパー:
  *   h(tag, css, text)
  *   showDialog({ title, width, maxHeight, gap, className, build })
@@ -491,10 +497,11 @@ export function h(tag, css = "", text = "") {
  *   gap?:       number,   // dlg の gap (px)。デフォルト 8
  *   className?: string,   // overlay に付与するクラス名（重複除去用）
  *   build:      (dlg: HTMLElement, close: () => void) => void,
+ *   onClose?:   () => void,  // close 時に追加で呼ばれるコールバック（cleanup 用）
  * }} opts
  * @returns {() => void} close 関数
  */
-export function showDialog({ title, width = 480, maxHeight = "76vh", gap = 8, className, build }) {
+export function showDialog({ title, width = 480, maxHeight = "76vh", gap = 8, className, build, onClose }) {
     const overlay = h("div",
         "position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:10000;" +
         "display:flex;align-items:center;justify-content:center;");
@@ -507,7 +514,7 @@ export function showDialog({ title, width = 480, maxHeight = "76vh", gap = 8, cl
 
     dlg.appendChild(h("div", "font:bold 14px sans-serif;color:var(--input-text,#ddd);flex-shrink:0;", title));
 
-    const close = () => overlay.remove();
+    const close = () => { onClose?.(); overlay.remove(); };
     build(dlg, close);
 
     overlay.appendChild(dlg);
@@ -1092,7 +1099,7 @@ export function makeItemListWidget(spec) {
  *   filterSourceNode:  (srcNode) => boolean,
  *   buildSource:       (srcNode, collectorNode, offset, remaining) => object|null,
  *   connectSource:     (srcNode, src, collectorNode, offset) => void,
- *   showAddPicker:     (collectorNode, existingIds, onConfirm) => void,
+ *   showAddPicker:     (collectorNode, selection, onConfirm) => void,  — selection: 既存ソースをプリセット済みの Map
  *
  *   formatInfo?:       (src) => string,
  *   onContentClick?:   (src, srcIdx, node) => void,
@@ -1525,11 +1532,17 @@ export function makeSourceListWidget(spec) {
                 if (inX(pos, layout.jump.x, layout.jump.w)) {
                     const srcNode = app.graph.getNodeById(sources[si].sourceId);
                     if (srcNode) {
-                        import("./sax_picker.js").then(({ panCanvasTo }) => {
+                        const savedOffset = [...app.canvas.ds.offset];
+                        import("./sax_picker.js").then(({ panCanvasTo, showReturnButton }) => {
                             panCanvasTo(
                                 srcNode.pos[0] + (srcNode.size?.[0] ?? 0) / 2,
                                 srcNode.pos[1] + (srcNode.size?.[1] ?? 0) / 2
                             );
+                            showReturnButton(() => {
+                                app.canvas.ds.offset[0] = savedOffset[0];
+                                app.canvas.ds.offset[1] = savedOffset[1];
+                                app.canvas.setDirty(true, true);
+                            });
                         }).catch(e => console.warn(`[${widgetName}] panCanvasTo error:`, e));
                     }
                     return true;
@@ -1547,12 +1560,29 @@ export function makeSourceListWidget(spec) {
             const btnRowTop = HEADER_H + sources.length * ROW_H;
             if (relY < btnRowTop || relY >= btnRowTop + ADD_H) return false;
 
-            if (_getTotalSlotCount(mouseNode) < maxSlots) {
-                const existingIds = new Set([mouseNode.id, ..._getSources(mouseNode).map(s => s.sourceId)]);
+            {
+                const sources = _getSources(mouseNode);
+                const selection = new Map();
+                for (const src of sources) {
+                    selection.set(`n:${src.sourceId}`, { type: "node", id: src.sourceId });
+                }
                 try {
-                    showAddPicker(mouseNode, existingIds, (items) => {
+                    showAddPicker(mouseNode, selection, (items) => {
+                        const currentSources = _getSources(mouseNode);
+                        const newIds = new Set(items.filter(i => i.type === "node").map(i => i.id));
+                        const oldIds = currentSources.map(s => s.sourceId);
+
+                        // 除去（逆順でインデックスずれを防止）
+                        for (let i = oldIds.length - 1; i >= 0; i--) {
+                            if (!newIds.has(oldIds[i])) removeSourceAt(mouseNode, i);
+                        }
+
+                        // 追加（既存にないもののみ）
+                        const survivingIds = new Set(oldIds.filter(id => newIds.has(id)));
                         for (const item of items) {
                             if (item.type !== "node") continue;
+                            if (survivingIds.has(item.id)) continue;
+                            if (_getTotalSlotCount(mouseNode) >= maxSlots) break;
                             const n = app.graph.getNodeById(item.id);
                             if (n) addSource(mouseNode, n);
                         }
@@ -1789,4 +1819,158 @@ export function restoreOutputLinks(node, items, syncFn, slotOffset = 0) {
         }
         app.canvas?.setDirty(true, true);
     }, 0);
+}
+
+// ---------------------------------------------------------------------------
+// ピッカー共通ユーティリティ
+// ---------------------------------------------------------------------------
+
+/**
+ * セクション数がこの閾値以下のとき、全セクションを強制展開する。
+ * sax_picker.js / sax_lora_loader.js が共有する。
+ */
+export const AUTO_EXPAND_THRESHOLD = 3;
+
+/**
+ * 折りたたみ可能なセクション要素を生成する。
+ *
+ * @param {Map}     collapsed        - 呼び出し側が管理する折りたたみ状態 Map<key, boolean>
+ * @param {string}  key              - セクションを一意に識別するキー
+ * @param {string}  label            - ヘッダーに表示するテキスト
+ * @param {string}  color            - ヘッダーテキスト色（デフォルト: SAX_COLORS.node）
+ * @param {Element[]} childEls       - 子要素の配列
+ * @param {boolean} [defaultCollapsed=false] - 初期折りたたみ状態
+ * @param {boolean} [forceOpen=false]        - true のとき collapsed Map を無視して強制展開
+ * @param {string}  [mode="multi"]           - "multi" のとき一括選択チェックボックスを表示
+ * @returns {HTMLElement}
+ */
+export function makePickerSection(collapsed, key, label, color, childEls, defaultCollapsed = false, forceOpen = false, mode = "multi") {
+    if (color == null) color = SAX_COLORS.node;
+    const isCollapsed = forceOpen ? false : (collapsed.has(key) ? collapsed.get(key) : defaultCollapsed);
+    const sec    = h("div", "margin-bottom:4px;");
+    const header = h("div",
+        `display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 4px;` +
+        `background:var(--comfy-input-bg,#222);border-radius:4px;` +
+        `color:${color};font-weight:bold;font-size:12px;`);
+    const arrow  = h("span", "font-size:10px;flex-shrink:0;", isCollapsed ? "▶" : "▼");
+    if (mode === "multi") {
+        const hasDirectItems = childEls.some(el => el.classList?.contains("sax-picker-item"));
+        const selectAllCb = document.createElement("input");
+        selectAllCb.type = "checkbox";
+        selectAllCb.disabled = !hasDirectItems;
+        selectAllCb.style.cssText = `cursor:${hasDirectItems ? "pointer" : "default"};flex-shrink:0;accent-color:#4a9;${hasDirectItems ? "" : "opacity:0.3;"}`;
+        selectAllCb.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (!hasDirectItems) return;
+            const checked = selectAllCb.checked;
+            body.querySelectorAll(":scope > .sax-picker-item input[type='checkbox']").forEach(cb => {
+                if (cb.checked !== checked) {
+                    cb.checked = checked;
+                    cb.dispatchEvent(new Event("change", { bubbles: true }));
+                }
+            });
+        });
+        header.appendChild(selectAllCb);
+    }
+    header.appendChild(arrow);
+    header.appendChild(h("span", "flex:1;", label));
+    const body = h("div", `padding-left:8px;${isCollapsed ? "display:none;" : ""}`);
+    for (const c of childEls) body.appendChild(c);
+    header.addEventListener("click", (e) => {
+        if (e.target.type === "checkbox") return;
+        const currentState = collapsed.has(key) ? collapsed.get(key) : (forceOpen ? false : defaultCollapsed);
+        const now = !currentState;
+        collapsed.set(key, now);
+        arrow.textContent  = now ? "▶" : "▼";
+        body.style.display = now ? "none" : "";
+    });
+    sec.appendChild(header);
+    sec.appendChild(body);
+    return sec;
+}
+
+/**
+ * ピッカーダイアログ内の共通コンテンツ（検索バー・スクロールコンテナ・ボタン行・ESC ハンドラ）を生成する。
+ *
+ * @param {object}   opts
+ * @param {"single"|"multi"} [opts.mode="multi"]   - "single" では Apply ボタンを表示しない
+ * @param {string}   [opts.placeholder="Search…"]  - 検索バーのプレースホルダー
+ * @param {Function} opts.renderContent             - (query: string, scroll: Element) => void
+ * @param {Function|null} [opts.onApply=null]       - Apply 時のコールバック（multi のみ）
+ * @param {Function} opts.onCancel                  - Cancel / ESC 時のコールバック
+ * @returns {{ element: HTMLElement, focusSearch: () => void, cleanup: () => void }}
+ */
+export function buildPickerContent({
+    mode          = "multi",
+    placeholder   = "Search…",
+    renderContent,
+    onApply       = null,
+    onCancel,
+}) {
+    // 検索バー
+    const searchWrap = h("div",
+        "display:flex;align-items:center;gap:6px;background:var(--comfy-input-bg,#222);" +
+        "border:1px solid var(--border-color,#4e4e4e);border-radius:4px;padding:5px 10px;flex-shrink:0;");
+    searchWrap.appendChild(h("span", "color:var(--content-bg,#4e4e4e);", "🔍"));
+    const searchInput = document.createElement("input");
+    searchInput.placeholder = placeholder;
+    searchInput.style.cssText =
+        "flex:1;background:none;border:none;outline:none;" +
+        "color:var(--input-text,#ddd);font-size:12px;";
+    searchWrap.appendChild(searchInput);
+
+    // スクロールコンテナ
+    const scroll = h("div", "overflow-y:auto;flex:1;");
+
+    // 描画関数
+    const doRender = () => renderContent(searchInput.value, scroll);
+    doRender();
+    searchInput.addEventListener("input", doRender);
+
+    // ボタン行
+    const btnRow = h("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
+    const makeBtn = (text, bg, fn, color = "var(--input-text,#ddd)", hoverBg = null) => {
+        const b = h("button",
+            `padding:6px 14px;background:${bg};border:1px solid var(--content-bg,#4e4e4e);` +
+            `border-radius:4px;color:${color};cursor:pointer;font-size:12px;`);
+        b.textContent = text;
+        b.addEventListener("click", fn);
+        if (hoverBg) {
+            b.addEventListener("mouseenter", () => { b.style.background = hoverBg; });
+            b.addEventListener("mouseleave", () => { b.style.background = bg; });
+        }
+        return b;
+    };
+    btnRow.appendChild(makeBtn("Cancel", "var(--comfy-input-bg,#222)", onCancel));
+    if (mode === "multi" && onApply) {
+        btnRow.appendChild(makeBtn(
+            "Apply",
+            SAX_COLORS.primaryBg,
+            onApply,
+            SAX_COLORS.primaryText,
+            SAX_COLORS.primaryHoverBg,
+        ));
+    }
+
+    // ESC キーハンドラ
+    const onKeyDown = (e) => {
+        if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", onKeyDown);
+
+    const cleanup = () => {
+        document.removeEventListener("keydown", onKeyDown);
+    };
+
+    // コンテナ要素
+    const element = h("div", "display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;");
+    element.appendChild(searchWrap);
+    element.appendChild(scroll);
+    element.appendChild(btnRow);
+
+    return {
+        element,
+        focusSearch: () => requestAnimationFrame(() => searchInput.focus()),
+        cleanup,
+    };
 }

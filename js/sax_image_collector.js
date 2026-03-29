@@ -45,15 +45,15 @@ const SOURCE = makeSourceListWidget({
         }
     },
 
-    showAddPicker(collectorNode, existingIds, onConfirm) {
+    showAddPicker(collectorNode, selection, onConfirm) {
         showPicker({
-            title:       "Select source nodes",
-            sections:    ["subgraphs", "nodes"],
-            mode:        "multi",
-            selection:   new Map(),
-            showWidgets: false,
-            filterNode:  n => !existingIds.has(n.id) &&
-                (n.outputs ?? []).some(o => o.type === "IMAGE"),
+            title:         "Add / Remove Items",
+            sections:      ["subgraphs", "nodes"],
+            mode:          "multi",
+            selection,
+            showWidgets:   false,
+            excludeNodeId: collectorNode.id,
+            filterNode:    n => (n.outputs ?? []).some(o => o.type === "IMAGE"),
             onConfirm,
         });
     },
