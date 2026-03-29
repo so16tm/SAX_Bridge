@@ -2,47 +2,32 @@ import json
 import random
 from typing import Any
 
+from comfy_api.latest import io
 
-class _AnyType(str):
-    """任意の型と互換性を持つワイルドカード型。"""
-    def __eq__(self, other: object) -> bool: return True
-    def __ne__(self, other: object) -> bool: return False
-    def __hash__(self) -> int: return hash(str(self))
+from .io_types import AnyType
 
-
-ANY = _AnyType("*")
 MAX_ITEMS = 32
 
 
-class SAX_Bridge_Primitive_Store:
-    """
-    Primitive Store — ワークフロー内で使用する共通プリミティブ変数を
-    一か所で定義・管理するノード。
-
-    アイテムを追加するたびに出力スロットが増え、
-    INT / FLOAT / STRING / BOOLEAN / SEED 値を下流ノードへ配布する。
-    SEED(mode=random) は実行ごとに Python 側でランダム生成する。
-    """
-
+class SAX_Bridge_Primitive_Store(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {},
-            "optional": {
-                # __ プレフィックスは Python 名前マングリングで壊れるため使用不可
-                "items_json": ("STRING", {"default": "[]"}),
-            },
-        }
-
-    RETURN_TYPES  = (ANY,) * MAX_ITEMS
-    RETURN_NAMES  = tuple(f"out_{i}" for i in range(MAX_ITEMS))
-    FUNCTION      = "execute"
-    CATEGORY      = "SAX/Bridge/Utility"
-    OUTPUT_NODE   = False
-    DESCRIPTION   = (
-        "Define and manage common primitive variables (INT, FLOAT, STRING, BOOLEAN, SEED) "
-        "in one place. Each item becomes an output slot for downstream nodes."
-    )
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Primitive_Store",
+            display_name="SAX Primitive Store",
+            category="SAX/Bridge/Utility",
+            description=(
+                "Define and manage common primitive variables (INT, FLOAT, STRING, BOOLEAN, SEED) "
+                "in one place. Each item becomes an output slot for downstream nodes."
+            ),
+            inputs=[
+                io.String.Input("items_json", default="[]", optional=True),
+            ],
+            outputs=[
+                AnyType.Output(f"out_{i}")
+                for i in range(MAX_ITEMS)
+            ],
+        )
 
     @classmethod
     def IS_CHANGED(cls, items_json="[]", **kwargs):
@@ -56,7 +41,8 @@ class SAX_Bridge_Primitive_Store:
                 return float("nan")
         return items_json
 
-    def execute(self, items_json="[]", **kwargs):
+    @classmethod
+    def execute(cls, items_json="[]", **kwargs) -> io.NodeOutput:
         try:
             items = json.loads(items_json) if isinstance(items_json, str) else []
         except (json.JSONDecodeError, TypeError):
@@ -82,13 +68,4 @@ class SAX_Bridge_Primitive_Store:
             except (ValueError, TypeError):
                 result[i] = None
 
-        return tuple(result)
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Primitive_Store": SAX_Bridge_Primitive_Store,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Primitive_Store": "SAX Primitive Store",
-}
+        return io.NodeOutput(*result)

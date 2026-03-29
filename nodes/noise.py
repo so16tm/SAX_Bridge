@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from comfy_api.latest import io
+
 
 class SAXNoiseEngine:
     """
@@ -147,31 +149,31 @@ class SAXNoiseEngine:
         return result.permute(0, 2, 3, 1)  # (B, H, W, C)
 
 
-class SAX_Bridge_Noise_Image:
+class SAX_Bridge_Noise_Image(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "intensity": ("FLOAT", {"default": 0.15, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "noise_type": (["gaussian", "grain", "uniform"],),
-                "color_mode": (["rgb", "grayscale"],),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                "mask_shrink": ("INT", {"default": 2, "min": 0, "max": 64, "step": 1}),
-                "mask_blur": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 32.0, "step": 0.5}),
-            },
-            "optional": {
-                "mask": ("MASK",),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Noise_Image",
+            display_name="SAX Image Noise",
+            category="SAX/Bridge/Enhance",
+            description="Add various types of noise to masked areas of an image to improve i2i detail and texture. If no mask is provided, noise is applied to the entire image.",
+            inputs=[
+                io.Image.Input("image"),
+                io.Float.Input("intensity", default=0.15, min=0.0, max=1.0, step=0.01),
+                io.Combo.Input("noise_type", options=["gaussian", "grain", "uniform"]),
+                io.Combo.Input("color_mode", options=["rgb", "grayscale"]),
+                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff),
+                io.Int.Input("mask_shrink", default=2, min=0, max=64, step=1),
+                io.Float.Input("mask_blur", default=0.0, min=0.0, max=32.0, step=0.5),
+                io.Mask.Input("mask", optional=True),
+            ],
+            outputs=[
+                io.Image.Output("IMAGE"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("IMAGE",)
-    FUNCTION = "apply_noise"
-    CATEGORY = "SAX/Bridge/Enhance"
-    DESCRIPTION = "Add various types of noise to masked areas of an image to improve i2i detail and texture. If no mask is provided, noise is applied to the entire image."
-
-    def apply_noise(self, image, intensity, noise_type, color_mode, seed, mask_shrink, mask_blur, mask=None):
+    @classmethod
+    def execute(cls, image, intensity, noise_type, color_mode, seed, mask_shrink, mask_blur, mask=None) -> io.NodeOutput:
         b, h, w, c = image.shape
         img_tensor = image.permute(0, 3, 1, 2)  # (B, C, H, W)
         device = img_tensor.device
@@ -206,33 +208,33 @@ class SAX_Bridge_Noise_Image:
         result = img_tensor + (scaled_noise * processed_mask)
         result = torch.clamp(result, min=0.0, max=1.0)
 
-        return (result.permute(0, 2, 3, 1),)
+        return io.NodeOutput(result.permute(0, 2, 3, 1))
 
 
-class SAX_Bridge_Noise_Latent:
+class SAX_Bridge_Noise_Latent(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "samples": ("LATENT",),
-                "intensity": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 2.0, "step": 0.01}),
-                "noise_type": (["gaussian", "uniform"],),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                "mask_shrink": ("INT", {"default": 1, "min": 0, "max": 16, "step": 1}),
-                "mask_blur": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 16.0, "step": 0.5}),
-            },
-            "optional": {
-                "mask": ("MASK",),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Noise_Latent",
+            display_name="SAX Latent Noise",
+            category="SAX/Bridge/Enhance",
+            description="Add noise directly to masked areas of a latent to robustly improve i2i detail and texture. If no mask is provided, noise is applied to the entire latent.",
+            inputs=[
+                io.Latent.Input("samples"),
+                io.Float.Input("intensity", default=0.05, min=0.0, max=2.0, step=0.01),
+                io.Combo.Input("noise_type", options=["gaussian", "uniform"]),
+                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff),
+                io.Int.Input("mask_shrink", default=1, min=0, max=16, step=1),
+                io.Float.Input("mask_blur", default=1.0, min=0.0, max=16.0, step=0.5),
+                io.Mask.Input("mask", optional=True),
+            ],
+            outputs=[
+                io.Latent.Output("SAMPLES"),
+            ],
+        )
 
-    RETURN_TYPES = ("LATENT",)
-    RETURN_NAMES = ("SAMPLES",)
-    FUNCTION = "apply_noise"
-    CATEGORY = "SAX/Bridge/Enhance"
-    DESCRIPTION = "Add noise directly to masked areas of a latent to robustly improve i2i detail and texture. If no mask is provided, noise is applied to the entire latent."
-
-    def apply_noise(self, samples, intensity, noise_type, seed, mask_shrink, mask_blur, mask=None):
+    @classmethod
+    def execute(cls, samples, intensity, noise_type, seed, mask_shrink, mask_blur, mask=None) -> io.NodeOutput:
         latent_tensor = samples["samples"].clone()
         b, c, h, w = latent_tensor.shape
         device = latent_tensor.device
@@ -253,4 +255,4 @@ class SAX_Bridge_Noise_Latent:
 
         new_samples = samples.copy()
         new_samples["samples"] = result_tensor
-        return (new_samples,)
+        return io.NodeOutput(new_samples)

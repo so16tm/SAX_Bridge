@@ -1,4 +1,6 @@
 import nodes
+from comfy_api.latest import io
+from .io_types import PipeLine
 
 
 def _empty_conditioning(clip):
@@ -6,7 +8,7 @@ def _empty_conditioning(clip):
     return nodes.CLIPTextEncode().encode(clip, "")[0]
 
 
-class SAX_Bridge_KSampler:
+class SAX_Bridge_KSampler(io.ComfyNode):
     """
     Pipe を受け取り、KSampler を実行して Pipe を返すノード。
     サンプリングパラメータは Pipe 内の loader_settings から自動取得する。
@@ -15,27 +17,28 @@ class SAX_Bridge_KSampler:
     """
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "pipe": ("PIPE_LINE",),
-                "decode_vae": (
-                    "BOOLEAN",
-                    {
-                        "default": True,
-                        "label_on": "decode",
-                        "label_off": "latent only",
-                    },
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_KSampler",
+            display_name="SAX KSampler",
+            category="SAX/Bridge/Sampler",
+            inputs=[
+                PipeLine.Input("pipe"),
+                io.Boolean.Input(
+                    "decode_vae",
+                    default=True,
+                    label_on="decode",
+                    label_off="latent only",
                 ),
-            }
-        }
+            ],
+            outputs=[
+                PipeLine.Output(),
+                io.Image.Output(),
+            ],
+        )
 
-    CATEGORY = "SAX/Bridge/Sampler"
-    RETURN_TYPES = ("PIPE_LINE", "IMAGE")
-    RETURN_NAMES = ("PIPE", "IMAGE")
-    FUNCTION = "doit"
-
-    def doit(self, pipe, decode_vae):
+    @classmethod
+    def execute(cls, pipe, decode_vae) -> io.NodeOutput:
         model = pipe.get("model")
         positive = pipe.get("positive")
         negative = pipe.get("negative")
@@ -84,13 +87,4 @@ class SAX_Bridge_KSampler:
             "images": images,
         }
 
-        return (new_pipe, images)
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_KSampler": SAX_Bridge_KSampler,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_KSampler": "SAX KSampler",
-}
+        return io.NodeOutput(new_pipe, images)

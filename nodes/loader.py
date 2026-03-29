@@ -105,7 +105,7 @@ class SAX_Bridge_Loader(io.ComfyNode):
         return io.NodeOutput(pipe, seed)
 
 
-class SAX_Bridge_Loader_Lora:
+class SAX_Bridge_Loader_Lora(io.ComfyNode):
     """
     Pipe 内の model / clip に複数の LoRA を一括適用するノード。
 
@@ -121,39 +121,31 @@ class SAX_Bridge_Loader_Lora:
     """
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "pipe": ("PIPE_LINE",),
-                "enabled": (
-                    "BOOLEAN",
-                    {
-                        "default": True,
-                        "tooltip": "When False, returns the pipe without applying any LoRA.",
-                    },
-                ),
-                "loras_json": (
-                    "STRING",
-                    {
-                        "default": "[]",
-                        "tooltip": "JSON array of LoRA entries. Managed by the node UI.",
-                    },
-                ),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Loader_Lora",
+            display_name="SAX Lora Loader",
+            category="SAX/Bridge/Loader",
+            description=(
+                "Applies multiple LoRAs to the model and CLIP in the pipe. "
+                "Each LoRA can be individually toggled on/off via the node UI."
+            ),
+            inputs=[
+                PipeLine.Input("pipe"),
+                io.Boolean.Input("enabled", default=True,
+                                 tooltip="When False, returns the pipe without applying any LoRA."),
+                io.String.Input("loras_json", default="[]",
+                                tooltip="JSON array of LoRA entries. Managed by the node UI."),
+            ],
+            outputs=[
+                PipeLine.Output("PIPE"),
+            ],
+        )
 
-    RETURN_TYPES = ("PIPE_LINE",)
-    RETURN_NAMES = ("PIPE",)
-    FUNCTION = "apply"
-    CATEGORY = "SAX/Bridge/Loader"
-    DESCRIPTION = (
-        "Applies multiple LoRAs to the model and CLIP in the pipe. "
-        "Each LoRA can be individually toggled on/off via the node UI."
-    )
-
-    def apply(self, pipe, enabled, loras_json):
+    @classmethod
+    def execute(cls, pipe, enabled, loras_json) -> io.NodeOutput:
         if not enabled:
-            return (pipe,)
+            return io.NodeOutput(pipe)
 
         model = pipe.get("model")
         clip  = pipe.get("clip")
@@ -165,11 +157,11 @@ class SAX_Bridge_Loader_Lora:
             entries = json.loads(loras_json)
         except json.JSONDecodeError as e:
             logger.warning(f"[SAX_Bridge] Lora Loader: failed to parse loras_json: {e}")
-            return (pipe,)
+            return io.NodeOutput(pipe)
 
         if not isinstance(entries, list):
             logger.warning("[SAX_Bridge] Lora Loader: loras_json must be a JSON array.")
-            return (pipe,)
+            return io.NodeOutput(pipe)
 
         applied = pipe.get(_APPLIED_LORAS_KEY, set())
         newly_applied = []
@@ -207,4 +199,4 @@ class SAX_Bridge_Loader_Lora:
         new_pipe["model"] = model
         new_pipe["clip"]  = clip
         record_applied_loras(new_pipe, newly_applied)
-        return (new_pipe,)
+        return io.NodeOutput(new_pipe)

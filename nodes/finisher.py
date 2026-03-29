@@ -7,6 +7,8 @@ Detailer / Upscaler の後に配置し、最終画像にポストエフェクト
 import torch
 import torch.nn.functional as F
 
+from comfy_api.latest import io
+
 from .noise import SAXNoiseEngine
 from .io_types import PipeLine
 
@@ -76,7 +78,7 @@ def _apply_color_temp(rgb: torch.Tensor, temperature: float) -> torch.Tensor:
     return torch.cat([r, g, b], dim=1)
 
 
-class SAX_Bridge_Finisher:
+class SAX_Bridge_Finisher(io.ComfyNode):
     """
     画像にポストエフェクトを適用する仕上げノード。
     Detailer / Upscaler の後、Output の前に配置する。
@@ -84,48 +86,45 @@ class SAX_Bridge_Finisher:
     """
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "pipe": ("PIPE_LINE",),
-                # Smooth
-                "smooth": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                     "tooltip": "High-frequency smoothing. Reduces jaggies and harsh edges. 0=off, 0.1-0.3=recommended."}),
-                # Bloom
-                "bloom": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                    "tooltip": "Soft glow from bright areas. 0=off, 0.1-0.3=subtle, 0.5+=dreamy."}),
-                "bloom_threshold": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 1.0, "step": 0.05,
-                                              "tooltip": "Brightness threshold for bloom extraction. Lower=more glow."}),
-                "bloom_radius": ("FLOAT", {"default": 8.0, "min": 1.0, "max": 32.0, "step": 1.0,
-                                           "tooltip": "Bloom spread radius (gaussian sigma)."}),
-                # Vignette
-                "vignette": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                       "tooltip": "Edge darkening to draw focus to center. 0=off, 0.2-0.4=subtle."}),
-                # Color Temperature
-                "color_temp": ("FLOAT", {"default": 0.0, "min": -1.0, "max": 1.0, "step": 0.05,
-                                         "tooltip": "Color temperature shift. Positive=warm, negative=cool. 0=neutral."}),
-                # Color Correction
-                "color_correction": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                               "tooltip": "Matches color distribution to reference image. 0=off, 0.7-1.0=recommended."}),
-            },
-            "optional": {
-                "reference_image": ("IMAGE", {"tooltip": "Reference image for color correction. If not connected, uses the pipe's pre-detailer image."}),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Finisher",
+            display_name="SAX Finisher",
+            category="SAX/Bridge/Enhance",
+            inputs=[
+                PipeLine.Input("pipe"),
+                io.Float.Input("smooth", default=0.0, min=0.0, max=1.0, step=0.05,
+                               tooltip="High-frequency smoothing. Reduces jaggies and harsh edges. 0=off, 0.1-0.3=recommended."),
+                io.Float.Input("bloom", default=0.0, min=0.0, max=1.0, step=0.05,
+                               tooltip="Soft glow from bright areas. 0=off, 0.1-0.3=subtle, 0.5+=dreamy."),
+                io.Float.Input("bloom_threshold", default=0.7, min=0.0, max=1.0, step=0.05,
+                               tooltip="Brightness threshold for bloom extraction. Lower=more glow."),
+                io.Float.Input("bloom_radius", default=8.0, min=1.0, max=32.0, step=1.0,
+                               tooltip="Bloom spread radius (gaussian sigma)."),
+                io.Float.Input("vignette", default=0.0, min=0.0, max=1.0, step=0.05,
+                               tooltip="Edge darkening to draw focus to center. 0=off, 0.2-0.4=subtle."),
+                io.Float.Input("color_temp", default=0.0, min=-1.0, max=1.0, step=0.05,
+                               tooltip="Color temperature shift. Positive=warm, negative=cool. 0=neutral."),
+                io.Float.Input("color_correction", default=0.0, min=0.0, max=1.0, step=0.05,
+                               tooltip="Matches color distribution to reference image. 0=off, 0.7-1.0=recommended."),
+                io.Image.Input("reference_image", optional=True,
+                               tooltip="Reference image for color correction. If not connected, uses the pipe's pre-detailer image."),
+            ],
+            outputs=[
+                PipeLine.Output("PIPE"),
+                io.Image.Output("IMAGE"),
+            ],
+        )
 
-    RETURN_TYPES = ("PIPE_LINE", "IMAGE")
-    RETURN_NAMES = ("PIPE", "IMAGE")
-    FUNCTION = "apply_finish"
-    CATEGORY = "SAX/Bridge/Enhance"
-
-    def apply_finish(self, pipe, smooth, bloom, bloom_threshold, bloom_radius,
-                     vignette, color_temp, color_correction, reference_image=None):
+    @classmethod
+    def execute(cls, pipe, smooth, bloom, bloom_threshold, bloom_radius,
+                vignette, color_temp, color_correction, reference_image=None) -> io.NodeOutput:
         images = pipe.get("images")
         if images is None:
-            return (pipe, None)
+            return io.NodeOutput(pipe, None)
 
         if smooth <= 0 and bloom <= 0 and vignette <= 0 and color_temp == 0 and color_correction <= 0:
-            return (pipe, images)
+            return io.NodeOutput(pipe, images)
 
         rgb = images[:, :, :, :3].permute(0, 3, 1, 2)  # (B, C, H, W)
 
@@ -151,13 +150,4 @@ class SAX_Bridge_Finisher:
 
         new_pipe = pipe.copy()
         new_pipe["images"] = result
-        return (new_pipe, result)
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Finisher": SAX_Bridge_Finisher,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Finisher": "SAX Finisher",
-}
+        return io.NodeOutput(new_pipe, result)

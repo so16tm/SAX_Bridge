@@ -1,12 +1,13 @@
 import logging
 
 import torch
-import torch.nn.functional as F
 import nodes
 import comfy.utils
 import folder_paths
+from comfy_api.latest import io
 
 from .detailer import _extract_pipe, _ensure_negative
+from .io_types import PipeLine
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -40,7 +41,7 @@ def _esrgan_upscale(upscale_model, images: torch.Tensor, target_h: int, target_w
     return upscaled
 
 
-class SAX_Bridge_Upscaler:
+class SAX_Bridge_Upscaler(io.ComfyNode):
     """
     Pipe 内の images をアップスケールし、オプションで軽量 i2i を適用するノード。
 
@@ -55,69 +56,41 @@ class SAX_Bridge_Upscaler:
     """
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "pipe": ("PIPE_LINE",),
-                "upscale_model_name": (
-                    ["None"] + folder_paths.get_filename_list("upscale_models"),
-                    {"tooltip": "Upscale model to use. None = pixel interpolation only."},
-                ),
-                "method": (["lanczos", "bilinear", "bicubic", "nearest-exact"],
-                           {"tooltip": "Pixel interpolation method. When upscale_model_name is set, model-based upscaling takes priority; this method is used only for final resize adjustment."}),
-                "scale_by": (
-                    "FLOAT",
-                    {
-                        "default": 2.0,
-                        "min": 0.25,
-                        "max": 8.0,
-                        "step": 0.05,
-                        "tooltip": "Scale factor relative to original resolution. For a 4x ESRGAN model, scale_by=2 upscales 4x then downscales to 1/2.",
-                    },
-                ),
-                "denoise": (
-                    "FLOAT",
-                    {
-                        "default": 0.0,
-                        "min": 0.0,
-                        "max": 1.0,
-                        "step": 0.01,
-                        "tooltip": "0=upscale only / Values > 0 run a lightweight img2img pass after upscaling.",
-                    },
-                ),
-                "steps_override": (
-                    "INT",
-                    {
-                        "default": 0,
-                        "min": 0,
-                        "max": 200,
-                        "tooltip": "Steps for img2img pass. 0 = inherit from loader_settings.",
-                    },
-                ),
-                "cfg_override": (
-                    "FLOAT",
-                    {
-                        "default": 0.0,
-                        "min": 0.0,
-                        "max": 100.0,
-                        "step": 0.5,
-                        "tooltip": "CFG for img2img pass. 0.0 = inherit from loader_settings. Values > 0 override it.",
-                    },
-                ),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Upscaler",
+            display_name="SAX Upscaler",
+            category="SAX/Bridge/Enhance",
+            description=(
+                "Upscales images in the pipe. "
+                "Using an ESRGAN model enables high-quality enlargement and allows lower denoise in downstream Detailer nodes."
+            ),
+            inputs=[
+                PipeLine.Input("pipe"),
+                io.Combo.Input("upscale_model_name",
+                               options=["None"] + folder_paths.get_filename_list("upscale_models"),
+                               tooltip="Upscale model to use. None = pixel interpolation only."),
+                io.Combo.Input("method",
+                               options=["lanczos", "bilinear", "bicubic", "nearest-exact"],
+                               tooltip="Pixel interpolation method. When upscale_model_name is set, model-based upscaling takes priority; this method is used only for final resize adjustment."),
+                io.Float.Input("scale_by", default=2.0, min=0.25, max=8.0, step=0.05,
+                               tooltip="Scale factor relative to original resolution. For a 4x ESRGAN model, scale_by=2 upscales 4x then downscales to 1/2."),
+                io.Float.Input("denoise", default=0.0, min=0.0, max=1.0, step=0.01,
+                               tooltip="0=upscale only / Values > 0 run a lightweight img2img pass after upscaling."),
+                io.Int.Input("steps_override", default=0, min=0, max=200,
+                             tooltip="Steps for img2img pass. 0 = inherit from loader_settings."),
+                io.Float.Input("cfg_override", default=0.0, min=0.0, max=100.0, step=0.5,
+                               tooltip="CFG for img2img pass. 0.0 = inherit from loader_settings. Values > 0 override it."),
+            ],
+            outputs=[
+                PipeLine.Output("PIPE"),
+                io.Image.Output("IMAGE"),
+            ],
+        )
 
-    RETURN_TYPES = ("PIPE_LINE", "IMAGE")
-    RETURN_NAMES = ("PIPE", "IMAGE")
-    FUNCTION = "upscale"
-    CATEGORY = "SAX/Bridge/Enhance"
-    DESCRIPTION = (
-        "Upscales images in the pipe. "
-        "Using an ESRGAN model enables high-quality enlargement and allows lower denoise in downstream Detailer nodes."
-    )
-
-    def upscale(
-        self,
+    @classmethod
+    def execute(
+        cls,
         pipe,
         upscale_model_name,
         method,
@@ -125,7 +98,7 @@ class SAX_Bridge_Upscaler:
         denoise,
         steps_override=0,
         cfg_override=0.0,
-    ):
+    ) -> io.NodeOutput:
         images = pipe.get("images")
         if images is None:
             raise ValueError("[SAX_Bridge] Pipe does not contain images. Run SAX Loader → KSampler → VAEDecode first.")
@@ -189,13 +162,4 @@ class SAX_Bridge_Upscaler:
 
         new_pipe = pipe.copy()
         new_pipe["images"] = upscaled
-        return (new_pipe, upscaled)
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Upscaler": SAX_Bridge_Upscaler,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Upscaler": "SAX Upscaler",
-}
+        return io.NodeOutput(new_pipe, upscaled)

@@ -1,11 +1,6 @@
 from comfy_api.latest import io
 
-from .io_types import PipeLine
-
-
-@io.comfytype(io_type="*")
-class AnyType(io.ComfyTypeIO):
-    Type = object
+from .io_types import AnyType, PipeLine
 
 
 @io.comfytype(io_type="SAMPLER")

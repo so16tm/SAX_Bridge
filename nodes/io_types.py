@@ -8,6 +8,11 @@ class PipeLine(io.ComfyTypeIO):
     Type = dict
 
 
+@io.comfytype(io_type="*")
+class AnyType(io.ComfyTypeIO):
+    Type = object
+
+
 _APPLIED_LORAS_KEY = "_applied_loras"
 
 
@@ -27,12 +32,10 @@ def filter_new_loras(pipe: dict, loras: list) -> list:
 
 def record_applied_loras(pipe: dict, lora_names) -> None:
     """
-    pipe["_applied_loras"] に適用済みLoRA名を追記する（in-place更新）。
-    lora_names: LoRAファイル名のイテラブル
+    pipe["_applied_loras"] に適用済みLoRA名を追記する。
+    常に新しい set を作成し、shallow copy 経由でのキャッシュ汚染を防ぐ。
     """
-    applied = pipe.get(_APPLIED_LORAS_KEY, set())
-    if not isinstance(applied, set):
-        applied = set(applied)
+    applied = set(pipe.get(_APPLIED_LORAS_KEY, ()))
     for name in lora_names:
         applied.add(_normalize_lora_name(name))
     pipe[_APPLIED_LORAS_KEY] = applied

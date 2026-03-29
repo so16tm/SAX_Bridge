@@ -3,20 +3,14 @@ import logging
 import torch
 import torch.nn.functional as F
 
+from comfy_api.latest import io
+
+from .io_types import AnyType
+
 logger = logging.getLogger("SAX_Bridge")
 
 MAX_SLOTS        = 64
 MAX_OUTPUT_IMAGES = 100
-
-
-class _AnyType(str):
-    """任意の型と互換性を持つワイルドカード型。"""
-    def __eq__(self, other: object) -> bool: return True
-    def __ne__(self, other: object) -> bool: return False
-    def __hash__(self) -> int: return hash(str(self))
-
-
-ANY = _AnyType("*")
 
 
 def _normalize_channels(frame: torch.Tensor) -> torch.Tensor:
@@ -63,33 +57,28 @@ def _resize_letterbox(frame: torch.Tensor, target_h: int, target_w: int) -> torc
     return x.permute(0, 2, 3, 1)           # BCHW → BHWC
 
 
-class SAX_Bridge_Image_Collector:
-    """
-    ソースノードの IMAGE 出力を収集してバッチ結合する。
-
-    JS ピッカーで登録したノードの IMAGE 型出力をステルスリンク経由で受け取り、
-    共通サイズ（最初の IMAGE を基準）にリサイズしてバッチ結合する。
-    バッチ枚数が MAX_OUTPUT_IMAGES を超えた場合は警告を出して先頭から制限する。
-    """
+class SAX_Bridge_Image_Collector(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Image_Collector",
+            display_name="SAX Image Collector",
+            category="SAX/Bridge/Collect",
+            description=(
+                "Collects IMAGE outputs from registered source nodes and concatenates them "
+                "into a single batch. Connect to SAX Image Preview to display all images at once."
+            ),
+            inputs=[
+                AnyType.Input(f"slot_{i}", optional=True)
+                for i in range(MAX_SLOTS)
+            ],
+            outputs=[
+                io.Image.Output("images"),
+            ],
+        )
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required":  {},
-            "optional":  {f"slot_{i}": (ANY,) for i in range(MAX_SLOTS)},
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("images",)
-    FUNCTION     = "collect"
-    CATEGORY     = "SAX/Bridge/Collect"
-    OUTPUT_NODE  = False
-    DESCRIPTION  = (
-        "Collects IMAGE outputs from registered source nodes and concatenates them "
-        "into a single batch. Connect to SAX Image Preview to display all images at once."
-    )
-
-    def collect(self, **kwargs):
+    def execute(cls, **kwargs) -> io.NodeOutput:
         frames: list[torch.Tensor] = []
         ref_h: int | None = None
         ref_w: int | None = None
@@ -113,7 +102,7 @@ class SAX_Bridge_Image_Collector:
                 frames.append(val[bi : bi + 1].cpu())   # [1, H, W, C]
 
         if not frames:
-            return (torch.zeros(1, 8, 8, 3, dtype=torch.float32),)
+            return io.NodeOutput(torch.zeros(1, 8, 8, 3, dtype=torch.float32))
 
         total = len(frames)
         if total > MAX_OUTPUT_IMAGES:
@@ -126,13 +115,4 @@ class SAX_Bridge_Image_Collector:
         normalized = [_normalize_channels(f) for f in frames]
         resized    = [_resize_letterbox(f, ref_h, ref_w) for f in normalized]
         result     = torch.cat(resized, dim=0)   # [N, ref_h, ref_w, 3]
-        return (result,)
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Image_Collector": SAX_Bridge_Image_Collector,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Image_Collector": "SAX Image Collector",
-}
+        return io.NodeOutput(result)
