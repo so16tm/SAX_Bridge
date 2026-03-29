@@ -6,7 +6,7 @@ import nodes
 from nodes import ConditioningConcat
 from comfy_api.latest import io
 
-from .io_types import PipeLine
+from .io_types import PipeLine, filter_new_loras, record_applied_loras
 
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,9 @@ def _apply_loras(model, clip, loras):
     """
     extract_lora_values で取得した LoRA リストを適用する。
     loras: [(lora_name, model_weight, clip_weight, lbw, lbw_a, lbw_b, loader), ...]
+    戻り値: (model, clip, applied_names) — applied_names は実際に適用できたLoRA名のリスト
     """
+    applied_names = []
     for lora_name, model_weight, clip_weight, lbw, lbw_a, lbw_b, loader in loras:
         lora_name_ext = lora_name.split(".")
         if ("." + lora_name_ext[-1]) not in folder_paths.supported_pt_extensions:
@@ -127,6 +129,7 @@ def _apply_loras(model, clip, loras):
                 if "NunchakuFluxLoraLoader" in nodes.NODE_CLASS_MAPPINGS:
                     cls = nodes.NODE_CLASS_MAPPINGS["NunchakuFluxLoraLoader"]
                     model = cls().load_lora(model, lora_name, model_weight)[0]
+                    applied_names.append(orig_lora_name)
                 else:
                     logging.warning(
                         "[SAX_Bridge] 'NunchakuFluxLoraLoader' not found. "
@@ -146,18 +149,21 @@ def _apply_loras(model, clip, loras):
                             model_weight, clip_weight,
                             False, 0, lbw_a, lbw_b, "", lbw
                         )
+                        applied_names.append(orig_lora_name)
                     else:
                         logging.warning(
                             "[SAX_Bridge] 'Inspire Pack' is not installed. "
                             "LBW= attribute is ignored."
                         )
                         model, clip = default_lora()
+                        applied_names.append(orig_lora_name)
                 else:
                     model, clip = default_lora()
+                    applied_names.append(orig_lora_name)
         else:
             logging.warning(f"[SAX_Bridge] LORA NOT FOUND: {orig_lora_name}")
 
-    return model, clip
+    return model, clip, applied_names
 
 
 def _resolve_lora_name(name):
@@ -244,8 +250,10 @@ class SAX_Bridge_Prompt:
             loras = []
             clean_text = wildcard_text
 
-        if loras:
-            model, clip = _apply_loras(model, clip, loras)
+        new_loras = filter_new_loras(pipe, loras)
+        applied_names = []
+        if new_loras:
+            model, clip, applied_names = _apply_loras(model, clip, new_loras)
 
         conditioning = _encode_with_break(clip, clean_text)
 
@@ -255,6 +263,8 @@ class SAX_Bridge_Prompt:
             "clip": clip,
             "positive": conditioning,
         }
+
+        record_applied_loras(new_pipe, applied_names)
 
         loader_settings = new_pipe.get("loader_settings")
         if isinstance(loader_settings, dict):
@@ -351,8 +361,10 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
             loras = []
             clean_text = wildcard_text
 
-        if loras:
-            model, clip = _apply_loras(model, clip, loras)
+        new_loras = filter_new_loras(pipe, loras)
+        applied_names = []
+        if new_loras:
+            model, clip, applied_names = _apply_loras(model, clip, new_loras)
 
         conditioning = _encode_with_break(clip, clean_text)
 
@@ -362,6 +374,8 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
             "clip": clip,
             target_type: conditioning,
         }
+
+        record_applied_loras(new_pipe, applied_names)
 
         loader_settings = new_pipe.get("loader_settings")
         if isinstance(loader_settings, dict):

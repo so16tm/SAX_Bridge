@@ -11,7 +11,7 @@ import comfy.samplers
 import comfy.utils
 from comfy_api.latest import io
 
-from .io_types import PipeLine
+from .io_types import PipeLine, _APPLIED_LORAS_KEY, _normalize_lora_name, record_applied_loras
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -60,10 +60,12 @@ class SAX_Bridge_Loader(io.ComfyNode):
             vae_path = folder_paths.get_full_path("vae", vae_name)
             vae = comfy.sd.VAE(sd=comfy.utils.load_torch_file(vae_path))
 
+        applied_lora_names = []
         if lora_name != "None":
             lora_path = folder_paths.get_full_path("loras", lora_name)
             lora = comfy.utils.load_torch_file(lora_path)
             model, clip = comfy.sd.load_lora_for_models(model, clip, lora, lora_model_strength, lora_model_strength)
+            applied_lora_names.append(lora_name)
 
         if v_pred:
             class ModelSamplingAdvanced(comfy.model_sampling.ModelSamplingDiscrete, comfy.model_sampling.V_PREDICTION):
@@ -98,6 +100,7 @@ class SAX_Bridge_Loader(io.ComfyNode):
                 "batch_size": batch_size,
             }
         }
+        record_applied_loras(pipe, applied_lora_names)
 
         return io.NodeOutput(pipe, seed)
 
@@ -168,6 +171,9 @@ class SAX_Bridge_Loader_Lora:
             logger.warning("[SAX_Bridge] Lora Loader: loras_json must be a JSON array.")
             return (pipe,)
 
+        applied = pipe.get(_APPLIED_LORAS_KEY, set())
+        newly_applied = []
+
         for entry in entries:
             if not entry.get("on", True):
                 continue
@@ -178,10 +184,17 @@ class SAX_Bridge_Loader_Lora:
             if not lora_name or strength == 0.0:
                 continue
 
+            if _normalize_lora_name(lora_name) in applied:
+                logger.debug(
+                    f"[SAX_Bridge] Lora Loader: skipping already applied '{lora_name}'"
+                )
+                continue
+
             try:
                 model, clip = nodes.LoraLoader().load_lora(
                     model, clip, lora_name, strength, strength
                 )
+                newly_applied.append(lora_name)
                 logger.debug(
                     f"[SAX_Bridge] Lora Loader: applied '{lora_name}' (strength={strength:.3f})"
                 )
@@ -193,4 +206,5 @@ class SAX_Bridge_Loader_Lora:
         new_pipe = pipe.copy()
         new_pipe["model"] = model
         new_pipe["clip"]  = clip
+        record_applied_loras(new_pipe, newly_applied)
         return (new_pipe,)
