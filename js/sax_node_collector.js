@@ -7,13 +7,6 @@ const NODE_TYPE = "SAX_Bridge_Node_Collector";
 const MAX_SLOTS = 32;   // Python 側 MAX_SLOTS と合わせる
 
 // ---------------------------------------------------------------------------
-// rebuildAllSources 時に旧 enabledSlots を引き継ぐための一時ヒント
-// applySlotSelection 呼出の前後でセット/クリアする
-// ---------------------------------------------------------------------------
-
-let _rebuildHints = null;
-
-// ---------------------------------------------------------------------------
 // makeSourceListWidget によるソースリストウィジェット構築
 // ---------------------------------------------------------------------------
 
@@ -33,7 +26,7 @@ const SOURCE = makeSourceListWidget({
         if (allCount === 0) return null;
 
         // rebuildAllSources 時: 一時ヒントがあれば旧 enabledSlots を引き継ぐ
-        const hint = _rebuildHints?.get(srcNode.id);
+        const hint = collectorNode._rebuildHints?.get(srcNode.id);
         let enabledSlots;
         if (hint?.enabledSlots) {
             const oldEnabled  = hint.enabledSlots;
@@ -297,7 +290,7 @@ function showSlotSelectDialog(node, si) {
 function _applySlotSelection(node, si, newEnabledSlots) {
     const allSources = SOURCE.getSources(node);
     const sorted = [...newEnabledSlots].sort((a, b) => a - b);
-    _rebuildHints = new Map(
+    node._rebuildHints = new Map(
         allSources.map((s, i) => [
             s.sourceId,
             i === si
@@ -310,7 +303,7 @@ function _applySlotSelection(node, si, newEnabledSlots) {
             src.enabledSlots = sorted;
         });
     } finally {
-        _rebuildHints = null;
+        node._rebuildHints = null;
     }
 }
 

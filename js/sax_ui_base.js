@@ -1347,7 +1347,7 @@ export function makeSourceListWidget(spec) {
         sources.splice(idx, 1);
         node._remoteSources = sources;
 
-        for (const id of [..._hiddenLinkIds]) {
+        for (const [id] of _hiddenLinkIds) {
             if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
         }
 
@@ -1391,7 +1391,7 @@ export function makeSourceListWidget(spec) {
     }
 
     function resetAllSources(node) {
-        for (const id of [..._hiddenLinkIds]) {
+        for (const [id] of _hiddenLinkIds) {
             if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
         }
         unhideSourceLinks(node);
@@ -1439,7 +1439,7 @@ export function makeSourceListWidget(spec) {
                 const srcNode = app.graph.getNodeById(src.sourceId);
                 if (!srcNode) {
                     removeSourceAt(drawNode, si);
-                    return;
+                    continue;
                 }
                 const currentTitle = srcNode.title || srcNode.type || `Node#${srcNode.id}`;
                 if (currentTitle !== src.sourceTitle) {
@@ -1453,7 +1453,8 @@ export function makeSourceListWidget(spec) {
                 }
             }
             if (sigChangedDetected) {
-                setTimeout(() => rebuildAllSources(drawNode), 0);
+                const ds = _captureDownstream(drawNode);
+                setTimeout(() => rebuildAllSources(drawNode, ds), 0);
                 return;
             }
 
@@ -1619,7 +1620,7 @@ export function makeSourceListWidget(spec) {
 
     function onSerialize(data) {
         data[serializeKey] = {
-            sources:      _getSources(this),
+            sources:      _getSources(this).map(({ _connectRetries, ...rest }) => rest),
             linksVisible: this._remoteLinksVisible ?? false,
         };
     }
@@ -1664,12 +1665,23 @@ export function makeSourceListWidget(spec) {
             for (let si = 0; si < sources.length; si++) {
                 const src     = sources[si];
                 const srcNode = app.graph.getNodeById(src.sourceId);
-                if (!srcNode) continue;
+                if (!srcNode) {
+                    src.sig = "";
+                    src._connectRetries = (src._connectRetries ?? 0) + 1;
+                    continue;
+                }
                 const offset = _getOffset(node, si);
                 try {
                     connectSource(srcNode, src, node, offset);
-                } catch (e) { console.warn(`[${widgetName}] connectSource (configure) error:`, e); }
-                src.sig = _sourceSignature(srcNode);
+                    src.sig = _sourceSignature(srcNode);
+                    delete src._connectRetries;
+                } catch (e) {
+                    console.warn(`[${widgetName}] connectSource (configure) error:`, e);
+                    if ((src._connectRetries ?? 0) < 3) {
+                        src.sig = "";
+                        src._connectRetries = (src._connectRetries ?? 0) + 1;
+                    }
+                }
             }
             applyLinkVisibility(node);
             _autoResize(node);
@@ -1698,11 +1710,11 @@ export function makeSourceListWidget(spec) {
 // ---------------------------------------------------------------------------
 // renderLink パッチ — ステルスリンク（非表示リンク）制御
 //
-// 複数ノードで共有する必要があるため sax_ui_base に定義する。
+// linkId → nodeId の Map で所有権を追跡し、ノード間の干渉を防ぐ。
 // node._remoteLinksVisible: true = リンク表示, false = 非表示（デフォルト）
 // ---------------------------------------------------------------------------
 
-export const _hiddenLinkIds = new Set();
+const _hiddenLinkIds = new Map();
 let _renderLinkPatched = false;
 
 /** renderLink を1度だけパッチし、_hiddenLinkIds に含まれるリンクをスキップする。 */
@@ -1718,20 +1730,19 @@ export function ensureRenderLinkPatch() {
     };
 }
 
-/** ノードの全入力リンクを非表示セットに追加する。 */
+/** ノードの全入力リンクを非表示 Map に登録する（所有者 = node.id）。 */
 export function hideSourceLinks(node) {
     for (let i = 0; i < (node.inputs?.length ?? 0); i++) {
         const linkId = node.inputs[i]?.link;
-        if (linkId != null) _hiddenLinkIds.add(linkId);
+        if (linkId != null) _hiddenLinkIds.set(linkId, node.id);
     }
     app.canvas?.setDirty(true, false);
 }
 
-/** ノードの全入力リンクを非表示セットから除去する。 */
+/** ノードが所有する全エントリを非表示 Map から除去する。 */
 export function unhideSourceLinks(node) {
-    for (let i = 0; i < (node.inputs?.length ?? 0); i++) {
-        const linkId = node.inputs[i]?.link;
-        if (linkId != null) _hiddenLinkIds.delete(linkId);
+    for (const [lid, nid] of _hiddenLinkIds) {
+        if (nid === node.id) _hiddenLinkIds.delete(lid);
     }
 }
 
