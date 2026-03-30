@@ -165,8 +165,7 @@ function snapshotCurrentState(config) {
 // グループ自動同期（移動・名称変更をインメモリ→config に遅延反映）
 // ---------------------------------------------------------------------------
 
-let _groupSyncTimer = null;
-let _groupSyncNode  = null;
+const _groupSyncTimers = new Map();
 
 function syncGroupsToConfig(node) {
     const cfg      = getConfig(node);
@@ -200,14 +199,13 @@ function syncGroupsToConfig(node) {
 }
 
 function scheduleGroupSync(node) {
-    if (_groupSyncTimer !== null) clearTimeout(_groupSyncTimer);
-    _groupSyncNode  = node;
-    _groupSyncTimer = setTimeout(() => {
-        _groupSyncTimer = null;
-        const n = _groupSyncNode;
-        _groupSyncNode = null;
-        if (n) syncGroupsToConfig(n);
-    }, 500);
+    const id = node.id;
+    const prev = _groupSyncTimers.get(id);
+    if (prev != null) clearTimeout(prev);
+    _groupSyncTimers.set(id, setTimeout(() => {
+        _groupSyncTimers.delete(id);
+        syncGroupsToConfig(node);
+    }, 500));
 }
 
 // ---------------------------------------------------------------------------
@@ -938,6 +936,11 @@ app.registerExtension({
 
         const origOnRemoved = node.onRemoved;
         node.onRemoved = function () {
+            const pendingSync = _groupSyncTimers.get(node.id);
+            if (pendingSync != null) {
+                clearTimeout(pendingSync);
+                _groupSyncTimers.delete(node.id);
+            }
             if (_managerNode === node) {
                 const other = (app.graph._nodes ?? []).find(
                     n => n.comfyClass === NODE_TYPE && n.id !== node.id
