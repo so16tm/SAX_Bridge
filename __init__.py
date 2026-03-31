@@ -6,7 +6,7 @@ from .nodes import pipe_collector as pipe_collector_node
 from .nodes import image_collector as image_collector_node
 from .nodes import primitive_store as primitive_store_node
 from .nodes import guidance as guidance_node
-from .nodes.sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
+from .nodes import sam3 as sam3_node
 from .nodes.schedulers import register_schedulers
 
 register_schedulers()
@@ -20,15 +20,8 @@ from .nodes import noise as noise_node
 from .nodes import upscaler as upscaler_node
 from .nodes import finisher as finisher_node
 
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Loader_SAM3":     SAX_Bridge_Loader_SAM3,
-    "SAX_Bridge_Segmenter_Multi": SAX_Bridge_Segmenter_Multi,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Loader_SAM3":     "SAX SAM3 Loader",
-    "SAX_Bridge_Segmenter_Multi": "SAX SAM3 Multi Segmenter",
-}
+NODE_CLASS_MAPPINGS = {}
+NODE_DISPLAY_NAME_MAPPINGS = {}
 
 for v3_node in [
     detailer_node.SAX_Bridge_Detailer,
@@ -53,6 +46,8 @@ for v3_node in [
     noise_node.SAX_Bridge_Noise_Image,
     noise_node.SAX_Bridge_Noise_Latent,
     upscaler_node.SAX_Bridge_Upscaler,
+    sam3_node.SAX_Bridge_Loader_SAM3,
+    sam3_node.SAX_Bridge_Segmenter_Multi,
 ]:
     _schema = v3_node.GET_SCHEMA()
     NODE_CLASS_MAPPINGS[_schema.node_id] = v3_node

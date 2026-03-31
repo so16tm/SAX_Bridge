@@ -21,6 +21,7 @@ from PIL import Image
 
 import comfy.model_management
 from comfy.model_patcher import ModelPatcher
+from comfy_api.latest import io
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -310,7 +311,12 @@ def _segment_single(processor, pil_image: Image.Image, prompt: str,
     return base_mask, preview_mask
 
 
-class SAX_Bridge_Loader_SAM3:
+@io.comfytype(io_type="CSAM3_MODEL")
+class SAM3Model(io.ComfyTypeIO):
+    Type = object
+
+
+class SAX_Bridge_Loader_SAM3(io.ComfyNode):
     """
     SAM3モデルをロードし、ComfyUIのVRAM管理下に配置する。
     models/sam3/ ディレクトリ内のチェックポイントを選択可能。
@@ -318,39 +324,34 @@ class SAX_Bridge_Loader_SAM3:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def define_schema(cls) -> io.Schema:
         model_list = []
         if folder_paths is not None:
             model_list = folder_paths.get_filename_list("sam3")
-        return {
-            "required": {
-                "model_name": (
-                    model_list,
-                    {"tooltip": "Checkpoint file in models/sam3/."},
-                ),
-                "precision": (
-                    ["fp32", "bf16", "fp16", "auto"],
-                    {
-                        "default": "fp32",
-                        "tooltip": (
-                            "Model precision. "
-                            "fp32: highest quality (recommended). "
-                            "bf16: reduced VRAM (Ampere+). "
-                            "fp16: reduced VRAM (Volta+). "
-                            "auto: select best for GPU."
-                        ),
-                    },
-                ),
-            },
-        }
+        return io.Schema(
+            node_id="SAX_Bridge_Loader_SAM3",
+            display_name="SAX SAM3 Loader",
+            category="SAX/Bridge/Segment",
+            description="SAM3モデルをロードして ComfyUI の VRAM 管理下に配置する。",
+            inputs=[
+                io.Combo.Input("model_name", options=model_list,
+                    tooltip="Checkpoint file in models/sam3/."),
+                io.Combo.Input("precision", options=["fp32", "bf16", "fp16", "auto"], default="fp32",
+                    tooltip=(
+                        "Model precision. "
+                        "fp32: highest quality (recommended). "
+                        "bf16: reduced VRAM (Ampere+). "
+                        "fp16: reduced VRAM (Volta+). "
+                        "auto: select best for GPU."
+                    )),
+            ],
+            outputs=[
+                SAM3Model.Output("SAM3_MODEL"),
+            ],
+        )
 
-    RETURN_TYPES  = ("CSAM3_MODEL",)
-    RETURN_NAMES  = ("SAM3_MODEL",)
-    FUNCTION      = "load_model"
-    CATEGORY      = "SAX/Bridge/Segment"
-    DESCRIPTION   = "SAM3モデルをロードして ComfyUI の VRAM 管理下に配置する。"
-
-    def load_model(self, model_name: str, precision: str = "fp32"):
+    @classmethod
+    def execute(cls, model_name: str, precision: str = "fp32") -> io.NodeOutput:
         if not _SAM3_AVAILABLE:
             raise RuntimeError(
                 "[SAX_Bridge] sam3 package is not installed. "
@@ -436,7 +437,7 @@ class SAX_Bridge_Loader_SAM3:
         size_mb = wrapper.model_size() / 1024 / 1024
         logger.info(f"[SAX_Bridge] SAM3 loaded ({size_mb:.1f} MB, dtype={dtype})")
 
-        return (wrapper,)
+        return io.NodeOutput(wrapper)
 
 
 _DEFAULT_SEGMENTS = json.dumps([
@@ -451,7 +452,7 @@ _DEFAULT_SEGMENTS = json.dumps([
 ])
 
 
-class SAX_Bridge_Segmenter_Multi:
+class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
     """
     複数のテキストプロンプトエントリーでセグメンテーションを行い、
     positive OR − negative OR でマスクを合成して出力する。
@@ -476,46 +477,37 @@ class SAX_Bridge_Segmenter_Multi:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "sam3_model": (
-                    "CSAM3_MODEL",
-                    {"tooltip": "Connect from SAX SAM3 Loader."},
-                ),
-                "image": ("IMAGE",),
-                "segments_json": (
-                    "STRING",
-                    {
-                        "default": _DEFAULT_SEGMENTS,
-                        "multiline": False,
-                        "tooltip": "セグメントエントリーデータ（JSON）。JS が管理するため直接編集不要。",
-                    },
-                ),
-            },
-            "optional": {
-                "mask": ("MASK",),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Segmenter_Multi",
+            display_name="SAX SAM3 Multi Segmenter",
+            category="SAX/Bridge/Segment",
+            description=(
+                "複数テキストプロンプトによる SAM3 セグメンテーション。"
+                "positive OR − negative OR でマスクを合成出力すると同時に、"
+                "検出の一致度をヒートマップで可視化したプレビュー画像を出力する。"
+            ),
+            inputs=[
+                SAM3Model.Input("sam3_model", tooltip="Connect from SAX SAM3 Loader."),
+                io.Image.Input("image"),
+                io.String.Input("segments_json", default=_DEFAULT_SEGMENTS, multiline=False,
+                    tooltip="セグメントエントリーデータ（JSON）。JS が管理するため直接編集不要。"),
+                io.Mask.Input("mask", optional=True),
+            ],
+            outputs=[
+                io.Mask.Output("MASK"),
+                io.Image.Output("PREVIEW_IMAGE"),
+            ],
+        )
 
-    RETURN_TYPES  = ("MASK", "IMAGE")
-    RETURN_NAMES  = ("MASK", "PREVIEW_IMAGE")
-    FUNCTION      = "segment"
-    CATEGORY      = "SAX/Bridge/Segment"
-    OUTPUT_NODE   = False
-    DESCRIPTION   = (
-        "複数テキストプロンプトによる SAM3 セグメンテーション。"
-        "positive OR − negative OR でマスクを合成出力すると同時に、"
-        "検出の一致度をヒートマップで可視化したプレビュー画像を出力する。"
-    )
-
-    def segment(
-        self,
+    @classmethod
+    def execute(
+        cls,
         sam3_model,
         image,
         segments_json: str,
         mask=None,
-    ):
+    ) -> io.NodeOutput:
         if not _SAM3_AVAILABLE:
             raise RuntimeError(
                 "[SAX_Bridge] sam3 package is not installed. "
@@ -660,15 +652,6 @@ class SAX_Bridge_Segmenter_Multi:
         gc.collect()
         comfy.model_management.soft_empty_cache()
 
-        return (result_mask, preview_images)
+        return io.NodeOutput(result_mask, preview_images)
 
 
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Loader_SAM3":        SAX_Bridge_Loader_SAM3,
-    "SAX_Bridge_Segmenter_Multi":    SAX_Bridge_Segmenter_Multi,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Loader_SAM3":        "SAX SAM3 Loader",
-    "SAX_Bridge_Segmenter_Multi":    "SAX SAM3 Multi Segmenter",
-}
