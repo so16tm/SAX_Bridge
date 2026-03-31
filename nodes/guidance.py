@@ -15,6 +15,7 @@ import torch.nn.functional as F
 import comfy.model_patcher
 import comfy.samplers
 
+from comfy_api.latest import io
 from .io_types import PipeLine
 
 
@@ -231,59 +232,46 @@ def apply_guidance_to_model(model, guidance_mode: str, guidance_strength: float,
 
 _ALL_MODES = ["off", "agc", "fdg", "agc+fdg", "post_fdg"]
 
-
-class SAX_Bridge_Guidance:
+class SAX_Bridge_Guidance(io.ComfyNode):
     """
     パイプラインのモデルに AGC / FDG / PAG ガイダンス強化を適用する。
     Detailer・KSampler・Upscaler の前に配置して使う。
     """
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "pipe": ("PIPE_LINE",),
-                "mode": (_ALL_MODES, {
-                    "default": "agc+fdg",
-                    "tooltip": "off=bypass, agc=spike suppression, fdg=detail emphasis (high CFG), "
-                               "agc+fdg=both, post_fdg=detail emphasis (low CFG / low-step LoRA)"}),
-                "strength": ("FLOAT", {
-                    "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "Effect intensity for AGC/FDG modes. 0.0=no effect, 0.5=moderate, 1.0=maximum."}),
-                "pag_strength": ("FLOAT", {
-                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "Perturbed Attention Guidance intensity. Works at any CFG. "
-                               "0.0=disabled, 0.5=standard (scale=3.0). Can combine with other modes. "
-                               "Note: adds one extra forward pass per step."}),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Guidance",
+            display_name="SAX Guidance",
+            category="SAX/Bridge/Enhance",
+            inputs=[
+                PipeLine.Input("pipe"),
+                io.Combo.Input("mode", options=_ALL_MODES, default="agc+fdg",
+                    tooltip="off=bypass, agc=spike suppression, fdg=detail emphasis (high CFG), "
+                            "agc+fdg=both, post_fdg=detail emphasis (low CFG / low-step LoRA)"),
+                io.Float.Input("strength", default=0.5, min=0.0, max=1.0, step=0.05,
+                    tooltip="Effect intensity for AGC/FDG modes. 0.0=no effect, 0.5=moderate, 1.0=maximum."),
+                io.Float.Input("pag_strength", default=0.0, min=0.0, max=1.0, step=0.05,
+                    tooltip="Perturbed Attention Guidance intensity. Works at any CFG. "
+                            "0.0=disabled, 0.5=standard (scale=3.0). Can combine with other modes. "
+                            "Note: adds one extra forward pass per step."),
+            ],
+            outputs=[PipeLine.Output()],
+        )
 
-    RETURN_TYPES = ("PIPE_LINE",)
-    RETURN_NAMES = ("PIPE",)
-    FUNCTION = "apply_guidance"
-    CATEGORY = "SAX/Bridge/Enhance"
-
-    def apply_guidance(self, pipe, mode, strength, pag_strength):
+    @classmethod
+    def execute(cls, pipe, mode, strength, pag_strength) -> io.NodeOutput:
         if (mode == "off" or strength <= 0.0) and pag_strength <= 0.0:
-            return (pipe,)
+            return io.NodeOutput(pipe)
 
         model = pipe.get("model")
         if model is None:
-            return (pipe,)
+            return io.NodeOutput(pipe)
 
         patched = apply_guidance_to_model(model, mode, strength, pag_strength)
         if patched is None:
-            return (pipe,)
+            return io.NodeOutput(pipe)
 
         new_pipe = pipe.copy()
         new_pipe["model"] = patched
-        return (new_pipe,)
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Guidance": SAX_Bridge_Guidance,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Guidance": "SAX Guidance",
-}
+        return io.NodeOutput(new_pipe)

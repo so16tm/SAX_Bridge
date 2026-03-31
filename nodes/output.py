@@ -10,7 +10,10 @@ import numpy as np
 from PIL import Image, PngImagePlugin
 import folder_paths
 
+from comfy_api.latest import io
+
 from .detailer import _extract_pipe
+from .io_types import PipeLine
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -201,7 +204,7 @@ def _pipe_to_meta(pipe: dict) -> dict:
 # SAX_Bridge_Output ノード
 # ---------------------------------------------------------------------------
 
-class SAX_Bridge_Output:
+class SAX_Bridge_Output(io.ComfyNode):
     """
     最終出力処理を集約するノード。
 
@@ -219,141 +222,58 @@ class SAX_Bridge_Output:
     """
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "save": (
-                    "BOOLEAN",
-                    {
-                        "default": True,
-                        "tooltip": "True to save. False for preview only (sharpening and grayscale are still applied).",
-                    },
-                ),
-                "output_dir": (
-                    "STRING",
-                    {
-                        "default": "{date:%Y-%m-%d}",
-                        "tooltip": "Output directory. Template variables supported. Leave empty for ComfyUI/output/. Relative paths are based on output/. Absolute paths also accepted.",
-                    },
-                ),
-                "filename_template": (
-                    "STRING",
-                    {
-                        "default": "{datetime:%Y%m%d_%H%M%S}",
-                        "tooltip": "Filename template. Use {var} or {var:format} syntax. Available: {date} {time} {datetime} {seed} {model} {steps} {cfg}.",
-                    },
-                ),
-                "filename_index": (
-                    "INT",
-                    {
-                        "default": 1,
-                        "min": 0,
-                        "max": 999999,
-                        "step": 1,
-                        "tooltip": "Starting index value. Increments with each save. Update manually at the next session.",
-                    },
-                ),
-                "index_digits": (
-                    "INT",
-                    {
-                        "default": 3,
-                        "min": 1,
-                        "max": 6,
-                        "tooltip": "Zero-padding digit count for the index. 3 = 001, 4 = 0001.",
-                    },
-                ),
-                "index_position": (
-                    ["prefix", "suffix"],
-                    {
-                        "tooltip": "Attach the index to the beginning (prefix) or end (suffix) of the filename.",
-                    },
-                ),
-                "format": (["webp", "png"],),
-                "webp_quality": (
-                    "INT",
-                    {
-                        "default": 90,
-                        "min": 1,
-                        "max": 100,
-                        "tooltip": "WebP quality (1–100). Ignored when lossless=True.",
-                    },
-                ),
-                "webp_lossless": ("BOOLEAN", {"default": False}),
-                "sharpen_strength": (
-                    "FLOAT",
-                    {
-                        "default": 0.0,
-                        "min": 0.0,
-                        "max": 2.0,
-                        "step": 0.05,
-                        "tooltip": "Unsharp Mask sharpening strength. 0.0 = disabled.",
-                    },
-                ),
-                "sharpen_sigma": (
-                    "FLOAT",
-                    {
-                        "default": 1.0,
-                        "min": 0.1,
-                        "max": 5.0,
-                        "step": 0.1,
-                        "tooltip": "Sharpening kernel width. Smaller values affect finer edges and details.",
-                    },
-                ),
-                "grayscale": ("BOOLEAN", {"default": False}),
-            },
-            "optional": {
-                "pipe": (
-                    "PIPE_LINE",
-                    {"tooltip": "Image source and metadata supplier (seed, steps, CFG, model name, etc.) when image is not connected."},
-                ),
-                "image": (
-                    "IMAGE",
-                    {"tooltip": "Target image to process. Falls back to pipe.images if not connected."},
-                ),
-                "prompt_text": (
-                    "STRING",
-                    {
-                        "tooltip": "Prompt text to embed in metadata. Recommended: connect SAX Prompt's POPULATED_TEXT.",
-                        "forceInput": True,
-                    },
-                ),
-            },
-            "hidden": {
-                "prompt": "PROMPT",
-                "extra_pnginfo": "EXTRA_PNGINFO",
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Output",
+            display_name="SAX Output",
+            description=(
+                "Final output node combining sharpening, grayscale conversion, WebP/PNG saving, and metadata embedding. "
+                "Set save=False to skip saving during experimentation."
+            ),
+            category="SAX/Bridge/Output",
+            is_output_node=True,
+            inputs=[
+                io.Boolean.Input("save", default=True,
+                    tooltip="True to save. False for preview only (sharpening and grayscale are still applied)."),
+                io.String.Input("output_dir", default="{date:%Y-%m-%d}",
+                    tooltip="Output directory. Template variables supported. Leave empty for ComfyUI/output/. Relative paths are based on output/. Absolute paths also accepted."),
+                io.String.Input("filename_template", default="{datetime:%Y%m%d_%H%M%S}",
+                    tooltip="Filename template. Use {var} or {var:format} syntax. Available: {date} {time} {datetime} {seed} {model} {steps} {cfg}."),
+                io.Int.Input("filename_index", default=1, min=0, max=999999, step=1,
+                    tooltip="Starting index value. Increments with each save. Update manually at the next session."),
+                io.Int.Input("index_digits", default=3, min=1, max=6,
+                    tooltip="Zero-padding digit count for the index. 3 = 001, 4 = 0001."),
+                io.Combo.Input("index_position", options=["prefix", "suffix"],
+                    tooltip="Attach the index to the beginning (prefix) or end (suffix) of the filename."),
+                io.Combo.Input("format", options=["webp", "png"]),
+                io.Int.Input("webp_quality", default=90, min=1, max=100,
+                    tooltip="WebP quality (1–100). Ignored when lossless=True."),
+                io.Boolean.Input("webp_lossless", default=False),
+                io.Float.Input("sharpen_strength", default=0.0, min=0.0, max=2.0, step=0.05,
+                    tooltip="Unsharp Mask sharpening strength. 0.0 = disabled."),
+                io.Float.Input("sharpen_sigma", default=1.0, min=0.1, max=5.0, step=0.1,
+                    tooltip="Sharpening kernel width. Smaller values affect finer edges and details."),
+                io.Boolean.Input("grayscale", default=False),
+                PipeLine.Input("pipe", optional=True,
+                    tooltip="Image source and metadata supplier (seed, steps, CFG, model name, etc.) when image is not connected."),
+                io.Image.Input("image", optional=True,
+                    tooltip="Target image to process. Falls back to pipe.images if not connected."),
+                io.String.Input("prompt_text", optional=True, force_input=True,
+                    tooltip="Prompt text to embed in metadata. Recommended: connect SAX Prompt's POPULATED_TEXT."),
+            ],
+            outputs=[
+                io.Image.Output(),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("IMAGE",)
-    FUNCTION = "process"
-    CATEGORY = "SAX/Bridge/Output"
-    OUTPUT_NODE = True
-    DESCRIPTION = (
-        "Final output node combining sharpening, grayscale conversion, WebP/PNG saving, and metadata embedding. "
-        "Set save=False to skip saving during experimentation."
-    )
+    @classmethod
+    def execute(cls, save, output_dir, filename_template, filename_index,
+                index_digits, index_position, format, webp_quality, webp_lossless,
+                sharpen_strength, sharpen_sigma, grayscale,
+                pipe=None, image=None, prompt_text="") -> io.NodeOutput:
+        prompt = cls.hidden.prompt
+        extra_pnginfo = cls.hidden.extra_pnginfo
 
-    def process(
-        self,
-        save: bool,
-        output_dir: str,
-        filename_template: str,
-        filename_index: int,
-        index_digits: int,
-        index_position: str,
-        format: str,
-        webp_quality: int,
-        webp_lossless: bool,
-        sharpen_strength: float,
-        sharpen_sigma: float,
-        grayscale: bool,
-        image: torch.Tensor = None,
-        pipe=None,
-        prompt_text: str = "",
-        prompt=None,
-        extra_pnginfo=None,
-    ):
         if image is not None:
             src = image
         elif pipe is not None and pipe.get("images") is not None:
@@ -393,10 +313,10 @@ class SAX_Bridge_Output:
                 logger.info(f"[SAX_Bridge] Output: saved → {filepath}")
 
         next_index = filename_index + 1 if save else filename_index
-        return {"ui": {"filename_index": [next_index]}, "result": (result,)}
+        return io.NodeOutput(result, ui={"filename_index": [next_index]})
 
 
-class SAX_Bridge_Image_Preview:
+class SAX_Bridge_Image_Preview(io.ComfyNode):
     """
     IMAGE バッチを比較プレビュー表示する終端ノード。
 
@@ -406,70 +326,51 @@ class SAX_Bridge_Image_Preview:
     グリッドは JS 側でトグル表示でき、サムネイルクリックで比較対象を選択できる。
     """
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "cell_w": (
-                    "INT",
-                    {
-                        "default": 200,
-                        "min": 64,
-                        "max": 512,
-                        "step": 16,
-                        "tooltip": "Width (px) of each cell. Height is auto-calculated from the images' actual aspect ratios.",
-                    },
-                ),
-                "max_cols": (
-                    "INT",
-                    {
-                        "default": 1,
-                        "min": 1,
-                        "max": 8,
-                        "step": 1,
-                        "tooltip": "Number of columns in the main comparison view. Node width is set automatically from cell_w × max_cols.",
-                    },
-                ),
-                "preview_quality": (
-                    ["low", "medium", "high"],
-                    {
-                        "default": "low",
-                        "tooltip": "Preview resolution. low=512px, medium=1024px, high=full size. Higher quality increases encoding time.",
-                    },
-                ),
-            },
-            "optional": {
-                "images": ("IMAGE",),
-            },
-        }
-
-    RETURN_TYPES = ()
-    FUNCTION     = "execute"
-    CATEGORY     = "SAX/Bridge/Output"
-    OUTPUT_NODE  = True
-    DESCRIPTION  = (
-        "Displays an IMAGE batch with a toggleable thumbnail grid for comparison. "
-        "Click thumbnails to select images for the main view. "
-        "Designed to work with SAX Image Collector, but accepts any IMAGE input."
-    )
-
     _PREVIEW_MAX_PX = {"low": 512, "medium": 1024, "high": None}
 
-    def execute(self, cell_w: int, max_cols: int, preview_quality: str = "low",
-                images: torch.Tensor | None = None):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Image_Preview",
+            display_name="SAX Image Preview",
+            description=(
+                "Displays an IMAGE batch with a toggleable thumbnail grid for comparison. "
+                "Click thumbnails to select images for the main view. "
+                "Designed to work with SAX Image Collector, but accepts any IMAGE input."
+            ),
+            category="SAX/Bridge/Output",
+            is_output_node=True,
+            hidden=[io.Hidden.unique_id],
+            inputs=[
+                io.Int.Input("cell_w", default=200, min=64, max=512, step=16,
+                    tooltip="Width (px) of each cell. Height is auto-calculated from the images' actual aspect ratios."),
+                io.Int.Input("max_cols", default=1, min=1, max=8, step=1,
+                    tooltip="Number of columns in the main comparison view. Node width is set automatically from cell_w × max_cols."),
+                io.Combo.Input("preview_quality", options=["low", "medium", "high"], default="low",
+                    tooltip="Preview resolution. low=512px, medium=1024px, high=full size. Higher quality increases encoding time."),
+                io.Image.Input("images", optional=True),
+            ],
+            outputs=[],
+        )
+
+    @classmethod
+    def execute(cls, cell_w, max_cols, preview_quality="low", images=None) -> io.NodeOutput:
         if images is None:
-            return {"ui": {"images": []}}
+            return io.NodeOutput(ui={"images": []})
 
         import glob
         temp_dir = folder_paths.get_temp_directory()
+        node_id = getattr(cls, "hidden", None)
+        node_id = node_id.unique_id if node_id else None
+        prefix = f"sax_preview_{node_id}_" if node_id else "sax_preview_"
 
-        for old in glob.glob(os.path.join(temp_dir, "sax_preview_*.webp")):
+        for old in glob.glob(os.path.join(temp_dir, f"{prefix}*.webp")):
             try:
                 os.remove(old)
             except OSError:
                 pass
 
-        max_px  = self._PREVIEW_MAX_PX.get(preview_quality)
+        max_px  = cls._PREVIEW_MAX_PX.get(preview_quality)
         results = []
 
         for i in range(images.shape[0]):
@@ -491,21 +392,10 @@ class SAX_Bridge_Image_Preview:
                         Image.LANCZOS,
                     )
 
-            filename = f"sax_preview_{uuid.uuid4().hex[:12]}.webp"
+            filename = f"{prefix}{uuid.uuid4().hex[:12]}.webp"
             filepath = os.path.join(temp_dir, filename)
             pil_img.save(filepath, format="WEBP", quality=85)
 
             results.append({"filename": filename, "subfolder": "", "type": "temp"})
 
-        return {"ui": {"images": results}}
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Output":        SAX_Bridge_Output,
-    "SAX_Bridge_Image_Preview": SAX_Bridge_Image_Preview,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Output":        "SAX Output",
-    "SAX_Bridge_Image_Preview": "SAX Image Preview",
-}
+        return io.NodeOutput(ui={"images": results})

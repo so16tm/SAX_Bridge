@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import nodes
 
+from comfy_api.latest import io
 from .io_types import PipeLine
 from .noise import SAXNoiseEngine
 from .guidance import apply_guidance_to_model, _ALL_MODES
@@ -336,53 +337,48 @@ def _ensure_negative(p):
         p["negative"] = nodes.CLIPTextEncode().encode(p["clip"], "")[0]
 
 
-class SAX_Bridge_Detailer:
+class SAX_Bridge_Detailer(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "pipe": ("PIPE_LINE",),
-                # Sampling
-                "denoise": ("FLOAT", {"default": 0.45, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "cycle": ("INT", {"default": 1, "min": 1, "max": 10, "step": 1}),
-                # Mask & Blend
-                "crop_factor": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 10.0, "step": 0.1}),
-                "noise_mask_feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
-                "blend_feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
-            },
-            "optional": {
-                "mask": ("MASK",),
-                # Override
-                "steps_override": ("INT", {"default": 0, "min": 0, "max": 200,
-                                           "tooltip": "0 = inherit steps from loader_settings. Values ≥1 override it."}),
-                "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
-                                           "tooltip": "0.0 = inherit CFG from loader_settings. Values > 0 override it."}),
-                # Guidance
-                "guidance_mode": (_ALL_MODES, {
-                    "default": "off",
-                    "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both, post_fdg=low CFG."}),
-                "guidance_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
-                                                "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
-                "pag_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                           "tooltip": "Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."}),
-                # Prompt (always last)
-                "positive_prompt": ("STRING", {"multiline": True}),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Detailer",
+            display_name="SAX Detailer",
+            category="SAX/Bridge/Enhance",
+            inputs=[
+                PipeLine.Input("pipe"),
+                io.Float.Input("denoise", default=0.45, min=0.0, max=1.0, step=0.01),
+                io.Int.Input("cycle", default=1, min=1, max=10, step=1),
+                io.Float.Input("crop_factor", default=3.0, min=1.0, max=10.0, step=0.1),
+                io.Int.Input("noise_mask_feather", default=5, min=0, max=100, step=1),
+                io.Int.Input("blend_feather", default=5, min=0, max=100, step=1),
+                io.Mask.Input("mask", optional=True),
+                io.Int.Input("steps_override", default=0, min=0, max=200, optional=True,
+                             tooltip="0 = inherit steps from loader_settings. Values ≥1 override it."),
+                io.Float.Input("cfg_override", default=0.0, min=0.0, max=100.0, step=0.5, optional=True,
+                               tooltip="0.0 = inherit CFG from loader_settings. Values > 0 override it."),
+                io.Combo.Input("guidance_mode", options=_ALL_MODES, default="off", optional=True,
+                               tooltip="CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both, post_fdg=low CFG."),
+                io.Float.Input("guidance_strength", default=0.5, min=0.0, max=1.0, step=0.05, optional=True,
+                               tooltip="Guidance effect intensity. 0.0=none, 1.0=maximum."),
+                io.Float.Input("pag_strength", default=0.0, min=0.0, max=1.0, step=0.05, optional=True,
+                               tooltip="Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."),
+                io.String.Input("positive_prompt", multiline=True, force_input=True, optional=True),
+            ],
+            outputs=[
+                PipeLine.Output(),
+                io.Image.Output(),
+            ],
+        )
 
-    RETURN_TYPES = ("PIPE_LINE", "IMAGE")
-    RETURN_NAMES = ("PIPE", "IMAGE")
-    FUNCTION = "do_detail_core"
-    CATEGORY = "SAX/Bridge/Enhance"
-
-    def do_detail_core(self, pipe, denoise, cycle, crop_factor, noise_mask_feather, blend_feather,
-                       mask=None, steps_override=0, cfg_override=0.0,
-                       guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
-                       positive_prompt=None):
+    @classmethod
+    def execute(cls, pipe, denoise, cycle, crop_factor, noise_mask_feather, blend_feather,
+                mask=None, steps_override=0, cfg_override=0.0,
+                guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
+                positive_prompt=None) -> io.NodeOutput:
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
-            return (pipe, p["images"] if p["images"] is not None else pipe.get("images"))
+            return io.NodeOutput(pipe, p["images"] if p["images"] is not None else pipe.get("images"))
         _ensure_negative(p)
 
         steps_eff = steps_override if steps_override > 0 else p["steps"]
@@ -403,80 +399,71 @@ class SAX_Bridge_Detailer:
         )
 
         if result_images is None:
-            return (pipe, p["images"] if p["images"] is not None else pipe.get("images"))
+            return io.NodeOutput(pipe, p["images"] if p["images"] is not None else pipe.get("images"))
 
         new_pipe = pipe.copy()
         new_pipe["images"] = result_images
         new_pipe["positive"] = positive
-        return (new_pipe, result_images)
+        return io.NodeOutput(new_pipe, result_images)
 
 
-class SAX_Bridge_Detailer_Enhanced:
+class SAX_Bridge_Detailer_Enhanced(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "pipe": ("PIPE_LINE",),
-                # Sampling
-                "denoise": ("FLOAT", {"default": 0.45, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "denoise_decay": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
-                "cycle": ("INT", {"default": 1, "min": 1, "max": 10, "step": 1}),
-                # Mask & Blend
-                "crop_factor": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 10.0, "step": 0.1}),
-                "noise_mask_feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
-                "blend_feather": ("INT", {"default": 5, "min": 0, "max": 100, "step": 1}),
-                # Pixel Enhancement
-                "shadow_enhance": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "shadow_decay": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05}),
-                "edge_weight": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
-                "edge_blur_sigma": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.1}),
-                # Latent Enhancement
-                "latent_noise_intensity": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 2.0, "step": 0.01}),
-                "noise_type": (["gaussian", "uniform"],),
-                # Context Blur
-                "context_blur_sigma": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 64.0, "step": 0.5,
-                                                  "tooltip": "Blurs the context area near the mask boundary to suppress text artifacts. 0=disabled."}),
-                "context_blur_radius": ("INT", {"default": 48, "min": 0, "max": 256, "step": 4,
-                                                "tooltip": "Limits the blur target to a ring N px outside the mask boundary. 0=entire context."}),
-            },
-            "optional": {
-                "mask": ("MASK",),
-                # Override
-                "steps_override": ("INT", {"default": 0, "min": 0, "max": 200,
-                                           "tooltip": "0 = inherit steps from loader_settings. Values ≥1 override it."}),
-                "cfg_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5,
-                                           "tooltip": "0.0 = inherit CFG from loader_settings. Values > 0 override it."}),
-                # Guidance
-                "guidance_mode": (_ALL_MODES, {
-                    "default": "off",
-                    "tooltip": "CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both, post_fdg=low CFG."}),
-                "guidance_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
-                                                "tooltip": "Guidance effect intensity. 0.0=none, 1.0=maximum."}),
-                "pag_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                           "tooltip": "Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."}),
-                # Post-processing
-                # Prompt (always last)
-                "positive_prompt": ("STRING", {"multiline": True}),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Detailer_Enhanced",
+            display_name="SAX Enhanced Detailer",
+            category="SAX/Bridge/Enhance",
+            inputs=[
+                PipeLine.Input("pipe"),
+                io.Float.Input("denoise", default=0.45, min=0.0, max=1.0, step=0.01),
+                io.Float.Input("denoise_decay", default=0.0, min=0.0, max=1.0, step=0.05),
+                io.Int.Input("cycle", default=1, min=1, max=10, step=1),
+                io.Float.Input("crop_factor", default=3.0, min=1.0, max=10.0, step=0.1),
+                io.Int.Input("noise_mask_feather", default=5, min=0, max=100, step=1),
+                io.Int.Input("blend_feather", default=5, min=0, max=100, step=1),
+                io.Float.Input("shadow_enhance", default=0.0, min=0.0, max=1.0, step=0.01),
+                io.Float.Input("shadow_decay", default=0.25, min=0.0, max=1.0, step=0.05),
+                io.Float.Input("edge_weight", default=0.0, min=0.0, max=1.0, step=0.05),
+                io.Float.Input("edge_blur_sigma", default=1.0, min=0.1, max=10.0, step=0.1),
+                io.Float.Input("latent_noise_intensity", default=0.1, min=0.0, max=2.0, step=0.01),
+                io.Combo.Input("noise_type", options=["gaussian", "uniform"]),
+                io.Float.Input("context_blur_sigma", default=0.0, min=0.0, max=64.0, step=0.5,
+                               tooltip="Blurs the context area near the mask boundary to suppress text artifacts. 0=disabled."),
+                io.Int.Input("context_blur_radius", default=48, min=0, max=256, step=4,
+                             tooltip="Limits the blur target to a ring N px outside the mask boundary. 0=entire context."),
+                io.Mask.Input("mask", optional=True),
+                io.Int.Input("steps_override", default=0, min=0, max=200, optional=True,
+                             tooltip="0 = inherit steps from loader_settings. Values ≥1 override it."),
+                io.Float.Input("cfg_override", default=0.0, min=0.0, max=100.0, step=0.5, optional=True,
+                               tooltip="0.0 = inherit CFG from loader_settings. Values > 0 override it."),
+                io.Combo.Input("guidance_mode", options=_ALL_MODES, default="off", optional=True,
+                               tooltip="CFG guidance enhancement. agc=spike suppression, fdg=detail emphasis, agc+fdg=both, post_fdg=low CFG."),
+                io.Float.Input("guidance_strength", default=0.5, min=0.0, max=1.0, step=0.05, optional=True,
+                               tooltip="Guidance effect intensity. 0.0=none, 1.0=maximum."),
+                io.Float.Input("pag_strength", default=0.0, min=0.0, max=1.0, step=0.05, optional=True,
+                               tooltip="Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."),
+                io.String.Input("positive_prompt", multiline=True, force_input=True, optional=True),
+            ],
+            outputs=[
+                PipeLine.Output(),
+                io.Image.Output(),
+            ],
+        )
 
-    RETURN_TYPES = ("PIPE_LINE", "IMAGE")
-    RETURN_NAMES = ("PIPE", "IMAGE")
-    FUNCTION = "do_enhanced_detail"
-    CATEGORY = "SAX/Bridge/Enhance"
-
-    def do_enhanced_detail(self, pipe, denoise, denoise_decay, cycle,
-                           crop_factor, noise_mask_feather, blend_feather,
-                           shadow_enhance, shadow_decay, edge_weight, edge_blur_sigma,
-                           latent_noise_intensity, noise_type,
-                           context_blur_sigma, context_blur_radius,
-                           mask=None, steps_override=0, cfg_override=0.0,
-                           guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
-                           positive_prompt=None):
+    @classmethod
+    def execute(cls, pipe, denoise, denoise_decay, cycle,
+                crop_factor, noise_mask_feather, blend_feather,
+                shadow_enhance, shadow_decay, edge_weight, edge_blur_sigma,
+                latent_noise_intensity, noise_type,
+                context_blur_sigma, context_blur_radius,
+                mask=None, steps_override=0, cfg_override=0.0,
+                guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
+                positive_prompt=None) -> io.NodeOutput:
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
                 or p["positive"] is None:
-            return (pipe, p["images"] if p["images"] is not None else pipe.get("images"))
+            return io.NodeOutput(pipe, p["images"] if p["images"] is not None else pipe.get("images"))
         _ensure_negative(p)
 
         steps_eff = steps_override if steps_override > 0 else p["steps"]
@@ -503,20 +490,9 @@ class SAX_Bridge_Detailer_Enhanced:
         )
 
         if result_images is None:
-            return (pipe, p["images"] if p["images"] is not None else pipe.get("images"))
+            return io.NodeOutput(pipe, p["images"] if p["images"] is not None else pipe.get("images"))
 
         new_pipe = pipe.copy()
         new_pipe["images"] = result_images
         new_pipe["positive"] = positive
-        return (new_pipe, result_images)
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Detailer": SAX_Bridge_Detailer,
-    "SAX_Bridge_Detailer_Enhanced": SAX_Bridge_Detailer_Enhanced,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Detailer": "SAX Detailer",
-    "SAX_Bridge_Detailer_Enhanced": "SAX Enhanced Detailer",
-}
+        return io.NodeOutput(new_pipe, result_images)

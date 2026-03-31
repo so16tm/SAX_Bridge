@@ -184,7 +184,7 @@ def _resolve_lora_name(name):
     return None
 
 
-class SAX_Bridge_Prompt:
+class SAX_Bridge_Prompt(io.ComfyNode):
     """
     Impact Pack の ImpactWildcardEncode を改良したノード。
     - Pipe 方式の入出力（Easy-Use 親和性）
@@ -195,7 +195,7 @@ class SAX_Bridge_Prompt:
     """
 
     @classmethod
-    def INPUT_TYPES(s):
+    def define_schema(cls) -> io.Schema:
         wildcard_list = ["Select the Wildcard to add to the text"]
         try:
             import impact.wildcards
@@ -205,31 +205,31 @@ class SAX_Bridge_Prompt:
         except Exception:
             pass
 
-        return {
-            "required": {
-                "pipe": ("PIPE_LINE",),
-                "wildcard_text": (
-                    "STRING",
-                    {
-                        "multiline": True,
-                        "dynamicPrompts": False,
-                        "tooltip": "Enter your prompt using wildcard syntax. LoRA syntax and BREAK syntax are also supported.",
-                    },
+        return io.Schema(
+            node_id="SAX_Bridge_Prompt",
+            display_name="SAX Prompt",
+            category="SAX/Bridge/Prompt",
+            inputs=[
+                PipeLine.Input("pipe"),
+                io.String.Input(
+                    "wildcard_text",
+                    multiline=True,
+                    tooltip="Enter your prompt using wildcard syntax. LoRA syntax and BREAK syntax are also supported.",
                 ),
-                "select_to_add_lora": (
-                    ["Select the LoRA to add to the text"]
-                    + folder_paths.get_filename_list("loras"),
+                io.Combo.Input(
+                    "select_to_add_lora",
+                    options=["Select the LoRA to add to the text"] + folder_paths.get_filename_list("loras"),
                 ),
-                "select_to_add_wildcard": (wildcard_list,),
-            },
-        }
+                io.Combo.Input("select_to_add_wildcard", options=wildcard_list),
+            ],
+            outputs=[
+                PipeLine.Output(display_name="PIPE"),
+                io.String.Output(display_name="POPULATED_TEXT"),
+            ],
+        )
 
-    CATEGORY = "SAX/Bridge/Prompt"
-    RETURN_TYPES = ("PIPE_LINE", "STRING")
-    RETURN_NAMES = ("PIPE", "POPULATED_TEXT")
-    FUNCTION = "doit"
-
-    def doit(self, pipe, wildcard_text, **kwargs):
+    @classmethod
+    def execute(cls, pipe, wildcard_text, **kwargs) -> io.NodeOutput:
         wildcards = _get_impact_wildcards()
 
         model = pipe.get("model")
@@ -273,16 +273,7 @@ class SAX_Bridge_Prompt:
                 "positive": clean_text,
             }
 
-        return (new_pipe, populated)
-
-
-NODE_CLASS_MAPPINGS = {
-    "SAX_Bridge_Prompt": SAX_Bridge_Prompt,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SAX_Bridge_Prompt": "SAX Prompt",
-}
+        return io.NodeOutput(new_pipe, populated)
 
 
 class SAX_Bridge_Prompt_Concat(io.ComfyNode):
