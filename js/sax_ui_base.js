@@ -1359,7 +1359,13 @@ export function makeSourceListWidget(spec) {
 
     function rebuildAllSources(node, preDownstream = null) {
         const savedSources = [..._getSources(node)];
-        const downstream   = preDownstream ?? _captureDownstream(node);
+        const autoHints = hasOutputSlots && !node._rebuildHints;
+        if (autoHints) {
+            node._rebuildHints = new Map(
+                savedSources.map(s => [s.sourceId, { enabledSlots: s.enabledSlots, slotCount: s.slotCount }])
+            );
+        }
+        const downstream = preDownstream ?? _captureDownstream(node);
 
         unhideSourceLinks(node);
         for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
@@ -1378,6 +1384,7 @@ export function makeSourceListWidget(spec) {
         }
 
         _restoreDownstream(node, downstream);
+        if (autoHints) node._rebuildHints = null;
     }
 
     function swapSources(node, si, sj) {
