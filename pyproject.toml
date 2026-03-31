@@ -12,6 +12,9 @@ wildcards = ["comfyui-impact-pack"]
 [project.urls]
 Repository = "https://github.com/so16tm/SAX_Bridge"
 
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+
 [tool.comfy]
 PublisherId = "so16tm"
 DisplayName = "SAX Bridge"

@@ -1,0 +1,291 @@
+{
+  "id": "test-03-guidance",
+  "revision": 0,
+  "last_node_id": 16,
+  "last_link_id": 16,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Loader",
+      "pos": [200, 400],
+      "size": [220, 440],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        { "name": "PIPE", "type": "PIPE_LINE", "links": [1] },
+        { "name": "SEED", "type": "INT", "links": null }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Loader" },
+      "widgets_values": [
+        "CHANGE_ME.safetensors", -2, "baked_vae", "None", 1, false,
+        42, "fixed", 20, 7, "euler", "normal", 1, 512, 512, 1
+      ]
+    },
+    {
+      "id": 2,
+      "type": "SAX_Bridge_Prompt",
+      "pos": [470, 400],
+      "size": [240, 160],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        { "name": "pipe", "type": "PIPE_LINE", "link": 1 }
+      ],
+      "outputs": [
+        { "name": "PIPE", "type": "PIPE_LINE", "links": [2, 4, 6, 8, 10, 12] },
+        { "name": "POPULATED_TEXT", "type": "STRING", "links": null }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Prompt" },
+      "widgets_values": [
+        "a girl, upper body, looking at viewer, masterpiece",
+        "Select the LoRA to add to the text",
+        "Select the Wildcard to add to the text"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "SAX_Bridge_Guidance",
+      "pos": [760, 50],
+      "size": [220, 120],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 2 }],
+      "outputs": [{ "name": "PIPE_LINE", "type": "PIPE_LINE", "links": [3] }],
+      "properties": { "Node name for S&R": "SAX_Bridge_Guidance" },
+      "title": "Guidance (off)",
+      "widgets_values": ["off", 0.5, 0.0]
+    },
+    {
+      "id": 4,
+      "type": "SAX_Bridge_KSampler",
+      "pos": [1030, 50],
+      "size": [210, 80],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 3 }],
+      "outputs": [
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": null },
+        { "name": "IMAGE", "type": "IMAGE", "links": [14] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_KSampler" },
+      "widgets_values": [true]
+    },
+    {
+      "id": 14,
+      "type": "PreviewImage",
+      "pos": [1290, 50],
+      "size": [250, 250],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [{ "name": "images", "type": "IMAGE", "link": 14 }],
+      "outputs": [],
+      "properties": { "Node name for S&R": "PreviewImage" },
+      "title": "C-1: off",
+      "widgets_values": []
+    },
+    {
+      "id": 5,
+      "type": "SAX_Bridge_Guidance",
+      "pos": [760, 220],
+      "size": [220, 120],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 4 }],
+      "outputs": [{ "name": "PIPE_LINE", "type": "PIPE_LINE", "links": [5] }],
+      "properties": { "Node name for S&R": "SAX_Bridge_Guidance" },
+      "title": "Guidance (agc)",
+      "widgets_values": ["agc", 0.5, 0.0]
+    },
+    {
+      "id": 6,
+      "type": "SAX_Bridge_KSampler",
+      "pos": [1030, 220],
+      "size": [210, 80],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 5 }],
+      "outputs": [
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": null },
+        { "name": "IMAGE", "type": "IMAGE", "links": [15] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_KSampler" },
+      "widgets_values": [true]
+    },
+    {
+      "id": 15,
+      "type": "PreviewImage",
+      "pos": [1290, 220],
+      "size": [250, 250],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [{ "name": "images", "type": "IMAGE", "link": 15 }],
+      "outputs": [],
+      "properties": { "Node name for S&R": "PreviewImage" },
+      "title": "C-1: agc",
+      "widgets_values": []
+    },
+    {
+      "id": 7,
+      "type": "SAX_Bridge_Guidance",
+      "pos": [760, 390],
+      "size": [220, 120],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 6 }],
+      "outputs": [{ "name": "PIPE_LINE", "type": "PIPE_LINE", "links": [7] }],
+      "properties": { "Node name for S&R": "SAX_Bridge_Guidance" },
+      "title": "Guidance (fdg)",
+      "widgets_values": ["fdg", 0.5, 0.0]
+    },
+    {
+      "id": 8,
+      "type": "SAX_Bridge_KSampler",
+      "pos": [1030, 390],
+      "size": [210, 80],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 7 }],
+      "outputs": [
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": null },
+        { "name": "IMAGE", "type": "IMAGE", "links": [16] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_KSampler" },
+      "widgets_values": [true]
+    },
+    {
+      "id": 16,
+      "type": "PreviewImage",
+      "pos": [1290, 390],
+      "size": [250, 250],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [{ "name": "images", "type": "IMAGE", "link": 16 }],
+      "outputs": [],
+      "properties": { "Node name for S&R": "PreviewImage" },
+      "title": "C-1: fdg",
+      "widgets_values": []
+    },
+    {
+      "id": 9,
+      "type": "SAX_Bridge_Guidance",
+      "pos": [760, 560],
+      "size": [220, 120],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 8 }],
+      "outputs": [{ "name": "PIPE_LINE", "type": "PIPE_LINE", "links": [9] }],
+      "properties": { "Node name for S&R": "SAX_Bridge_Guidance" },
+      "title": "Guidance (agc+fdg)",
+      "widgets_values": ["agc+fdg", 0.5, 0.0]
+    },
+    {
+      "id": 10,
+      "type": "SAX_Bridge_KSampler",
+      "pos": [1030, 560],
+      "size": [210, 80],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 9 }],
+      "outputs": [
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": null },
+        { "name": "IMAGE", "type": "IMAGE", "links": [13] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_KSampler" },
+      "widgets_values": [true]
+    },
+    {
+      "id": 13,
+      "type": "PreviewImage",
+      "pos": [1290, 560],
+      "size": [250, 250],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [{ "name": "images", "type": "IMAGE", "link": 13 }],
+      "outputs": [],
+      "properties": { "Node name for S&R": "PreviewImage" },
+      "title": "C-1: agc+fdg",
+      "widgets_values": []
+    },
+    {
+      "id": 11,
+      "type": "SAX_Bridge_Guidance",
+      "pos": [760, 730],
+      "size": [220, 120],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 10 }],
+      "outputs": [{ "name": "PIPE_LINE", "type": "PIPE_LINE", "links": [11] }],
+      "properties": { "Node name for S&R": "SAX_Bridge_Guidance" },
+      "title": "Guidance (post_fdg)",
+      "widgets_values": ["post_fdg", 0.5, 0.0]
+    },
+    {
+      "id": 12,
+      "type": "SAX_Bridge_KSampler",
+      "pos": [1030, 730],
+      "size": [210, 80],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 11 }],
+      "outputs": [
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": null },
+        { "name": "IMAGE", "type": "IMAGE", "links": [12] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_KSampler" },
+      "widgets_values": [true]
+    },
+    {
+      "id": 100,
+      "type": "PreviewImage",
+      "pos": [1290, 730],
+      "size": [250, 250],
+      "flags": {},
+      "order": 100,
+      "mode": 0,
+      "inputs": [{ "name": "images", "type": "IMAGE", "link": 12 }],
+      "outputs": [],
+      "properties": { "Node name for S&R": "PreviewImage" },
+      "title": "C-1: post_fdg",
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "PIPE_LINE"],
+    [2, 2, 0, 3, 0, "PIPE_LINE"],
+    [3, 3, 0, 4, 0, "PIPE_LINE"],
+    [4, 2, 0, 5, 0, "PIPE_LINE"],
+    [5, 5, 0, 6, 0, "PIPE_LINE"],
+    [6, 2, 0, 7, 0, "PIPE_LINE"],
+    [7, 7, 0, 8, 0, "PIPE_LINE"],
+    [8, 2, 0, 9, 0, "PIPE_LINE"],
+    [9, 9, 0, 10, 0, "PIPE_LINE"],
+    [10, 2, 0, 11, 0, "PIPE_LINE"],
+    [11, 11, 0, 12, 0, "PIPE_LINE"],
+    [12, 12, 1, 100, 0, "IMAGE"],
+    [13, 10, 1, 13, 0, "IMAGE"],
+    [14, 4, 1, 14, 0, "IMAGE"],
+    [15, 6, 1, 15, 0, "IMAGE"],
+    [16, 8, 1, 16, 0, "IMAGE"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": { "ds": { "scale": 0.7, "offset": [0, 0] } },
+  "version": 0.4
+}

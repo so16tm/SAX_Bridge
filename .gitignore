@@ -10,5 +10,5 @@ pyrightconfig.json
 # 内部管理ドキュメント（公開リポジトリではGitHub Issuesへ移行予定）
 ISSUES.md
 
-# テストケース（ローカル管理）
-.tests/
+# テスト一時ファイル
+.pytest_cache/

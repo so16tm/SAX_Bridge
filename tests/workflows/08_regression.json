@@ -1,0 +1,238 @@
+{
+  "id": "test-08-regression",
+  "revision": 0,
+  "last_node_id": 14,
+  "last_link_id": 15,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Loader",
+      "pos": [200, 300],
+      "size": [220, 440],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        { "name": "PIPE", "type": "PIPE_LINE", "links": [1] },
+        { "name": "SEED", "type": "INT", "links": null }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Loader" },
+      "title": "Loader (scheduler=karras, batch=2)",
+      "widgets_values": [
+        "CHANGE_ME.safetensors", -2, "baked_vae", "None", 1, false,
+        42, "fixed", 20, 7, "euler", "karras", 1, 512, 512, 2
+      ]
+    },
+    {
+      "id": 2,
+      "type": "SAX_Bridge_Prompt",
+      "pos": [470, 300],
+      "size": [240, 160],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 1 }],
+      "outputs": [
+        { "name": "PIPE", "type": "PIPE_LINE", "links": [2] },
+        { "name": "POPULATED_TEXT", "type": "STRING", "links": [15] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Prompt" },
+      "widgets_values": [
+        "a girl, upper body, looking at viewer, masterpiece",
+        "Select the LoRA to add to the text",
+        "Select the Wildcard to add to the text"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "SAX_Bridge_Guidance",
+      "pos": [760, 300],
+      "size": [220, 120],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 2 }],
+      "outputs": [{ "name": "PIPE_LINE", "type": "PIPE_LINE", "links": [3] }],
+      "properties": { "Node name for S&R": "SAX_Bridge_Guidance" },
+      "widgets_values": ["agc+fdg", 0.5, 0.0]
+    },
+    {
+      "id": 4,
+      "type": "SAX_Bridge_KSampler",
+      "pos": [1030, 300],
+      "size": [210, 80],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [{ "name": "pipe", "type": "PIPE_LINE", "link": 3 }],
+      "outputs": [
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": [4, 7, 10] },
+        { "name": "IMAGE", "type": "IMAGE", "links": null }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_KSampler" },
+      "widgets_values": [true]
+    },
+    {
+      "id": 5,
+      "type": "SAX_Bridge_Detailer",
+      "pos": [1290, 50],
+      "size": [260, 220],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        { "name": "pipe", "type": "PIPE_LINE", "link": 4 },
+        { "name": "mask", "type": "MASK", "link": null },
+        { "name": "steps_override", "type": "INT", "link": null },
+        { "name": "cfg_override", "type": "FLOAT", "link": null },
+        { "name": "guidance_mode", "type": "COMBO", "link": null },
+        { "name": "guidance_strength", "type": "FLOAT", "link": null },
+        { "name": "pag_strength", "type": "FLOAT", "link": null },
+        { "name": "positive_prompt", "type": "STRING", "link": null }
+      ],
+      "outputs": [
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": null },
+        { "name": "IMAGE", "type": "IMAGE", "links": [5] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Detailer" },
+      "title": "H-1: Detailer (karras)",
+      "widgets_values": [0.45, 1, 3.0, 5, 5]
+    },
+    {
+      "id": 6,
+      "type": "SAX_Bridge_Output",
+      "pos": [1600, 50],
+      "size": [300, 450],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        { "name": "pipe", "type": "PIPE_LINE", "link": null },
+        { "name": "image", "type": "IMAGE", "link": 5 },
+        { "name": "prompt_text", "type": "STRING", "link": 15 }
+      ],
+      "outputs": [
+        { "name": "IMAGE", "type": "IMAGE", "links": [6] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Output" },
+      "title": "H-1: Output (metadata check)",
+      "widgets_values": [
+        true, "{date:%Y-%m-%d}", "{datetime:%Y%m%d_%H%M%S}",
+        1, 3, "suffix", "png", 90, false, 0, 1, false
+      ]
+    },
+    {
+      "id": 14,
+      "type": "PreviewImage",
+      "pos": [1950, 50],
+      "size": [250, 250],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [{ "name": "images", "type": "IMAGE", "link": 6 }],
+      "outputs": [],
+      "properties": { "Node name for S&R": "PreviewImage" },
+      "title": "H-1: Detailer result",
+      "widgets_values": []
+    },
+    {
+      "id": 8,
+      "type": "SAX_Bridge_Detailer_Enhanced",
+      "pos": [1290, 350],
+      "size": [260, 450],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        { "name": "pipe", "type": "PIPE_LINE", "link": 7 },
+        { "name": "mask", "type": "MASK", "link": null },
+        { "name": "steps_override", "type": "INT", "link": null },
+        { "name": "cfg_override", "type": "FLOAT", "link": null },
+        { "name": "guidance_mode", "type": "COMBO", "link": null },
+        { "name": "guidance_strength", "type": "FLOAT", "link": null },
+        { "name": "pag_strength", "type": "FLOAT", "link": null },
+        { "name": "positive_prompt", "type": "STRING", "link": null }
+      ],
+      "outputs": [
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": null },
+        { "name": "IMAGE", "type": "IMAGE", "links": [9] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Detailer_Enhanced" },
+      "title": "H-1: Enhanced Detailer (karras)",
+      "widgets_values": [
+        0.45, 0.3, 2, 3.0, 5, 5,
+        0.3, 0.25, 0.2, 1.0,
+        0.1, "gaussian", 8.0, 48
+      ]
+    },
+    {
+      "id": 9,
+      "type": "PreviewImage",
+      "pos": [1600, 350],
+      "size": [250, 250],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [{ "name": "images", "type": "IMAGE", "link": 9 }],
+      "outputs": [],
+      "properties": { "Node name for S&R": "PreviewImage" },
+      "title": "H-1: Enhanced result",
+      "widgets_values": []
+    },
+    {
+      "id": 11,
+      "type": "SAX_Bridge_Output",
+      "pos": [1290, 870],
+      "size": [300, 450],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        { "name": "pipe", "type": "PIPE_LINE", "link": 10 },
+        { "name": "image", "type": "IMAGE", "link": null },
+        { "name": "prompt_text", "type": "STRING", "link": null }
+      ],
+      "outputs": [
+        { "name": "IMAGE", "type": "IMAGE", "links": [12] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Output" },
+      "title": "H-3: Output (batch=2, pipe fallback)",
+      "widgets_values": [
+        true, "{date:%Y-%m-%d}", "{datetime:%Y%m%d_%H%M%S}",
+        1, 3, "suffix", "webp", 90, false, 0, 1, false
+      ]
+    },
+    {
+      "id": 12,
+      "type": "SAX_Bridge_Image_Preview",
+      "pos": [1640, 870],
+      "size": [300, 400],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [{ "name": "images", "type": "IMAGE", "link": 12 }],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Image_Preview" },
+      "title": "H-3: batch preview",
+      "widgets_values": [200, 2, "low"]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "PIPE_LINE"],
+    [2, 2, 0, 3, 0, "PIPE_LINE"],
+    [3, 3, 0, 4, 0, "PIPE_LINE"],
+    [4, 4, 0, 5, 0, "PIPE_LINE"],
+    [5, 5, 1, 6, 1, "IMAGE"],
+    [6, 6, 0, 14, 0, "IMAGE"],
+    [7, 4, 0, 8, 0, "PIPE_LINE"],
+    [9, 8, 1, 9, 0, "IMAGE"],
+    [10, 4, 0, 11, 0, "PIPE_LINE"],
+    [12, 11, 0, 12, 0, "IMAGE"],
+    [15, 2, 1, 6, 2, "STRING"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": { "ds": { "scale": 0.6, "offset": [0, 0] } },
+  "version": 0.4
+}
