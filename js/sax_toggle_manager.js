@@ -225,7 +225,7 @@ const BACK_POS_STYLES = {
 
 let _backBtn          = null;
 let _managerNode      = null;
-let _sceneFlashUntil  = 0;
+const _sceneFlashUntil = new WeakMap();
 let _capturingBackKey = false;
 
 function exitToRootGraph() {
@@ -504,7 +504,7 @@ function makeSceneWidget(node) {
                 canPrev ? t.border    : t.menuSecBg);
             txt(ctx, "◀", p.prevX + 9, midY, canPrev ? t.inputText : t.contentBg, "center", 9);
 
-            const flashing   = Date.now() < _sceneFlashUntil;
+            const flashing   = Date.now() < (_sceneFlashUntil.get(node) ?? 0);
             const sceneColor = flashing ? SAX_COLORS.flash : t.fg;
             ctx.save();
             ctx.beginPath();
@@ -541,12 +541,12 @@ function makeSceneWidget(node) {
 
             if (inX(pos_, p.prevX, 18) && idx > 0) {
                 config.currentScene = scenes[idx - 1];
-                _sceneFlashUntil = Date.now() + 500;
+                _sceneFlashUntil.set(node, Date.now() + 500);
                 saveConfig(node, config); applyScene(config); return true;
             }
             if (inX(pos_, p.nextX, 18) && idx < scenes.length - 1) {
                 config.currentScene = scenes[idx + 1];
-                _sceneFlashUntil = Date.now() + 500;
+                _sceneFlashUntil.set(node, Date.now() + 500);
                 saveConfig(node, config); applyScene(config); return true;
             }
             if (inX(pos_, p.gearX, 24)) { showSceneManager(node); return true; }
