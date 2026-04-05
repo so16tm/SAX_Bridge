@@ -2,7 +2,7 @@ import logging
 
 from comfy_api.latest import io
 
-from .cache_impl import apply_deepcache, apply_tgate
+from .cache_impl import apply_deepcache
 from .io_types import PipeLine
 
 logger = logging.getLogger("SAX_Bridge")
@@ -15,7 +15,7 @@ class SAX_Bridge_Cache(io.ComfyNode):
             node_id="SAX_Bridge_Cache",
             display_name="SAX Cache",
             category="SAX/Bridge/Utility",
-            description="Applies DeepCache / TGate to the model in the pipe, accelerating all downstream processing (KSampler, Detailer).",
+            description="Applies DeepCache to the model in the pipe, accelerating all downstream processing (KSampler, Detailer).",
             inputs=[
                 PipeLine.Input("pipe"),
                 io.Boolean.Input("enabled", default=True,
@@ -24,10 +24,6 @@ class SAX_Bridge_Cache(io.ComfyNode):
                              tooltip="1=DeepCache disabled. Runs full computation once every N steps; remaining steps use the cache."),
                 io.Float.Input("deepcache_start_percent", default=0.2, min=0.0, max=1.0, step=0.01,
                                tooltip="Denoising progress ratio at which DeepCache kicks in. Early steps run normally to preserve quality."),
-                io.Boolean.Input("tgate_enabled", default=False, optional=True,
-                                 tooltip="When True, also applies TGate (cross-attention caching)."),
-                io.Float.Input("tgate_gate_step", default=0.5, min=0.0, max=1.0, step=0.01, optional=True,
-                               tooltip="Cache start boundary as a percentage. 0.5 = cache is used from 50% onward."),
             ],
             outputs=[
                 PipeLine.Output("PIPE"),
@@ -41,8 +37,6 @@ class SAX_Bridge_Cache(io.ComfyNode):
         enabled,
         deepcache_interval,
         deepcache_start_percent,
-        tgate_enabled=False,
-        tgate_gate_step=0.5,
     ) -> io.NodeOutput:
         if not enabled:
             return io.NodeOutput(pipe)
@@ -63,15 +57,6 @@ class SAX_Bridge_Cache(io.ComfyNode):
                 f"[SAX_Bridge] Cache: DeepCache applied (interval={deepcache_interval}, "
                 f"start={deepcache_start_percent:.0%})"
             )
-
-        if tgate_enabled:
-            model = apply_tgate(
-                model=model,
-                gate_step_percent=tgate_gate_step,
-                start_percent=0.0,
-                end_percent=1.0,
-            )
-            logger.info(f"[SAX_Bridge] Cache: TGate applied (gate_step={tgate_gate_step:.0%})")
 
         new_pipe = pipe.copy()
         new_pipe["model"] = model
