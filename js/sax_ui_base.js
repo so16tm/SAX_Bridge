@@ -1551,18 +1551,33 @@ export function makeSourceListWidget(spec) {
                                 srcNode.pos[0] + (srcNode.size?.[0] ?? 0) / 2,
                                 srcNode.pos[1] + (srcNode.size?.[1] ?? 0) / 2
                             );
-                            setTimeout(() => {
-                                app.canvas.deselectAllNodes?.();
-                                app.canvas.selected_nodes = { [srcNode.id]: srcNode };
-                                srcNode.is_selected = true;
+                            const jumpTimer = setTimeout(() => {
+                                for (const n of app.graph._nodes) n.is_selected = false;
+                                if (typeof app.canvas.selectNode === "function") {
+                                    app.canvas.selectNode(srcNode, false);
+                                } else {
+                                    app.canvas.selected_nodes = { [srcNode.id]: srcNode };
+                                    srcNode.is_selected = true;
+                                }
                                 app.canvas.setDirty(true, true);
                             }, 100);
                             showReturnButton(() => {
+                                clearTimeout(jumpTimer);
                                 srcNode.is_selected = false;
                                 clearPickerHighlight();
                                 app.canvas.ds.offset[0] = savedOffset[0];
                                 app.canvas.ds.offset[1] = savedOffset[1];
-                                app.canvas.setDirty(true, true);
+                                setTimeout(() => {
+                                    if (!app.graph.getNodeById(mouseNode.id)) return;
+                                    for (const n of app.graph._nodes) n.is_selected = false;
+                                    if (typeof app.canvas.selectNode === "function") {
+                                        app.canvas.selectNode(mouseNode, false);
+                                    } else {
+                                        app.canvas.selected_nodes = { [mouseNode.id]: mouseNode };
+                                        mouseNode.is_selected = true;
+                                    }
+                                    app.canvas.setDirty(true, true);
+                                }, 100);
                             });
                         }).catch(e => console.warn(`[${widgetName}] panCanvasTo error:`, e));
                     }

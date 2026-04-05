@@ -297,17 +297,23 @@ function showBackButton() {
 function _highlightTarget(target) {
     if (!target) return;
     setTimeout(() => {
-        app.canvas.deselectAllNodes?.();
-        app.canvas.selected_nodes = { [target.id]: target };
-        target.is_selected = true;
+        if (!app.graph.getNodeById(target.id)) return;
+        for (const n of app.graph._nodes) n.is_selected = false;
+        if (typeof app.canvas.selectNode === "function") {
+            app.canvas.selectNode(target, false);
+        } else {
+            app.canvas.selected_nodes = { [target.id]: target };
+            target.is_selected = true;
+        }
         app.canvas.setDirty(true, true);
     }, 100);
 }
 
-function navigateToItem(item) {
+function navigateToItem(item, sourceNode = null) {
     try {
         const savedOffset = [...app.canvas.ds.offset];
         let jumped = false;
+        let jumpNode = null;
         if (item.type === "node" || item.type === "widget") {
             const nId = item.type === "widget" ? item.nodeId : item.id;
             const n = app.graph.getNodeById(nId);
@@ -317,6 +323,7 @@ function navigateToItem(item) {
                     n.pos[1] + (n.size?.[1] ?? 0) / 2
                 );
                 _highlightTarget(n);
+                jumpNode = n;
                 jumped = true;
             }
         } else if (item.type === "group") {
@@ -328,10 +335,12 @@ function navigateToItem(item) {
         }
         if (jumped) {
             showReturnButton(() => {
+                if (jumpNode) jumpNode.is_selected = false;
                 clearPickerHighlight();
                 app.canvas.ds.offset[0] = savedOffset[0];
                 app.canvas.ds.offset[1] = savedOffset[1];
-                app.canvas.setDirty(true, true);
+                if (sourceNode) _highlightTarget(sourceNode);
+                else app.canvas.setDirty(true, true);
             });
         }
     } catch (e) {
@@ -869,7 +878,7 @@ function makeToggleWidget(node, item, index) {
             }
 
             if (inX(pos, layout.contentX, layout.contentW)) {
-                navigateToItem(item);
+                navigateToItem(item, node);
                 return true;
             }
 
