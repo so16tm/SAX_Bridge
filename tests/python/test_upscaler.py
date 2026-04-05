@@ -105,19 +105,22 @@ class TestUpscalerExecute:
                 pipe, upscale_model_name="None", method="lanczos",
                 scale_by=1.1, denoise=0.0,
             )
-        # 16 → 17 → align 16 == 元サイズなので no-op ブランチ（images がそのまま）
+        # 16 → 17 → align 16 == 元サイズなので no-op ブランチ（upscale は呼ばれない）
         assert result[1].shape == (1, 16, 16, 3)
+        mock_upscale.assert_not_called()
 
     def test_no_size_change_skips_upscale(self):
         pipe = self._make_pipe(16, 16)
         original_images = pipe["images"]
-        result = SAX_Bridge_Upscaler.execute(
-            pipe, upscale_model_name="None", method="lanczos",
-            scale_by=1.0, denoise=0.0,
-        )
-        # サイズ変更なしならそのまま（ただし clamp は通る）
+        with patch("comfy.utils.common_upscale") as mock_upscale:
+            result = SAX_Bridge_Upscaler.execute(
+                pipe, upscale_model_name="None", method="lanczos",
+                scale_by=1.0, denoise=0.0,
+            )
+        # サイズ変更なしならそのまま（ただし clamp は通る）。upscale は呼ばれない
         assert result[1].shape == (1, 16, 16, 3)
         assert torch.allclose(result[1], torch.clamp(original_images, 0.0, 1.0))
+        mock_upscale.assert_not_called()
 
     def test_output_clamped_to_valid_range(self):
         pipe = self._make_pipe(16, 16)
@@ -171,6 +174,8 @@ class TestUpscalerExecute:
         pipe["vae"].decode.assert_called_once()
         # i2i 経路で decoded が最終結果
         assert result[1].shape == decoded.shape
+        # clamp 処理後の値域を厳密に検証
+        assert result[1].min() >= 0.0 and result[1].max() <= 1.0
 
     def test_denoise_zero_skips_i2i(self):
         pipe = self._make_pipe(16, 16)
@@ -284,3 +289,9 @@ class TestUpscalerExecute:
                 scale_by=scale_by, denoise=0.0,
             )
         assert result[1].shape == (1, expected_size, expected_size, 3)
+        # common_upscale に渡された target_w / target_h がサイズ計算ロジックから導かれることを検証
+        # _pixel_upscale 呼び出し引数: (bchw, target_w, target_h, method, "disabled")
+        mock_upscale.assert_called_once()
+        args, _ = mock_upscale.call_args
+        assert args[1] == expected_size  # target_w
+        assert args[2] == expected_size  # target_h

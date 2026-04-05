@@ -48,10 +48,10 @@ class TestApplyBloom:
         assert result.shape == rgb.shape
 
     def test_bloom_brightens(self):
-        # 明部を持つ画像でブルームは輝度を増加させる
+        # 明部を持つ画像でブルームは輝度を厳密に増加させる
         rgb = torch.full((1, 3, 16, 16), 0.9)
         result = _apply_bloom(rgb, 1.0, threshold=0.5, radius=2.0)
-        assert result.mean() >= rgb.mean() - 1e-5
+        assert result.mean() > rgb.mean()
 
 
 class TestApplyVignette:
@@ -65,7 +65,8 @@ class TestApplyVignette:
     def test_zero_strength_identity(self):
         rgb = _make_rgb()
         result = _apply_vignette(rgb, 0.0)
-        assert torch.allclose(result, rgb)
+        # GPU 演算誤差を吸収する tolerance で恒等性を検証
+        assert torch.allclose(result, rgb, atol=1e-5)
 
     def test_shape_preserved(self):
         rgb = _make_rgb(2, 16, 24)
@@ -78,8 +79,10 @@ class TestApplyColorCorrection:
         rgb = torch.rand(1, 3, 16, 16)
         reference = torch.rand(1, 3, 16, 16) * 0.5 + 0.2
         result = _apply_color_correction(rgb, reference, 1.0)
-        ref_mean = reference.mean(dim=(2, 3))
-        res_mean = result.mean(dim=(2, 3))
+        # shape を明示的に揃えて broadcasting 依存を除去
+        ref_mean = reference.mean(dim=(2, 3))  # (B, C)
+        res_mean = result.mean(dim=(2, 3))  # (B, C)
+        assert ref_mean.shape == res_mean.shape
         assert torch.allclose(ref_mean, res_mean, atol=1e-4)
 
     def test_zero_strength_identity(self):
@@ -240,6 +243,7 @@ class TestFinisherExecute:
         )
         # color_correction のみ指定かつ reference なしなら all-zero チェックは通らないため
         # 新 pipe は返るが、内容は clamp 後の元画像と等価
+        assert result[0] is not pipe
         assert torch.allclose(result[1][:, :, :, :3], original_images[:, :, :, :3], atol=1e-5)
 
     @pytest.mark.parametrize("smooth,bloom,vignette,color_temp", [
