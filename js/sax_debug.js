@@ -97,5 +97,37 @@ app.registerExtension({
             this.size[1] = 1; // 再計算させる
             app.graph.setDirtyCanvas(true, true);
         };
+
+        // 右クリック → "Copy Text" でウィジェットのテキストをクリップボードにコピー
+        const origGetExtraMenuOptions = nodeType.prototype.getExtraMenuOptions;
+        nodeType.prototype.getExtraMenuOptions = function (_, options) {
+            origGetExtraMenuOptions?.apply(this, arguments);
+            const node = this;
+            options.push({
+                content: "Copy Text",
+                callback: () => {
+                    const w = node._debugTextWidget;
+                    if (!w) {
+                        console.warn("[SAX Debug] widget not found");
+                        return;
+                    }
+                    const text = w._text || "";
+                    if (navigator.clipboard) {
+                        navigator.clipboard.writeText(text)
+                            .catch(e => console.warn("[SAX Debug] Copy failed:", e));
+                    } else {
+                        // フォールバック（非 HTTPS 環境）
+                        const textarea = document.createElement("textarea");
+                        textarea.value = text;
+                        textarea.style.position = "fixed";
+                        textarea.style.left = "-9999px";
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(textarea);
+                    }
+                },
+            });
+        };
     },
 });

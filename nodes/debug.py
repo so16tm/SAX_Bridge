@@ -207,6 +207,79 @@ def _evaluate_assertion(actual: Any, mode: str, expected_raw: str) -> tuple[bool
 
 
 # ---------------------------------------------------------------------------
+# 任意型の表示用変換
+# ---------------------------------------------------------------------------
+
+def _to_display_string(value: Any) -> str:
+    """任意型の値を表示用文字列に変換する。"""
+    if value is None:
+        return "None"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    # Tensor 系（torch.Tensor / numpy.ndarray 等）
+    if hasattr(value, "shape") and hasattr(value, "dtype"):
+        return (
+            f"<{type(value).__name__} shape={tuple(value.shape)} "
+            f"dtype={value.dtype} device={getattr(value, 'device', '?')}>"
+        )
+    # Dict
+    if isinstance(value, dict):
+        return f"<dict keys={list(value.keys())}>"
+    # List/Tuple
+    if isinstance(value, (list, tuple)):
+        return f"<{type(value).__name__} len={len(value)}>"
+    # ComfyUI 系オブジェクト（内部型探索）
+    type_name = type(value).__name__
+    for attr in ("model", "cond_stage_model", "first_stage_model"):
+        if hasattr(value, attr):
+            try:
+                inner = type(getattr(value, attr)).__name__
+                return f"<{type_name} (inner: {inner})>"
+            except Exception:
+                pass
+    return f"<{type_name}>"
+
+
+# ---------------------------------------------------------------------------
+# model/clip/vae の内部型・dtype/device 探索（Inspector 用）
+# ---------------------------------------------------------------------------
+
+def _get_inner_type_name(v: Any) -> str | None:
+    """ComfyUI の各オブジェクト構造に対応した内部モデル型を取得。"""
+    for attr in ("model", "cond_stage_model", "first_stage_model"):
+        if hasattr(v, attr):
+            try:
+                return type(getattr(v, attr)).__name__
+            except Exception:
+                pass
+    return None
+
+
+def _get_dtype_device_info(v: Any) -> dict:
+    """model/clip/vae の dtype/device 情報を取得。取得できない場合は空 dict。"""
+    info: dict = {}
+    # 内部モジュールから dtype を探索
+    for inner_attr in ("model", "cond_stage_model", "first_stage_model"):
+        inner = getattr(v, inner_attr, None)
+        if inner is not None:
+            for dtype_attr in ("dtype", "manual_cast_dtype"):
+                dt = getattr(inner, dtype_attr, None)
+                if dt is not None:
+                    info["dtype"] = str(dt)
+                    break
+            break
+    # ModelPatcher.load_device / offload_device / device を探索
+    for dev_attr in ("load_device", "offload_device", "device"):
+        dev = getattr(v, dev_attr, None)
+        if dev is not None:
+            info["device"] = str(dev)
+            break
+    return info
+
+
+# ---------------------------------------------------------------------------
 # Pipe 内容のフォーマット
 # ---------------------------------------------------------------------------
 
@@ -219,10 +292,25 @@ def _format_pipe_summary(pipe: Any) -> str:
 
     lines: list[str] = []
 
-    # 主要な参照フィールド
+    # 主要な参照フィールド（型名 + 内部 model 型名 + dtype/device）
     for key in ("model", "clip", "vae"):
         v = pipe.get(key)
-        lines.append(f"{key}: {'present' if v is not None else 'None'}")
+        if v is None:
+            lines.append(f"{key}: None")
+            continue
+        type_name = type(v).__name__
+        inner_name = _get_inner_type_name(v)
+        dtype_device = _get_dtype_device_info(v)
+
+        extras = []
+        if inner_name:
+            extras.append(f"inner: {inner_name}")
+        if "dtype" in dtype_device:
+            extras.append(f"dtype={dtype_device['dtype']}")
+        if "device" in dtype_device:
+            extras.append(f"device={dtype_device['device']}")
+        detail = f"{type_name} ({', '.join(extras)})" if extras else type_name
+        lines.append(f"{key}: {detail}")
 
     # seed
     if "seed" in pipe:
@@ -263,16 +351,26 @@ def _format_pipe_summary(pipe: Any) -> str:
         else:
             lines.append(f"samples: {type(samples).__name__}")
 
-    # positive / negative
+    # positive / negative（conditioning tensor shape を含める）
     for key in ("positive", "negative"):
         v = pipe.get(key)
         if v is None:
             lines.append(f"{key}: None")
         else:
             try:
-                lines.append(f"{key}: present ({len(v)} entries)")
+                n = len(v)
+                first_shape = None
+                if n > 0 and isinstance(v[0], (list, tuple)) and len(v[0]) > 0:
+                    first = v[0][0]
+                    shape = getattr(first, "shape", None)
+                    if shape is not None:
+                        first_shape = tuple(shape)
+                if first_shape:
+                    lines.append(f"{key}: {n} entries, first tensor shape={first_shape}")
+                else:
+                    lines.append(f"{key}: {n} entries")
             except TypeError:
-                lines.append(f"{key}: present")
+                lines.append(f"{key}: {type(v).__name__}")
 
     # applied_loras
     applied = pipe.get("_applied_loras")
@@ -323,7 +421,7 @@ class SAX_Bridge_Debug_Inspector(io.ComfyNode):
 # ---------------------------------------------------------------------------
 
 class SAX_Bridge_Debug_Text(io.ComfyNode):
-    """文字列値を UI に表示するデバッグノード。"""
+    """任意型の値を UI に表示するデバッグノード。"""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -332,21 +430,20 @@ class SAX_Bridge_Debug_Text(io.ComfyNode):
             display_name="SAX Debug Text",
             category="SAX/Bridge/Debug",
             description=(
-                "Displays a string value in the node UI. "
-                "Useful for checking populated text, metadata, or any "
-                "intermediate string value."
+                "Displays any value in the node UI. "
+                "Auto-converts to string for display."
             ),
             is_output_node=True,
             inputs=[
-                io.String.Input("text", multiline=True, default=""),
+                AnyType.Input("value"),
             ],
             outputs=[],
         )
 
     @classmethod
-    def execute(cls, text) -> io.NodeOutput:
-        s = text if isinstance(text, str) else str(text)
-        return io.NodeOutput(ui={"text": [s]})
+    def execute(cls, value) -> io.NodeOutput:
+        text = _to_display_string(value)
+        return io.NodeOutput(ui={"text": [text]})
 
 
 # ---------------------------------------------------------------------------
@@ -358,22 +455,15 @@ def _run_assertion(
     mode: str,
     expected_raw: str,
     label: str,
-    stop_on_fail: bool,
     node_name: str,
 ) -> io.NodeOutput:
-    """Assertion 実行の共通処理。UI テキストを生成し結果を返す。"""
+    """Assertion 実行の共通処理。PASS/FAIL/ERROR を UI テキストで返す。"""
     try:
         passed, expected_parsed = _evaluate_assertion(actual, mode, expected_raw)
     except Exception as exc:
-        msg = (
-            f'[SAX {node_name}] "{label}" ERROR\n'
-            f"  mode: {mode}\n"
-            f"  reason: {exc}"
-        )
-        if stop_on_fail:
-            raise RuntimeError(msg) from exc
-        logger.warning(f"[SAX_Bridge] {msg}")
-        return io.NodeOutput(ui={"text": [f"[{label}] ERROR: {exc}"]})
+        err_msg = f'[SAX {node_name}] "{label}" ERROR: {exc}'
+        logger.warning(f"[SAX_Bridge] {err_msg}")
+        return io.NodeOutput(ui={"text": [err_msg]})
 
     if passed:
         logger.info(f'[SAX_Bridge] [SAX {node_name}] "{label}" PASS')
@@ -384,17 +474,10 @@ def _run_assertion(
     if len(actual_repr) > 200:
         actual_repr = actual_repr[:200] + "..."
     fail_msg = (
-        f'[SAX {node_name}] "{label}" FAILED\n'
-        f"  mode: {mode}\n"
-        f"  actual: {actual_repr}\n"
-        f"  expected: {expected_parsed!r}"
+        f'[SAX {node_name}] "{label}" FAILED '
+        f'(mode={mode}, actual={actual_repr}, expected={expected_parsed!r})'
     )
-    if stop_on_fail:
-        raise RuntimeError(fail_msg)
-    logger.warning(
-        f'[SAX_Bridge] [SAX {node_name}] "{label}" FAILED: '
-        f"mode={mode}, actual={actual_repr}, expected={expected_parsed!r}"
-    )
+    logger.warning(f"[SAX_Bridge] {fail_msg}")
     return io.NodeOutput(
         ui={"text": [f"[{label}] FAIL: mode={mode} actual={actual_repr}"]}
     )
@@ -423,14 +506,13 @@ class SAX_Bridge_Assert(io.ComfyNode):
                 io.Combo.Input("mode", options=ASSERTION_MODES, default="not_none"),
                 io.String.Input("expected", default="", optional=True),
                 io.String.Input("label", default="assert"),
-                io.Boolean.Input("stop_on_fail", default=True),
             ],
             outputs=[],
         )
 
     @classmethod
-    def execute(cls, value, mode, expected="", label="assert", stop_on_fail=True) -> io.NodeOutput:
-        return _run_assertion(value, mode, expected, label, stop_on_fail, "Assert")
+    def execute(cls, value, mode, expected="", label="assert") -> io.NodeOutput:
+        return _run_assertion(value, mode, expected, label, "Assert")
 
 
 # ---------------------------------------------------------------------------
@@ -457,21 +539,17 @@ class SAX_Bridge_Assert_Pipe(io.ComfyNode):
                 io.Combo.Input("mode", options=ASSERTION_MODES, default="not_none"),
                 io.String.Input("expected", default="", optional=True),
                 io.String.Input("label", default="assert"),
-                io.Boolean.Input("stop_on_fail", default=True),
             ],
             outputs=[],
         )
 
     @classmethod
     def execute(cls, value, path="", mode="not_none", expected="",
-                label="assert", stop_on_fail=True) -> io.NodeOutput:
+                label="assert") -> io.NodeOutput:
         try:
-            resolved = _resolve_path(value, path)
-        except RuntimeError as exc:
-            msg = f'[SAX Assert Pipe] "{label}" FAILED: {exc}'
-            if stop_on_fail:
-                raise RuntimeError(msg) from exc
-            logger.warning(f"[SAX_Bridge] {msg}")
-            return io.NodeOutput(ui={"text": [f"[{label}] FAIL: {exc}"]})
-
-        return _run_assertion(resolved, mode, expected, label, stop_on_fail, "Assert Pipe")
+            resolved = _resolve_path(value, path) if path else value
+        except Exception as exc:
+            err_msg = f'[SAX Assert Pipe] "{label}" ERROR: path resolution failed: {exc}'
+            logger.warning(f"[SAX_Bridge] {err_msg}")
+            return io.NodeOutput(ui={"text": [err_msg]})
+        return _run_assertion(resolved, mode, expected, label, "Assert Pipe")

@@ -10,8 +10,11 @@ from nodes.debug import (
     SAX_Bridge_Debug_Text,
     _evaluate_assertion,
     _format_pipe_summary,
+    _get_dtype_device_info,
+    _get_inner_type_name,
     _parse_expected,
     _resolve_path,
+    _to_display_string,
 )
 
 
@@ -206,6 +209,127 @@ class TestEvaluateAssertion:
 
 
 # ---------------------------------------------------------------------------
+# _to_display_string
+# ---------------------------------------------------------------------------
+
+class TestToDisplayString:
+    def test_none(self):
+        assert _to_display_string(None) == "None"
+
+    def test_str(self):
+        assert _to_display_string("hello") == "hello"
+
+    def test_int(self):
+        assert _to_display_string(42) == "42"
+
+    def test_float(self):
+        assert _to_display_string(3.14) == "3.14"
+
+    def test_bool(self):
+        assert _to_display_string(True) == "True"
+
+    def test_dict(self):
+        s = _to_display_string({"a": 1, "b": 2})
+        assert "dict" in s
+        assert "a" in s and "b" in s
+
+    def test_list(self):
+        s = _to_display_string([1, 2, 3])
+        assert "list" in s
+        assert "len=3" in s
+
+    def test_tuple(self):
+        s = _to_display_string((1, 2))
+        assert "tuple" in s
+        assert "len=2" in s
+
+    def test_tensor(self):
+        torch = pytest.importorskip("torch")
+        t = torch.zeros(1, 3, 64, 64)
+        s = _to_display_string(t)
+        assert "Tensor" in s
+        assert "shape=(1, 3, 64, 64)" in s
+        assert "dtype=" in s
+
+    def test_comfyui_like_object(self):
+        class Inner:
+            pass
+        class Outer:
+            def __init__(self):
+                self.model = Inner()
+        s = _to_display_string(Outer())
+        assert "Outer" in s
+        assert "inner: Inner" in s
+
+    def test_plain_object(self):
+        class Foo:
+            pass
+        s = _to_display_string(Foo())
+        assert "Foo" in s
+
+
+# ---------------------------------------------------------------------------
+# _get_inner_type_name / _get_dtype_device_info
+# ---------------------------------------------------------------------------
+
+class TestGetInnerTypeName:
+    def test_model_attr(self):
+        class Inner: pass
+        class Outer:
+            def __init__(self):
+                self.model = Inner()
+        assert _get_inner_type_name(Outer()) == "Inner"
+
+    def test_cond_stage_model(self):
+        class Inner: pass
+        class Outer:
+            def __init__(self):
+                self.cond_stage_model = Inner()
+        assert _get_inner_type_name(Outer()) == "Inner"
+
+    def test_first_stage_model(self):
+        class Inner: pass
+        class Outer:
+            def __init__(self):
+                self.first_stage_model = Inner()
+        assert _get_inner_type_name(Outer()) == "Inner"
+
+    def test_none(self):
+        class Plain: pass
+        assert _get_inner_type_name(Plain()) is None
+
+
+class TestGetDtypeDeviceInfo:
+    def test_dtype_from_model(self):
+        class Inner:
+            dtype = "torch.float16"
+        class Outer:
+            def __init__(self):
+                self.model = Inner()
+        info = _get_dtype_device_info(Outer())
+        assert info.get("dtype") == "torch.float16"
+
+    def test_device_from_load_device(self):
+        class Outer:
+            load_device = "cuda:0"
+        info = _get_dtype_device_info(Outer())
+        assert info.get("device") == "cuda:0"
+
+    def test_empty(self):
+        class Plain: pass
+        assert _get_dtype_device_info(Plain()) == {}
+
+    def test_manual_cast_dtype_fallback(self):
+        class Inner:
+            manual_cast_dtype = "torch.bfloat16"
+        class Outer:
+            def __init__(self):
+                self.model = Inner()
+        info = _get_dtype_device_info(Outer())
+        assert info.get("dtype") == "torch.bfloat16"
+
+
+# ---------------------------------------------------------------------------
 # _format_pipe_summary
 # ---------------------------------------------------------------------------
 
@@ -225,7 +349,7 @@ class TestFormatPipeSummary:
     def test_with_model(self):
         pipe = {"model": MagicMock(), "clip": None, "vae": None, "seed": 42}
         s = _format_pipe_summary(pipe)
-        assert "model: present" in s
+        assert "model: MagicMock" in s
         assert "seed: 42" in s
 
     def test_with_settings(self):
@@ -255,6 +379,39 @@ class TestFormatPipeSummary:
         assert "applied_loras:" in s
         assert "2 entries" in s
 
+    def test_model_with_dtype_device(self):
+        class Inner:
+            dtype = "torch.float16"
+        class ModelPatcher:
+            load_device = "cuda:0"
+            def __init__(self):
+                self.model = Inner()
+        pipe = {"model": ModelPatcher()}
+        s = _format_pipe_summary(pipe)
+        assert "inner: Inner" in s
+        assert "dtype=torch.float16" in s
+        assert "device=cuda:0" in s
+
+    def test_clip_with_inner(self):
+        class Inner: pass
+        class Clip:
+            def __init__(self):
+                self.cond_stage_model = Inner()
+        pipe = {"clip": Clip()}
+        s = _format_pipe_summary(pipe)
+        assert "clip: Clip" in s
+        assert "inner: Inner" in s
+
+    def test_vae_with_inner(self):
+        class Inner: pass
+        class Vae:
+            def __init__(self):
+                self.first_stage_model = Inner()
+        pipe = {"vae": Vae()}
+        s = _format_pipe_summary(pipe)
+        assert "vae: Vae" in s
+        assert "inner: Inner" in s
+
 
 # ---------------------------------------------------------------------------
 # SAX_Bridge_Debug_Inspector
@@ -267,7 +424,7 @@ class TestDebugInspector:
         assert result.ui is not None
         assert "text" in result.ui
         text = result.ui["text"][0]
-        assert "model: present" in text
+        assert "model: MagicMock" in text
         assert "seed: 42" in text
 
     def test_execute_with_none(self):
@@ -284,13 +441,37 @@ class TestDebugText:
         result = SAX_Bridge_Debug_Text.execute("hello")
         assert result.ui["text"][0] == "hello"
 
-    def test_execute_non_str(self):
+    def test_execute_int(self):
         result = SAX_Bridge_Debug_Text.execute(42)
         assert result.ui["text"][0] == "42"
 
-    def test_execute_empty(self):
+    def test_execute_float(self):
+        result = SAX_Bridge_Debug_Text.execute(3.14)
+        assert result.ui["text"][0] == "3.14"
+
+    def test_execute_none(self):
+        result = SAX_Bridge_Debug_Text.execute(None)
+        assert result.ui["text"][0] == "None"
+
+    def test_execute_empty_str(self):
         result = SAX_Bridge_Debug_Text.execute("")
         assert result.ui["text"][0] == ""
+
+    def test_execute_dict(self):
+        result = SAX_Bridge_Debug_Text.execute({"a": 1})
+        assert "dict" in result.ui["text"][0]
+
+    def test_execute_list(self):
+        result = SAX_Bridge_Debug_Text.execute([1, 2, 3])
+        assert "list" in result.ui["text"][0]
+        assert "len=3" in result.ui["text"][0]
+
+    def test_execute_tensor(self):
+        torch = pytest.importorskip("torch")
+        result = SAX_Bridge_Debug_Text.execute(torch.zeros(2, 3))
+        text = result.ui["text"][0]
+        assert "Tensor" in text
+        assert "shape=(2, 3)" in text
 
 
 # ---------------------------------------------------------------------------
@@ -299,33 +480,29 @@ class TestDebugText:
 
 class TestAssert:
     def test_pass(self):
-        result = SAX_Bridge_Assert.execute(42, "not_none", "", "test", True)
+        result = SAX_Bridge_Assert.execute(42, "not_none", "", "test")
         assert "PASS" in result.ui["text"][0]
 
-    def test_fail_stop(self):
-        with pytest.raises(RuntimeError, match="FAILED"):
-            SAX_Bridge_Assert.execute(None, "not_none", "", "test", True)
-
-    def test_fail_warn(self):
-        result = SAX_Bridge_Assert.execute(None, "not_none", "", "test", False)
+    def test_fail(self):
+        result = SAX_Bridge_Assert.execute(None, "not_none", "", "test")
         assert "FAIL" in result.ui["text"][0]
 
     def test_equals_pass(self):
-        result = SAX_Bridge_Assert.execute(10, "equals", "10", "eq", True)
+        result = SAX_Bridge_Assert.execute(10, "equals", "10", "eq")
         assert "PASS" in result.ui["text"][0]
 
-    def test_equals_fail_stop(self):
-        with pytest.raises(RuntimeError, match="FAILED"):
-            SAX_Bridge_Assert.execute(10, "equals", "20", "eq", True)
+    def test_equals_fail(self):
+        result = SAX_Bridge_Assert.execute(10, "equals", "20", "eq")
+        assert "FAIL" in result.ui["text"][0]
 
     def test_in_range_pass(self):
-        result = SAX_Bridge_Assert.execute(5, "in_range", "1,10", "r", True)
+        result = SAX_Bridge_Assert.execute(5, "in_range", "1,10", "r")
         assert "PASS" in result.ui["text"][0]
 
-    def test_error_mode_warn(self):
-        # in_range で不正なフォーマット → ValueError、stop_on_fail=False で warning
-        result = SAX_Bridge_Assert.execute(5, "in_range", "bad", "r", False)
-        assert "ERROR" in result.ui["text"][0] or "FAIL" in result.ui["text"][0]
+    def test_error_mode(self):
+        # in_range で不正なフォーマット → ValueError、UI テキストに ERROR
+        result = SAX_Bridge_Assert.execute(5, "in_range", "bad", "r")
+        assert "ERROR" in result.ui["text"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -336,34 +513,28 @@ class TestAssertPipe:
     def test_path_resolution_pass(self):
         pipe = {"loader_settings": {"steps": 20}}
         result = SAX_Bridge_Assert_Pipe.execute(
-            pipe, "loader_settings.steps", "equals", "20", "steps", True
+            pipe, "loader_settings.steps", "equals", "20", "steps"
         )
         assert "PASS" in result.ui["text"][0]
 
-    def test_path_resolution_fail_stop(self):
+    def test_path_resolution_fail(self):
         pipe = {"loader_settings": {"steps": 20}}
-        with pytest.raises(RuntimeError, match="FAILED"):
-            SAX_Bridge_Assert_Pipe.execute(
-                pipe, "loader_settings.steps", "equals", "99", "steps", True
-            )
-
-    def test_path_not_found_stop(self):
-        pipe = {"a": 1}
-        with pytest.raises(RuntimeError, match="path resolution error"):
-            SAX_Bridge_Assert_Pipe.execute(
-                pipe, "nonexistent", "not_none", "", "x", True
-            )
-
-    def test_path_not_found_warn(self):
-        pipe = {"a": 1}
         result = SAX_Bridge_Assert_Pipe.execute(
-            pipe, "nonexistent", "not_none", "", "x", False
+            pipe, "loader_settings.steps", "equals", "99", "steps"
         )
         assert "FAIL" in result.ui["text"][0]
 
+    def test_path_not_found(self):
+        pipe = {"a": 1}
+        result = SAX_Bridge_Assert_Pipe.execute(
+            pipe, "nonexistent", "not_none", "", "x"
+        )
+        assert "ERROR" in result.ui["text"][0]
+        assert "path resolution failed" in result.ui["text"][0]
+
     def test_empty_path_uses_value_directly(self):
         result = SAX_Bridge_Assert_Pipe.execute(
-            42, "", "equals", "42", "direct", True
+            42, "", "equals", "42", "direct"
         )
         assert "PASS" in result.ui["text"][0]
 
@@ -371,6 +542,6 @@ class TestAssertPipe:
         torch = pytest.importorskip("torch")
         pipe = {"images": torch.zeros(1, 512, 512, 3)}
         result = SAX_Bridge_Assert_Pipe.execute(
-            pipe, "images", "shape_equals", "1,512,512,3", "shape", True
+            pipe, "images", "shape_equals", "1,512,512,3", "shape"
         )
         assert "PASS" in result.ui["text"][0]
