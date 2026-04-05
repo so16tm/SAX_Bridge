@@ -12,6 +12,12 @@ from nodes.finisher import SAX_Bridge_Finisher
 from nodes.noise import SAX_Bridge_Noise_Image, SAX_Bridge_Noise_Latent
 from nodes.upscaler import SAX_Bridge_Upscaler
 from nodes.cache import SAX_Bridge_Cache
+from nodes.toggle_manager import SAX_Bridge_Toggle_Manager
+from nodes.node_collector import SAX_Bridge_Node_Collector
+from nodes.pipe_collector import SAX_Bridge_Pipe_Collector
+from nodes.image_collector import SAX_Bridge_Image_Collector
+from nodes.primitive_store import SAX_Bridge_Primitive_Store
+from nodes.sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
 
 ALL_V3_NODES = [
     SAX_Bridge_Guidance,
@@ -31,6 +37,13 @@ ALL_V3_NODES = [
     SAX_Bridge_Noise_Latent,
     SAX_Bridge_Upscaler,
     SAX_Bridge_Cache,
+    SAX_Bridge_Toggle_Manager,
+    SAX_Bridge_Node_Collector,
+    SAX_Bridge_Pipe_Collector,
+    SAX_Bridge_Image_Collector,
+    SAX_Bridge_Primitive_Store,
+    SAX_Bridge_Loader_SAM3,
+    SAX_Bridge_Segmenter_Multi,
 ]
 
 
