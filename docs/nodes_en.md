@@ -20,8 +20,8 @@
 | Enhance | `SAX_Bridge_Detailer` | [SAX Detailer](#sax-detailer) |
 | Enhance | `SAX_Bridge_Detailer_Enhanced` | [SAX Enhanced Detailer](#sax-enhanced-detailer) |
 | Enhance | `SAX_Bridge_Upscaler` | [SAX Upscaler](#sax-upscaler) |
-| Enhance | `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) |
-| Enhance | `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) |
+| Option | `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) |
+| Option | `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) |
 | Segment | `SAX_Bridge_Loader_SAM3` | [SAX SAM3 Loader](#sax-sam3-loader) |
 | Segment | `SAX_Bridge_Segmenter_Multi` | [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | Output | `SAX_Bridge_Output` | [SAX Output](#sax-output) |
@@ -280,6 +280,8 @@ Use `target_positive` to choose whether the result is stored in Positive or Nega
 [↑ Back to top](#top)
 
 ---
+
+## Option
 
 ### SAX Image Noise
 

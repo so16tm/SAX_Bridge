@@ -24,30 +24,40 @@ NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 
 for v3_node in [
-    detailer_node.SAX_Bridge_Detailer,
-    detailer_node.SAX_Bridge_Detailer_Enhanced,
-    output_node.SAX_Bridge_Output,
-    output_node.SAX_Bridge_Image_Preview,
-    loader_node.SAX_Bridge_Loader,
-    loader_node.SAX_Bridge_Loader_Lora,
-    pipe_node.SAX_Bridge_Pipe,
-    pipe_node.SAX_Bridge_Pipe_Switcher,
-    prompt_node.SAX_Bridge_Prompt,
-    prompt_node.SAX_Bridge_Prompt_Concat,
-    sampler_node.SAX_Bridge_KSampler,
-    guidance_node.SAX_Bridge_Guidance,
-    toggle_manager_node.SAX_Bridge_Toggle_Manager,
+    # Collect
+    image_collector_node.SAX_Bridge_Image_Collector,
     node_collector_node.SAX_Bridge_Node_Collector,
     pipe_collector_node.SAX_Bridge_Pipe_Collector,
-    image_collector_node.SAX_Bridge_Image_Collector,
-    primitive_store_node.SAX_Bridge_Primitive_Store,
-    cache_node.SAX_Bridge_Cache,
+    # Enhance
+    detailer_node.SAX_Bridge_Detailer,
+    detailer_node.SAX_Bridge_Detailer_Enhanced,
     finisher_node.SAX_Bridge_Finisher,
+    guidance_node.SAX_Bridge_Guidance,
+    upscaler_node.SAX_Bridge_Upscaler,
+    # Loader
+    loader_node.SAX_Bridge_Loader,
+    loader_node.SAX_Bridge_Loader_Lora,
+    # Option
     noise_node.SAX_Bridge_Noise_Image,
     noise_node.SAX_Bridge_Noise_Latent,
-    upscaler_node.SAX_Bridge_Upscaler,
+    # Output
+    output_node.SAX_Bridge_Image_Preview,
+    output_node.SAX_Bridge_Output,
+    # Pipe
+    pipe_node.SAX_Bridge_Pipe,
+    pipe_node.SAX_Bridge_Pipe_Switcher,
+    # Prompt
+    prompt_node.SAX_Bridge_Prompt,
+    prompt_node.SAX_Bridge_Prompt_Concat,
+    # Sampler
+    sampler_node.SAX_Bridge_KSampler,
+    # Segment
     sam3_node.SAX_Bridge_Loader_SAM3,
     sam3_node.SAX_Bridge_Segmenter_Multi,
+    # Utility
+    cache_node.SAX_Bridge_Cache,
+    primitive_store_node.SAX_Bridge_Primitive_Store,
+    toggle_manager_node.SAX_Bridge_Toggle_Manager,
 ]:
     _schema = v3_node.GET_SCHEMA()
     NODE_CLASS_MAPPINGS[_schema.node_id] = v3_node
