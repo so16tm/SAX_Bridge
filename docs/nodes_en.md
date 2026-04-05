@@ -285,6 +285,8 @@ Use `target_positive` to choose whether the result is stored in Positive or Nega
 
 `SAX_Bridge_Noise_Image` — Injects noise into an image (or masked region).
 
+> **Scope**: Standalone utility for composing with a plain KSampler or other custom nodes. For noise injection within SAX Detailer, use `SAX Enhanced Detailer`'s `latent_noise_intensity` instead.
+
 **Inputs**
 
 | Parameter | Type | Description |
@@ -309,6 +311,8 @@ Use `target_positive` to choose whether the result is stored in Positive or Nega
 ### SAX Latent Noise
 
 `SAX_Bridge_Noise_Latent` — Injects noise into the latent space. Used for texture restoration and detail reinforcement in i2i.
+
+> **Scope**: Standalone utility for composing with a plain KSampler or other custom nodes. For noise injection within SAX Detailer, use `SAX Enhanced Detailer`'s `latent_noise_intensity` instead.
 
 **Inputs**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
 

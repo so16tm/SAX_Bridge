@@ -285,6 +285,8 @@
 
 `SAX_Bridge_Noise_Image` — 画像領域（またはマスク領域）にノイズを注入します。
 
+> **用途**: 素の KSampler や他のカスタムノードと組み合わせて使う standalone ユーティリティです。SAX Detailer 内でのノイズ注入には `SAX Enhanced Detailer` の `latent_noise_intensity` を使用してください。
+
 **入力**
 
 | パラメータ | 型 | 説明 |
@@ -309,6 +311,8 @@
 ### SAX Latent Noise
 
 `SAX_Bridge_Noise_Latent` — Latent 領域にノイズを注入します。i2i での質感復元・ディテール補強に使用します。
+
+> **用途**: 素の KSampler や他のカスタムノードと組み合わせて使う standalone ユーティリティです。SAX Detailer 内でのノイズ注入には `SAX Enhanced Detailer` の `latent_noise_intensity` を使用してください。
 
 **入力**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
 
