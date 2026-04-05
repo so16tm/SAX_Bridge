@@ -6,32 +6,20 @@
 
 ---
 
-## Node List
+## Category List
 
-| Category | Node ID | Display Name |
-|---------|---------|--------|
-| Loader | `SAX_Bridge_Loader` | [SAX Loader](#sax-loader) |
-| Loader | `SAX_Bridge_Loader_Lora` | [SAX Lora Loader](#sax-lora-loader) |
-| Sampler | `SAX_Bridge_KSampler` | [SAX KSampler](#sax-ksampler) |
-| Pipe | `SAX_Bridge_Pipe` | [SAX Pipe](#sax-pipe) |
-| Pipe | `SAX_Bridge_Pipe_Switcher` | [SAX Pipe Switcher](#sax-pipe-switcher) |
-| Prompt | `SAX_Bridge_Prompt` | [SAX Prompt](#sax-prompt) |
-| Prompt | `SAX_Bridge_Prompt_Concat` | [SAX Prompt Concat](#sax-prompt-concat) |
-| Enhance | `SAX_Bridge_Detailer` | [SAX Detailer](#sax-detailer) |
-| Enhance | `SAX_Bridge_Detailer_Enhanced` | [SAX Enhanced Detailer](#sax-enhanced-detailer) |
-| Enhance | `SAX_Bridge_Upscaler` | [SAX Upscaler](#sax-upscaler) |
-| Option | `SAX_Bridge_Noise_Image` | [SAX Image Noise](#sax-image-noise) |
-| Option | `SAX_Bridge_Noise_Latent` | [SAX Latent Noise](#sax-latent-noise) |
-| Segment | `SAX_Bridge_Loader_SAM3` | [SAX SAM3 Loader](#sax-sam3-loader) |
-| Segment | `SAX_Bridge_Segmenter_Multi` | [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
-| Output | `SAX_Bridge_Output` | [SAX Output](#sax-output) |
-| Output | `SAX_Bridge_Image_Preview` | [SAX Image Preview](#sax-image-preview) |
-| Collect | `SAX_Bridge_Image_Collector` | [SAX Image Collector](#sax-image-collector) |
-| Collect | `SAX_Bridge_Node_Collector` | [SAX Node Collector](#sax-node-collector) |
-| Collect | `SAX_Bridge_Pipe_Collector` | [SAX Pipe Collector](#sax-pipe-collector) |
-| Utility | `SAX_Bridge_Primitive_Store` | [SAX Primitive Store](#sax-primitive-store) |
-| Utility | `SAX_Bridge_Cache` | [SAX Cache](#sax-cache) |
-| Utility | `SAX_Bridge_Toggle_Manager` | [SAX Toggle Manager](#sax-toggle-manager) |
+| Category | Description |
+|---------|------|
+| [Loader](#loader) | Model and LoRA loading |
+| [Sampler](#sampler) | KSampler |
+| [Pipe](#pipe) | Pipe construction and switching |
+| [Prompt](#prompt) | Prompt encoding and concatenation |
+| [Enhance](#enhance) | Detailer / Upscaler / Guidance |
+| [Option](#option) | Standalone utilities (noise injection etc.) |
+| [Segment](#segment) | Segmentation via SAM3 |
+| [Output](#output) | Output and preview |
+| [Collect](#collect) | Node / image / pipe aggregation |
+| [Utility](#utility) | Pipe-internal helpers |
 
 ---
 
