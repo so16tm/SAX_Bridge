@@ -18,6 +18,12 @@ from nodes.pipe_collector import SAX_Bridge_Pipe_Collector
 from nodes.image_collector import SAX_Bridge_Image_Collector
 from nodes.primitive_store import SAX_Bridge_Primitive_Store
 from nodes.sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
+from nodes.debug import (
+    SAX_Bridge_Assert,
+    SAX_Bridge_Assert_Pipe,
+    SAX_Bridge_Debug_Inspector,
+    SAX_Bridge_Debug_Text,
+)
 
 ALL_V3_NODES = [
     SAX_Bridge_Guidance,
@@ -44,6 +50,10 @@ ALL_V3_NODES = [
     SAX_Bridge_Primitive_Store,
     SAX_Bridge_Loader_SAM3,
     SAX_Bridge_Segmenter_Multi,
+    SAX_Bridge_Assert,
+    SAX_Bridge_Assert_Pipe,
+    SAX_Bridge_Debug_Inspector,
+    SAX_Bridge_Debug_Text,
 ]
 
 

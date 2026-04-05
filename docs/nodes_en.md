@@ -19,6 +19,7 @@
 | [Segment](#segment) | Segmentation via SAM3 | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
+| [Debug](#debug) | Debugging & testing | [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
 | [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
@@ -563,6 +564,101 @@ output/2026-03-20/001_20260320_153045.webp
 
 - The order of the source list determines priority (up to 16 sources)
 - If all slots are None, downstream will error (intentional by design)
+
+[↑ Back to top](#top)
+
+---
+
+## Debug
+
+### SAX Debug Inspector
+
+`SAX_Bridge_Debug_Inspector` — Inspects a `PIPE_LINE` and displays its internal fields (model/clip/vae existence, seed, loader_settings values, images/samples shape, applied_loras, etc.) in the node UI.
+
+**Inputs**: `pipe` (PIPE_LINE)
+
+**Outputs**: None (text displayed in node UI)
+
+**Example output**:
+```
+model: present
+clip: present
+vae: present
+seed: 42
+loader_settings.steps: 20
+loader_settings.cfg: 8.0
+loader_settings.sampler_name: euler
+images: shape=(1, 512, 512, 3)
+samples.samples: shape=(1, 4, 64, 64)
+applied_loras: {'lora_a'} (1 entries)
+```
+
+[↑ Back to top](#top)
+
+### SAX Debug Text
+
+`SAX_Bridge_Debug_Text` — Displays an arbitrary string value in the node UI. Useful for checking `POPULATED_TEXT`, intermediate prompts, metadata, or any other string value.
+
+**Inputs**: `text` (STRING, multiline)
+
+**Outputs**: None (text displayed in node UI)
+
+[↑ Back to top](#top)
+
+### SAX Assert
+
+`SAX_Bridge_Assert` — Asserts that a value meets the expected condition. Use `stop_on_fail` to choose between halting the workflow on mismatch or just emitting a warning log.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `value` | ANY | Value to check |
+| `mode` | Combo | Assertion mode (see table below) |
+| `expected` | String | Expected value (auto-parsed based on mode) |
+| `label` | String | UI label |
+| `stop_on_fail` | Boolean | True: raise RuntimeError on fail / False: warn only |
+
+**Outputs**: None (PASS/FAIL shown in node UI with color-coded border: PASS=green / FAIL=red / ERROR=orange)
+
+**Assertion modes**
+
+| mode | Expected format | Behavior |
+|------|-----------------|----------|
+| `not_none` | — | `value is not None` |
+| `is_none` | — | `value is None` |
+| `equals` | any (auto-parsed) | `value == expected` |
+| `not_equals` | any | `value != expected` |
+| `contains` | string | `str(expected) in str(value)` |
+| `not_contains` | string | `str(expected) not in str(value)` |
+| `matches` | regex | `re.search(expected, str(value))` |
+| `startswith` / `endswith` | string | Prefix/suffix match |
+| `greater_than` / `less_than` | number | Numeric comparison |
+| `in_range` | `"min,max"` | `min <= value <= max` |
+| `shape_equals` | `"B,C,H,W"` | Tensor shape match |
+| `length_equals` | int | `len(value) == N` |
+| `has_key` | string | `key in value` (dict) |
+| `has_item` | any | `item in value` (list/set) |
+
+**Auto-parse order for expected**: int → float → bool (`true`/`false`) → None (`null`/`none`) → list/tuple (comma-separated) → str fallback
+
+[↑ Back to top](#top)
+
+### SAX Assert Pipe
+
+`SAX_Bridge_Assert_Pipe` — Extracts a field from a `PIPE_LINE` (or arbitrary dict/object) using a dot-separated path, then validates it with the same assertion modes as SAX Assert.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `value` | ANY | Target (typically PIPE_LINE) |
+| `path` | String | Dot-separated path (e.g. `loader_settings.steps`) |
+| `mode` / `expected` / `label` / `stop_on_fail` | — | Same as SAX Assert |
+
+**Path resolution**: Each segment is tried in order as `dict[key]` → `getattr` → integer index. On failure, a `RuntimeError` is raised listing the available keys/attrs.
+
+**Outputs**: None (PASS/FAIL shown in node UI)
 
 [↑ Back to top](#top)
 

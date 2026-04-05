@@ -1,3 +1,4 @@
+from .nodes import debug as debug_node
 from .nodes import detailer as detailer_node
 from .nodes import output as output_node
 from .nodes import toggle_manager as toggle_manager_node
@@ -28,6 +29,11 @@ for v3_node in [
     image_collector_node.SAX_Bridge_Image_Collector,
     node_collector_node.SAX_Bridge_Node_Collector,
     pipe_collector_node.SAX_Bridge_Pipe_Collector,
+    # Debug
+    debug_node.SAX_Bridge_Assert,
+    debug_node.SAX_Bridge_Assert_Pipe,
+    debug_node.SAX_Bridge_Debug_Inspector,
+    debug_node.SAX_Bridge_Debug_Text,
     # Enhance
     detailer_node.SAX_Bridge_Detailer,
     detailer_node.SAX_Bridge_Detailer_Enhanced,

@@ -19,6 +19,7 @@
 | [Segment](#segment) | SAM3 によるセグメンテーション | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | [Output](#output) | 出力・プレビュー | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | ノード・画像・Pipe の集約 | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
+| [Debug](#debug) | デバッグ・テスト用 | [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
 | [Utility](#utility) | Pipe 内部ヘルパー | [SAX Primitive Store](#sax-primitive-store) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
@@ -563,6 +564,101 @@ output/2026-03-20/001_20260320_153045.webp
 
 - ソースリストの並び順が優先順位になります（最大 16 ソース）
 - 全スロットが None の場合は下流でエラー（設計として意図的）
+
+[↑ トップへ](#top)
+
+---
+
+## Debug
+
+### SAX Debug Inspector
+
+`SAX_Bridge_Debug_Inspector` — `PIPE_LINE` の内部フィールド（model/clip/vae の有無、seed、loader_settings の各値、images/samples の shape、applied_loras 等）を整形してノード UI に表示するデバッグノードです。
+
+**入力**: `pipe` (PIPE_LINE)
+
+**出力**: なし（ノード UI にテキスト表示）
+
+**表示例**:
+```
+model: present
+clip: present
+vae: present
+seed: 42
+loader_settings.steps: 20
+loader_settings.cfg: 8.0
+loader_settings.sampler_name: euler
+images: shape=(1, 512, 512, 3)
+samples.samples: shape=(1, 4, 64, 64)
+applied_loras: {'lora_a'} (1 entries)
+```
+
+[↑ トップへ](#top)
+
+### SAX Debug Text
+
+`SAX_Bridge_Debug_Text` — 任意の文字列値をノード UI に表示するノードです。`POPULATED_TEXT` の確認や、中間プロンプト・メタデータ・任意の文字列値の確認に利用します。
+
+**入力**: `text` (STRING, multiline)
+
+**出力**: なし（ノード UI にテキスト表示）
+
+[↑ トップへ](#top)
+
+### SAX Assert
+
+`SAX_Bridge_Assert` — 任意の値が期待条件を満たすかを検証するノードです。不一致時にワークフロー全体を停止させるか、warning ログを出すだけかを `stop_on_fail` で選択できます。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `value` | ANY | 検証対象の値 |
+| `mode` | Combo | assertion モード（下表参照） |
+| `expected` | String | 期待値（mode に応じて自動パース） |
+| `label` | String | UI 表示用ラベル |
+| `stop_on_fail` | Boolean | True: 失敗時に RuntimeError / False: warning ログのみ |
+
+**出力**: なし（ノード UI に PASS/FAIL 表示、PASS=緑 / FAIL=赤 / ERROR=橙の枠線）
+
+**assertion モード一覧**
+
+| mode | 期待値フォーマット | 動作 |
+|------|------------------|------|
+| `not_none` | — | `value is not None` |
+| `is_none` | — | `value is None` |
+| `equals` | 任意（自動パース） | `value == expected` |
+| `not_equals` | 任意 | `value != expected` |
+| `contains` | 文字列 | `str(expected) in str(value)` |
+| `not_contains` | 文字列 | `str(expected) not in str(value)` |
+| `matches` | 正規表現 | `re.search(expected, str(value))` |
+| `startswith` / `endswith` | 文字列 | 文字列前方・後方一致 |
+| `greater_than` / `less_than` | 数値 | 数値比較 |
+| `in_range` | "min,max" | `min <= value <= max` |
+| `shape_equals` | "B,C,H,W" | tensor の shape 一致 |
+| `length_equals` | 整数 | `len(value) == N` |
+| `has_key` | 文字列 | `key in value`（dict） |
+| `has_item` | 任意 | `item in value`（list/set） |
+
+**期待値の自動パース順序**: int → float → bool(`true`/`false`) → None(`null`/`none`) → list/tuple（カンマ区切り）→ str fallback
+
+[↑ トップへ](#top)
+
+### SAX Assert Pipe
+
+`SAX_Bridge_Assert_Pipe` — `PIPE_LINE`（または任意の dict/object）内のフィールドを、ドット区切りパスで取り出して検証するノードです。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `value` | ANY | 対象（通常は PIPE_LINE） |
+| `path` | String | ドット区切りパス（例: `loader_settings.steps`） |
+| `mode` / `expected` / `label` / `stop_on_fail` | — | SAX Assert と同一 |
+
+**path 解決ルール**: 各セグメントを `dict[key]` → `getattr` → `value[int(seg)]`（インデックス）の順に試行。解決失敗時は `RuntimeError` に available keys/attrs を含めて送出します。
+
+**出力**: なし（ノード UI に PASS/FAIL 表示）
 
 [↑ トップへ](#top)
 
