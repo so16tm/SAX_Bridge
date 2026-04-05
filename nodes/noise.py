@@ -156,7 +156,7 @@ class SAX_Bridge_Noise_Image(io.ComfyNode):
             node_id="SAX_Bridge_Noise_Image",
             display_name="SAX Image Noise",
             category="SAX/Bridge/Enhance",
-            description="Add various types of noise to masked areas of an image to improve i2i detail and texture. If no mask is provided, noise is applied to the entire image.",
+            description="Standalone utility: adds various types of noise to masked areas of an image. Designed to be combined with other custom nodes or a plain KSampler for i2i workflows. For noise injection within SAX Detailer, use SAX Enhanced Detailer's latent_noise_intensity instead. If no mask is provided, noise is applied to the entire image.",
             inputs=[
                 io.Image.Input("image"),
                 io.Float.Input("intensity", default=0.15, min=0.0, max=1.0, step=0.01),
@@ -218,7 +218,7 @@ class SAX_Bridge_Noise_Latent(io.ComfyNode):
             node_id="SAX_Bridge_Noise_Latent",
             display_name="SAX Latent Noise",
             category="SAX/Bridge/Enhance",
-            description="Add noise directly to masked areas of a latent to robustly improve i2i detail and texture. If no mask is provided, noise is applied to the entire latent.",
+            description="Standalone utility: adds noise directly to masked areas of a latent. Designed to be combined with other custom nodes or a plain KSampler for i2i workflows. For noise injection within SAX Detailer, use SAX Enhanced Detailer's latent_noise_intensity instead. If no mask is provided, noise is applied to the entire latent.",
             inputs=[
                 io.Latent.Input("samples"),
                 io.Float.Input("intensity", default=0.05, min=0.0, max=2.0, step=0.01),
