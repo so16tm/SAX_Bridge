@@ -63,7 +63,7 @@ class SAX_Bridge_KSampler(io.ComfyNode):
 
         settings = pipe.get("loader_settings", {})
         steps = settings.get("steps", 20)
-        cfg = settings.get("cfg", 7.0)
+        cfg = settings.get("cfg", 8.0)
         sampler_name = settings.get("sampler_name", "euler")
         scheduler = settings.get("scheduler", "normal")
         denoise = settings.get("denoise", 1.0)

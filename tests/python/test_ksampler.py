@@ -77,7 +77,7 @@ class TestKSamplerBasic:
             SAX_Bridge_KSampler.execute(pipe=pipe, decode_vae=False)
         args, kwargs = mock_ks.call_args
         assert args[2] == 20         # steps default
-        assert args[3] == 7.0        # cfg default
+        assert args[3] == 8.0        # cfg default
         assert args[4] == "euler"
         assert args[5] == "normal"
         assert kwargs["denoise"] == 1.0
