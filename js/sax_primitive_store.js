@@ -457,9 +457,12 @@ app.registerExtension({
             this.addCustomWidget(makeStoreWidget(this));
             this.size[0] = Math.max(this.size[0], 260);
 
-            // LiteGraph のリンク復元完了後にスロット同期・リンク記録
+            // 出力スロット・items_json 同期は同期フェーズで実行
+            // （setTimeout 内で Node Collector 側の connect 補完より後回しになる競合を回避）
+            syncOutputSlots(this, items);
+
+            // LiteGraph のリンク復元完了後に _links を記録
             setTimeout(() => {
-                syncOutputSlots(this, items);
                 captureOutputLinks(this, items);
             }, 0);
         };
