@@ -50,6 +50,16 @@
 
 **出力**: `PIPE`, `SEED`
 
+**動作**:
+- 構築される pipe dict の初期フィールド:
+  - `model`, `clip`, `vae`, `samples`, `seed` — 生成した値を格納
+  - `positive`: `None`（下流の Prompt ノードが設定）
+  - `negative`: `None`（下流の Prompt ノードが設定。KSampler 側で自動補完も可能）
+  - `images`: `None`（下流の VAE Decode / Sampler で設定）
+  - `loader_settings`: `steps` / `cfg` / `sampler_name` / `scheduler` / `denoise` を格納する dict
+- `clip_skip` は model の clip_skip を設定する
+- `lora_model_strength` は LoRA の model strength と clip strength の両方に同じ値を適用する（1スライダー制御）
+
 [↑ トップへ](#top)
 
 ---
@@ -82,6 +92,11 @@
 
 > **クリップ強度**: モデル強度と常に連動（1スライダー制御）。
 
+**動作**:
+- LoRA 読み込みに失敗した場合、警告ログを出力してそのエントリをスキップし、残りの LoRA 適用を継続する
+- `strength=0.0` のエントリはスキップする
+- `on` キーが欠落しているエントリは `True`（有効）として扱う
+
 [↑ トップへ](#top)
 
 ---
@@ -106,6 +121,19 @@
 - `negative` が Pipe に存在しない場合、CLIP で空文字列をエンコードして自動補完
 - サンプリング設定（`steps`, `cfg`, `sampler_name`, `scheduler`, `denoise`）は `loader_settings` から継承
 - `decode_vae=False` の場合、`IMAGE` 出力は `None`
+
+**loader_settings フォールバック仕様**:
+
+通常フローでは Loader → Pipe → KSampler の経路で `loader_settings` が常に populated されますが、カスタム経路で pipe に `loader_settings` が存在しない／一部キーが欠落している場合は以下のデフォルト値を使用します。
+
+| キー | デフォルト値 |
+|-----|-----------|
+| `steps` | `20` |
+| `cfg` | `8.0` |
+| `sampler_name` | `"euler"` |
+| `scheduler` | `"normal"` |
+| `denoise` | `1.0` |
+| `seed`（`pipe.seed`） | `0` |
 
 [↑ トップへ](#top)
 
@@ -140,7 +168,7 @@
 
 **選択ロジック**:
 1. `slot` が 1〜5 の場合、該当スロットの Pipe を最優先で参照
-2. 指定スロットが None の場合、`pipe1` → `pipe5` の順にスキャンして最初の非 None を採用
+2. 指定スロットが None、または `slot` が 1〜5 の範囲外（`0` および 5 超）の場合、`pipe1` → `pipe5` の順にスキャンして最初の非 None を採用（`slot=0` は自動スキャンモードとして扱う）
 3. 全スロットが None の場合、空 Pipe として安全に展開
 
 [↑ トップへ](#top)
@@ -214,6 +242,16 @@
 **出力**: `PIPE`, `IMAGE`
 
 > `negative` が Pipe に存在しない場合、CLIP で空文字列をエンコードして自動補完します。
+
+**denoise_decay 計算式**:
+
+各サイクル `i`（0 始まり）における実効 denoise は次式で算出します。
+
+```
+effective_denoise(i) = denoise * max(0.0, 1.0 - i * denoise_decay / cycle)
+```
+
+例: `cycle=3`, `denoise=1.0`, `denoise_decay=0.9` のとき → `[1.0, 0.7, 0.4]`
 
 [↑ トップへ](#top)
 
@@ -307,6 +345,8 @@
 **入力**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
 
 **出力**: `LATENT`
+
+> **値域クランプなし**: Latent 空間のノイズ注入は値域クランプを行いません（画像空間の `SAX Image Noise` は `[0, 1]` にクランプします）。強い `intensity` では latent 値が ±1.0 を超える場合がありますが、これは設計上の意図です。
 
 [↑ トップへ](#top)
 
