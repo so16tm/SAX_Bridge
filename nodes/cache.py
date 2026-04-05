@@ -1,26 +1,11 @@
 import logging
-import os
-import sys
 
 from comfy_api.latest import io
 
+from .cache_impl import apply_deepcache, apply_tgate
 from .io_types import PipeLine
 
 logger = logging.getLogger("SAX_Bridge")
-
-
-def _get_sax_cache():
-    """SAX_Cache モジュールへの参照を遅延取得する。未インストール時は None を返す。"""
-    try:
-        custom_nodes_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        if custom_nodes_dir not in sys.path:
-            sys.path.insert(0, custom_nodes_dir)
-
-        from SAX_Cache.cache_deepcache import SAX_Cache_DeepCache
-        from SAX_Cache.cache_tgate import SAX_Cache_TGate
-        return SAX_Cache_DeepCache, SAX_Cache_TGate
-    except ImportError:
-        return None, None
 
 
 class SAX_Bridge_Cache(io.ComfyNode):
@@ -66,15 +51,9 @@ class SAX_Bridge_Cache(io.ComfyNode):
         if model is None:
             raise ValueError("[SAX_Bridge] Pipe does not contain a model.")
 
-        SAX_Cache_DeepCache, SAX_Cache_TGate = _get_sax_cache()
-        if SAX_Cache_DeepCache is None:
-            logger.warning("[SAX_Bridge] Cache: SAX_Cache is not installed. Skipping cache application.")
-            return io.NodeOutput(pipe)
-
         if deepcache_interval > 1:
-            model, = SAX_Cache_DeepCache().apply(
+            model = apply_deepcache(
                 model=model,
-                enabled=True,
                 deepcache_interval=deepcache_interval,
                 deepcache_start_ratio=deepcache_start_percent,
                 cfg_skip_start_ratio=0.4,
@@ -86,9 +65,8 @@ class SAX_Bridge_Cache(io.ComfyNode):
             )
 
         if tgate_enabled:
-            model, = SAX_Cache_TGate().apply(
+            model = apply_tgate(
                 model=model,
-                enabled=True,
                 gate_step_percent=tgate_gate_step,
                 start_percent=0.0,
                 end_percent=1.0,
