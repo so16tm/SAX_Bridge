@@ -8,18 +8,18 @@
 
 ## カテゴリ一覧
 
-| カテゴリ | 概要 |
-|---------|------|
-| [Loader](#loader) | モデル・LoRA の読み込み |
-| [Sampler](#sampler) | KSampler |
-| [Pipe](#pipe) | Pipe の構築・切替 |
-| [Prompt](#prompt) | プロンプトのエンコード・結合 |
-| [Enhance](#enhance) | Detailer / Upscaler / ガイダンス |
-| [Option](#option) | 独立ユーティリティ（ノイズ注入等） |
-| [Segment](#segment) | SAM3 によるセグメンテーション |
-| [Output](#output) | 出力・プレビュー |
-| [Collect](#collect) | ノード・画像・Pipe の集約 |
-| [Utility](#utility) | Pipe 内部ヘルパー |
+| カテゴリ | 概要 | ノード |
+|---------|------|--------|
+| [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Lora Loader](#sax-lora-loader) |
+| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
+| [Pipe](#pipe) | Pipe の構築・切替 | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
+| [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
+| [Enhance](#enhance) | Detailer / Upscaler / ガイダンス | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) |
+| [Option](#option) | 独立ユーティリティ（ノイズ注入等） | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
+| [Segment](#segment) | SAM3 によるセグメンテーション | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
+| [Output](#output) | 出力・プレビュー | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
+| [Collect](#collect) | ノード・画像・Pipe の集約 | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
+| [Utility](#utility) | Pipe 内部ヘルパー | [SAX Primitive Store](#sax-primitive-store) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 

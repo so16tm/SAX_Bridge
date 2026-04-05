@@ -8,18 +8,18 @@
 
 ## Category List
 
-| Category | Description |
-|---------|------|
-| [Loader](#loader) | Model and LoRA loading |
-| [Sampler](#sampler) | KSampler |
-| [Pipe](#pipe) | Pipe construction and switching |
-| [Prompt](#prompt) | Prompt encoding and concatenation |
-| [Enhance](#enhance) | Detailer / Upscaler / Guidance |
-| [Option](#option) | Standalone utilities (noise injection etc.) |
-| [Segment](#segment) | Segmentation via SAM3 |
-| [Output](#output) | Output and preview |
-| [Collect](#collect) | Node / image / pipe aggregation |
-| [Utility](#utility) | Pipe-internal helpers |
+| Category | Description | Nodes |
+|---------|------|-------|
+| [Loader](#loader) | Model and LoRA loading | [SAX Loader](#sax-loader) / [SAX Lora Loader](#sax-lora-loader) |
+| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
+| [Pipe](#pipe) | Pipe construction and switching | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
+| [Prompt](#prompt) | Prompt encoding and concatenation | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
+| [Enhance](#enhance) | Detailer / Upscaler / Guidance | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) |
+| [Option](#option) | Standalone utilities (noise injection etc.) | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
+| [Segment](#segment) | Segmentation via SAM3 | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
+| [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
+| [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
+| [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
