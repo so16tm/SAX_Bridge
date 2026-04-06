@@ -27,6 +27,7 @@
  *   makePickerSection(collapsed, key, label, color, childEls, defaultCollapsed?, forceOpen?)
  *   buildPickerContent({ mode, placeholder, renderContent, onApply, onCancel })
  *     → { element, focusSearch, cleanup }
+ *   showFilePicker(opts)         — 汎用ファイルピッカーダイアログ
  *
  * DOM UI ヘルパー:
  *   h(tag, css, text)
@@ -2019,4 +2020,234 @@ export function buildPickerContent({
         focusSearch: () => requestAnimationFrame(() => searchInput.focus()),
         cleanup,
     };
+}
+
+// ---------------------------------------------------------------------------
+// 汎用ファイルピッカー
+// ---------------------------------------------------------------------------
+
+/**
+ * 汎用ファイルピッカーダイアログ。
+ * フォルダツリー + 検索フィルタ + single/multi 選択をサポート。
+ *
+ * @param {object}  opts
+ * @param {string[]} opts.items           - 選択肢の文字列配列（パス区切りでフォルダ構造を自動構築）
+ * @param {string}  [opts.currentValue]   - 現在選択中の値（ハイライト用）
+ * @param {string}  [opts.title]          - ダイアログタイトル
+ * @param {string}  [opts.placeholder]    - 検索バーのプレースホルダー
+ * @param {"single"|"multi"} [opts.mode="single"] - 選択モード
+ * @param {string}  [opts.className]      - ダイアログの CSS クラス
+ * @param {Function} [opts.onSelect]      - single モード: (name) => void
+ * @param {Set}     [opts.selection]      - multi モード: 初期選択セット
+ * @param {Function} [opts.onConfirm]     - multi モード: (names: string[]) => void
+ * @param {Function} [opts.displayName]   - 表示名変換関数（デフォルト: 拡張子除去 + パス除去）
+ * @param {Function} [opts.filterFn]      - カスタムフィルタ (name, query) => boolean
+ */
+export function showFilePicker(opts) {
+    const mode = opts.mode ?? "single";
+    const {
+        items,
+        currentValue   = "",
+        title          = mode === "multi" ? "Add / Remove Items" : "Select Item",
+        placeholder    = "Search…",
+        className      = "__sax_file_picker",
+        onSelect       = null,
+        selection: initSelection = new Set(),
+        onConfirm      = null,
+        displayName: displayFn = (name) => name.split(/[\\/]/).pop().replace(/\.[^.]+$/, ""),
+        filterFn: customFilter = null,
+    } = opts;
+
+    document.querySelectorAll(`.${className}`).forEach(e => e.remove());
+
+    const collapsed = new Map();
+    const selection = new Set(initSelection);
+
+    // -- ツリー構造 --
+
+    function buildTree(names) {
+        const root = { children: new Map(), items: [] };
+        for (const name of names) {
+            const parts = name.split(/[\\/]/);
+            let node = root;
+            for (let i = 0; i < parts.length - 1; i++) {
+                const p = parts[i];
+                if (!node.children.has(p))
+                    node.children.set(p, { children: new Map(), items: [] });
+                node = node.children.get(p);
+            }
+            node.items.push(name);
+        }
+        return root;
+    }
+
+    function countAll(node) {
+        return node.items.length +
+            [...node.children.values()].reduce((s, c) => s + countAll(c), 0);
+    }
+
+    function countFiltered(node, fn) {
+        const own = node.items.filter(fn).length;
+        return own + [...node.children.values()].reduce((s, c) => s + countFiltered(c, fn), 0);
+    }
+
+    function countSections(node, fn) {
+        let count = 0;
+        for (const child of node.children.values()) {
+            const directItems = fn ? child.items.filter(fn).length : child.items.length;
+            if (directItems > 0) count += 1;
+            count += countSections(child, fn);
+        }
+        return count;
+    }
+
+    function containsCurrent(node, pathPrefix) {
+        if (!currentValue) return false;
+        const norm = currentValue.replace(/\\/g, "/");
+        if (pathPrefix && !norm.startsWith(pathPrefix + "/")) return false;
+        return node.items.includes(currentValue) ||
+            [...node.children.entries()].some(([name, child]) =>
+                containsCurrent(child, (pathPrefix ? pathPrefix + "/" : "") + name));
+    }
+
+    // -- 行生成 --
+
+    function makeRow(fullName, isCurrent, close) {
+        const label = displayFn(fullName);
+
+        if (mode === "multi") {
+            const row = h("div",
+                "display:flex;align-items:center;gap:8px;padding:3px 0 3px 2px;");
+            row.classList.add("sax-picker-item");
+            row.title = fullName;
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = selection.has(fullName);
+            cb.style.cssText = "cursor:pointer;flex-shrink:0;accent-color:#4a9;";
+            cb.addEventListener("change", () => {
+                if (cb.checked) selection.add(fullName); else selection.delete(fullName);
+            });
+            const lbl = h("span",
+                "cursor:pointer;user-select:none;flex:1;overflow:hidden;text-overflow:ellipsis;" +
+                "white-space:nowrap;font-size:11px;color:var(--input-text,#ddd);");
+            lbl.textContent = label;
+            lbl.addEventListener("click", () => { cb.click(); });
+            row.appendChild(cb);
+            row.appendChild(lbl);
+            return row;
+        }
+
+        const row = h("div",
+            `display:flex;align-items:center;gap:6px;padding:3px 2px;border-radius:3px;` +
+            `${isCurrent ? "background:var(--comfy-menu-secondary-bg,#303030);" : ""}`);
+        row.title = fullName;
+
+        const lbl = h("label",
+            `cursor:default;user-select:none;flex:1;overflow:hidden;text-overflow:ellipsis;` +
+            `white-space:nowrap;font-size:11px;` +
+            `color:${isCurrent ? "#7d7" : "var(--input-text,#ddd)"};`);
+        lbl.textContent = label;
+        row.appendChild(lbl);
+
+        const selBtn = h("button",
+            `padding:2px 10px;border-radius:3px;font-size:11px;cursor:pointer;flex-shrink:0;` +
+            `background:${isCurrent ? "var(--comfy-menu-secondary-bg,#303030)" : "var(--comfy-input-bg,#222)"};` +
+            `border:1px solid var(--content-bg,#4e4e4e);` +
+            `color:${isCurrent ? "#9f9" : "var(--input-text,#ddd)"};`,
+            isCurrent ? "✓" : "Select");
+        selBtn.addEventListener("mouseenter", () => {
+            selBtn.style.background = "var(--comfy-menu-secondary-bg,#303030)";
+        });
+        selBtn.addEventListener("mouseleave", () => {
+            selBtn.style.background = isCurrent
+                ? "var(--comfy-menu-secondary-bg,#303030)"
+                : "var(--comfy-input-bg,#222)";
+        });
+        selBtn.addEventListener("click", () => { close(); onSelect?.(fullName); });
+
+        row.appendChild(selBtn);
+        if (isCurrent) row.dataset.current = "true";
+        return row;
+    }
+
+    // -- ツリーレンダリング --
+
+    function renderTree(node, pathPrefix, close, filterFn = null, alwaysOpen = false) {
+        const els = [];
+        for (const name of [...node.items].sort()) {
+            if (filterFn && !filterFn(name)) continue;
+            els.push(makeRow(name, name === currentValue, close));
+        }
+        for (const [folderName, child] of [...node.children.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+            const key      = (pathPrefix ? pathPrefix + "/" : "") + folderName;
+            const childEls = renderTree(child, key, close, filterFn, alwaysOpen);
+            if (childEls.length === 0) continue;
+            const total    = countAll(child);
+            const matched  = filterFn ? countFiltered(child, filterFn) : total;
+            const countStr = filterFn && matched < total ? `${matched}/${total}` : String(total);
+            const hasCur   = containsCurrent(child, key);
+            els.push(makePickerSection(collapsed, key, `${folderName}  (${countStr})`, SAX_COLORS.node, childEls, !hasCur, alwaysOpen, mode));
+        }
+        return els;
+    }
+
+    // -- ダイアログ表示 --
+
+    let pickerCleanup = null;
+    showDialog({
+        title,
+        width:     480,
+        className,
+        onClose:   () => { pickerCleanup?.(); },
+        build(dlg, close) {
+            const closeFn = () => { pickerCleanup?.(); close(); };
+
+            const renderContentFn = (q, scroll) => {
+                scroll.innerHTML = "";
+                const lower = q.toLowerCase().trim();
+                const filterFn = lower
+                    ? customFilter
+                        ? (name) => customFilter(name, lower)
+                        : (name) => name.replace(/\.[^.]+$/, "").toLowerCase().includes(lower)
+                    : null;
+
+                if (items.length === 0) {
+                    scroll.appendChild(h("div",
+                        "color:var(--content-bg,#4e4e4e);padding:20px;text-align:center;font-size:12px;",
+                        "No items found"));
+                    return;
+                }
+
+                const tree         = buildTree(items);
+                const sectionCount = countSections(tree, filterFn);
+                const forceOpen    = sectionCount <= AUTO_EXPAND_THRESHOLD;
+                const els          = renderTree(tree, "", closeFn, filterFn, forceOpen);
+                if (els.length === 0) {
+                    scroll.appendChild(h("div",
+                        "color:var(--content-bg,#4e4e4e);padding:20px;text-align:center;font-size:12px;",
+                        "No results"));
+                    return;
+                }
+                for (const el of els) scroll.appendChild(el);
+                if (!filterFn) {
+                    requestAnimationFrame(() => {
+                        const cur = scroll.querySelector("[data-current='true']");
+                        if (cur) cur.scrollIntoView({ block: "center" });
+                    });
+                }
+            };
+
+            const { element, focusSearch, cleanup } = buildPickerContent({
+                mode,
+                placeholder,
+                renderContent: renderContentFn,
+                onApply: mode === "multi" ? () => { closeFn(); onConfirm?.([...selection]); } : null,
+                onCancel: closeFn,
+            });
+            pickerCleanup = cleanup;
+
+            dlg.appendChild(element);
+            focusSearch();
+        },
+    });
 }
