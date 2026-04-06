@@ -1969,6 +1969,34 @@ export function buildPickerContent({
     // スクロールコンテナ
     const scroll = h("div", "overflow-y:auto;flex:1;");
 
+    // Expand All / Collapse All — scroll 内のセクションを DOM 操作で一括制御
+    function toggleAllSections(expand) {
+        scroll.querySelectorAll(":scope div > div").forEach(header => {
+            const arrow = header.querySelector(":scope > span:first-of-type");
+            const body = header.nextElementSibling;
+            if (!arrow || !body || body.tagName !== "DIV") return;
+            const isArrow = arrow.textContent === "▶" || arrow.textContent === "▼";
+            if (!isArrow) return;
+            arrow.textContent = expand ? "▼" : "▶";
+            body.style.display = expand ? "" : "none";
+        });
+        // collapsed Map の同期は header の click イベントに任せず、
+        // 次回 renderContent 時に collapsed Map の状態で再構築される
+    }
+
+    const makeFoldBtn = (label, title, fn) => {
+        const b = h("button",
+            "padding:2px 6px;border-radius:3px;font-size:10px;cursor:pointer;" +
+            "background:none;border:1px solid var(--content-bg,#4e4e4e);" +
+            "color:var(--input-text,#ddd);white-space:nowrap;flex-shrink:0;");
+        b.textContent = label;
+        b.title = title;
+        b.addEventListener("click", fn);
+        return b;
+    };
+    searchWrap.appendChild(makeFoldBtn("▼", "Expand all", () => toggleAllSections(true)));
+    searchWrap.appendChild(makeFoldBtn("▶", "Collapse all", () => toggleAllSections(false)));
+
     // 描画関数
     const doRender = () => renderContent(searchInput.value, scroll);
     doRender();
