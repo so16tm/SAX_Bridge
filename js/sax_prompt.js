@@ -21,6 +21,11 @@ async function loadWildcardsFromAPI() {
     return [];
 }
 
+// COMBO の標準 ContextMenu を閉じる
+function dismissComboMenu() {
+    document.querySelectorAll(".litecontextmenu").forEach(e => e.remove());
+}
+
 app.registerExtension({
     name: "SAX.Prompt",
 
@@ -41,23 +46,25 @@ app.registerExtension({
 
             const origLoraMouse = loraCombo.mouse;
             loraCombo.mouse = function(event, pos, node) {
-                if (event.type === "mouseup") {
-                    const values = (this.options?.values || []).filter(v => v !== LORA_PLACEHOLDER);
-                    showFilePicker({
-                        items: values,
-                        title: "Select LoRA to Insert",
-                        placeholder: "Search LoRA name…",
-                        mode: "single",
-                        className: "__sax_prompt_lora_picker",
-                        displayName: loraDisplayName,
-                        onSelect(name) {
-                            if (!tbox) return;
-                            let lora_name = name;
-                            if (lora_name.endsWith(".safetensors")) lora_name = lora_name.slice(0, -12);
-                            tbox.value += `<lora:${lora_name}>`;
-                        },
+                if (event.type === "pointerup") {
+                    requestAnimationFrame(() => {
+                        dismissComboMenu();
+                        const values = (this.options?.values || []).filter(v => v !== LORA_PLACEHOLDER);
+                        showFilePicker({
+                            items: values,
+                            title: "Select LoRA to Insert",
+                            placeholder: "Search LoRA name…",
+                            mode: "single",
+                            className: "__sax_prompt_lora_picker",
+                            displayName: loraDisplayName,
+                            onSelect(name) {
+                                if (!tbox) return;
+                                let lora_name = name;
+                                if (lora_name.endsWith(".safetensors")) lora_name = lora_name.slice(0, -12);
+                                tbox.value += `<lora:${lora_name}>`;
+                            },
+                        });
                     });
-                    return true;
                 }
                 return origLoraMouse?.call(this, event, pos, node) ?? false;
             };
@@ -83,21 +90,23 @@ app.registerExtension({
 
             const origWcMouse = wcCombo.mouse;
             wcCombo.mouse = function(event, pos, node) {
-                if (event.type === "mouseup") {
-                    const values = (this.options?.values || []).filter(v => v !== WC_PLACEHOLDER);
-                    showFilePicker({
-                        items: values,
-                        title: "Select Wildcard to Insert",
-                        placeholder: "Search wildcard…",
-                        mode: "single",
-                        className: "__sax_prompt_wc_picker",
-                        onSelect(name) {
-                            if (!tbox) return;
-                            if (tbox.value !== "") tbox.value += ", ";
-                            tbox.value += name;
-                        },
+                if (event.type === "pointerup") {
+                    requestAnimationFrame(() => {
+                        dismissComboMenu();
+                        const values = (this.options?.values || []).filter(v => v !== WC_PLACEHOLDER);
+                        showFilePicker({
+                            items: values,
+                            title: "Select Wildcard to Insert",
+                            placeholder: "Search wildcard…",
+                            mode: "single",
+                            className: "__sax_prompt_wc_picker",
+                            onSelect(name) {
+                                if (!tbox) return;
+                                if (tbox.value !== "") tbox.value += ", ";
+                                tbox.value += name;
+                            },
+                        });
                     });
-                    return true;
                 }
                 return origWcMouse?.call(this, event, pos, node) ?? false;
             };
