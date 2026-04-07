@@ -8,6 +8,7 @@ from .nodes import image_collector as image_collector_node
 from .nodes import primitive_store as primitive_store_node
 from .nodes import guidance as guidance_node
 from .nodes import sam3 as sam3_node
+from .nodes import debug_log as debug_log_module
 from .nodes.schedulers import register_schedulers
 
 register_schedulers()
@@ -68,6 +69,19 @@ for v3_node in [
     _schema = v3_node.GET_SCHEMA()
     NODE_CLASS_MAPPINGS[_schema.node_id] = v3_node
     NODE_DISPLAY_NAME_MAPPINGS[_schema.node_id] = _schema.display_name
+
+# デバッグログ基盤: SAX_DEBUG 環境変数が設定されている場合のみ有効化
+if debug_log_module.is_enabled():
+    for node_cls in NODE_CLASS_MAPPINGS.values():
+        try:
+            original = node_cls.execute.__func__
+            wrapped = debug_log_module.wrap_execute(original, node_cls)
+            node_cls.execute = classmethod(wrapped)
+        except Exception as exc:
+            import logging
+            logging.getLogger("SAX_Bridge").warning(
+                "debug_log: failed to wrap %s: %s", node_cls, exc
+            )
 
 WEB_DIRECTORY = "js"
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']
