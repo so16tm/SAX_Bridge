@@ -399,6 +399,9 @@ class SAX_Bridge_Debug_Controller(io.ComfyNode):
             category="SAX/Bridge/Debug",
             description="Enables debug logging for all SAX nodes in this workflow when toggled ON.",
             is_output_node=True,
+            # not_idempotent: ComfyUI のキャッシュをバイパスし毎回実行する。
+            # これにより enable()/disable() が毎回呼ばれ、_report_requested の状態が常に最新になる。
+            not_idempotent=True,
             inputs=[
                 io.Boolean.Input(
                     "enabled",
