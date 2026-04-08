@@ -39,23 +39,20 @@ _MAX_RECORDS = 1000
 
 
 def enable(cls: type) -> None:
-    """Debug Controller から呼ばれる。今回のワークフロー分を「出力」としてフラッシュする。
+    """Debug Controller から呼ばれる。今回のワークフロー分のレポート出力を要求する。
 
-    Debug Controller は is_output_node=True でワークフロー末端に実行されるため、
-    この時点で _execution_records には今回のワークフローの全ノード記録が蓄積済み。
-    フラグを True に設定してから flush することで、今回分が正しく出力される。
+    Debug Controller の実行順序に関わらず、ワークフロー完了時に lifecycle hook
+    (SAXDebugLifecycleHook.on_prompt_end) が呼ばれて flush される。
     """
     global _report_requested
     _try_capture_prompt(cls)
     _report_requested = True
-    _do_flush()
 
 
 def disable() -> None:
-    """Debug Controller から呼ばれる。今回のワークフロー分を「破棄」としてフラッシュする。"""
+    """Debug Controller から呼ばれる。今回のワークフロー分のレポート出力を取り下げる。"""
     global _report_requested
     _report_requested = False
-    _do_flush()
 
 
 def wrap_execute(original_func: Callable, node_class: type) -> Callable:
@@ -406,3 +403,63 @@ def _cleanup_old_files(debug_dir: Path) -> None:
             old_file.unlink()
         except OSError as exc:
             logger.warning("Failed to delete old debug log: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# ComfyUI lifecycle hook
+# ---------------------------------------------------------------------------
+
+# ComfyUI の CacheProvider インターフェースを利用してワークフロー完了時に flush する。
+# Debug Controller の実行順序（先頭/末端）に依存しない確実なフラッシュタイミングを確保する。
+
+# singleton インスタンス（多重登録防止）
+_lifecycle_hook_instance: Any = None
+
+
+def register_lifecycle_hook() -> None:
+    """ComfyUI の prompt lifecycle に flush フックを登録する。
+
+    ComfyUI が起動済みで CacheProvider API が利用可能な場合のみ登録される。
+    テスト環境や ComfyUI 非依存の実行環境では no-op。
+    複数回呼ばれても singleton により重複登録されない（hot-reload 対策）。
+    """
+    global _lifecycle_hook_instance
+    if _lifecycle_hook_instance is not None:
+        return
+
+    try:
+        from comfy_api.latest._caching import CacheProvider
+        from comfy_execution.cache_provider import register_cache_provider
+    except ImportError:
+        logger.debug("lifecycle hook skipped: CacheProvider API unavailable")
+        return
+
+    class SAXDebugLifecycleHook(CacheProvider):
+        """ワークフロー完了時に debug log の flush をトリガーする cache provider。
+
+        実際のキャッシュ処理は行わず、on_prompt_start / on_prompt_end のタイミングフックのみを利用する。
+        """
+
+        async def on_lookup(self, context):  # type: ignore[override]
+            return None
+
+        async def on_store(self, context, value):  # type: ignore[override]
+            return None
+
+        def should_cache(self, context, value=None):  # type: ignore[override]
+            return False
+
+        def on_prompt_start(self, prompt_id: str) -> None:  # type: ignore[override]
+            # 前回ワークフローの残留データを除去し、フラグをリセットする。
+            # Debug Controller 不在のワークフローで前回のフラグが残らないよう保証し、
+            # 異常終了で on_prompt_end が発火しなかった場合の残留データにも対応する。
+            global _report_requested, _execution_records, _prompt_data
+            _report_requested = False
+            _execution_records = []
+            _prompt_data = {}
+
+        def on_prompt_end(self, prompt_id: str) -> None:  # type: ignore[override]
+            _do_flush()
+
+    _lifecycle_hook_instance = SAXDebugLifecycleHook()
+    register_cache_provider(_lifecycle_hook_instance)

@@ -68,8 +68,9 @@ class TestEnableDisable:
         enable(cls)
         assert debug_log_mod._prompt_data != {}
 
-    def test_enable_outputs_current_workflow_records(self):
-        # Controller 末端実行時点で蓄積済みの今回分を「出力」として flush する
+    def test_enable_does_not_flush(self):
+        # enable は flush を行わず、フラグ設定と prompt 取得のみ行う
+        # （flush は ComfyUI lifecycle hook 経由で on_prompt_end に発火する）
         debug_log_mod._execution_records = [
             {"node_id": "1", "class_type": "T", "display_name": "N",
              "input_summary": {}, "output_summary": {}, "elapsed_s": 0.1,
@@ -78,12 +79,12 @@ class TestEnableDisable:
         cls = types.SimpleNamespace(hidden=types.SimpleNamespace(prompt={}, unique_id="1"))
         with patch.object(debug_log_mod, "_write_jsonl") as mock_write:
             enable(cls)
-        assert debug_log_mod._execution_records == []
-        mock_write.assert_called_once()
+        # flush されないので records は残ったまま
+        assert len(debug_log_mod._execution_records) == 1
+        mock_write.assert_not_called()
         assert debug_log_mod._report_requested is True
 
-    def test_disable_discards_current_workflow_records(self):
-        # Controller 末端実行時点で蓄積済みの今回分を「破棄」として flush する
+    def test_disable_does_not_flush(self):
         debug_log_mod._execution_records = [
             {"node_id": "1", "class_type": "T", "display_name": "N",
              "input_summary": {}, "output_summary": {}, "elapsed_s": 0.1,
@@ -91,7 +92,8 @@ class TestEnableDisable:
         ]
         with patch.object(debug_log_mod, "_write_jsonl") as mock_write:
             disable()
-        assert debug_log_mod._execution_records == []
+        # flush されないので records は残ったまま
+        assert len(debug_log_mod._execution_records) == 1
         mock_write.assert_not_called()
         assert debug_log_mod._report_requested is False
 

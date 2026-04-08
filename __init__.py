@@ -83,5 +83,8 @@ for node_cls in NODE_CLASS_MAPPINGS.values():
             "debug_log: failed to wrap %s: %s", node_cls, exc
         )
 
+# ComfyUI の prompt lifecycle に flush フックを登録する（ワークフロー完了時に発火）
+debug_log_module.register_lifecycle_hook()
+
 WEB_DIRECTORY = "js"
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']
