@@ -33,6 +33,7 @@ for v3_node in [
     # Debug
     debug_node.SAX_Bridge_Assert,
     debug_node.SAX_Bridge_Assert_Pipe,
+    debug_node.SAX_Bridge_Debug_Controller,
     debug_node.SAX_Bridge_Debug_Inspector,
     debug_node.SAX_Bridge_Debug_Text,
     # Enhance
@@ -70,18 +71,17 @@ for v3_node in [
     NODE_CLASS_MAPPINGS[_schema.node_id] = v3_node
     NODE_DISPLAY_NAME_MAPPINGS[_schema.node_id] = _schema.display_name
 
-# デバッグログ基盤: SAX_DEBUG 環境変数が設定されている場合のみ有効化
-if debug_log_module.is_enabled():
-    for node_cls in NODE_CLASS_MAPPINGS.values():
-        try:
-            original = node_cls.execute.__func__
-            wrapped = debug_log_module.wrap_execute(original, node_cls)
-            node_cls.execute = classmethod(wrapped)
-        except Exception as exc:
-            import logging
-            logging.getLogger("SAX_Bridge").warning(
-                "debug_log: failed to wrap %s: %s", node_cls, exc
-            )
+# デバッグログ基盤: 全ノードの execute をラップ（実行時のフラグで ON/OFF 制御）
+for node_cls in NODE_CLASS_MAPPINGS.values():
+    try:
+        original = node_cls.execute.__func__
+        wrapped = debug_log_module.wrap_execute(original, node_cls)
+        node_cls.execute = classmethod(wrapped)
+    except Exception as exc:
+        import logging
+        logging.getLogger("SAX_Bridge").warning(
+            "debug_log: failed to wrap %s: %s", node_cls, exc
+        )
 
 WEB_DIRECTORY = "js"
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']

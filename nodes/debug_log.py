@@ -1,15 +1,14 @@
 """SAX_Bridge デバッグログ基盤 — ワークフロー内の実行追跡・レポート・JSONL 出力。
 
-環境変数 SAX_DEBUG が設定されている場合のみ有効化される。
-__init__.py から wrap_execute() で各ノードの execute を装飾し、
-実行記録を蓄積 → 次のワークフロー開始時に前回分をフラッシュする。
+全ノードの execute を常にラップし、実行記録を常に蓄積する。
+Debug Controller ノードが ON の場合のみ、flush 時にレポートが出力される。
+Controller の実行順序に依存せず、ワークフロー内の全ノードの記録を取得できる。
 """
 
 import functools
 import inspect
 import json
 import logging
-import os
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -24,12 +23,14 @@ logger = logging.getLogger("SAX_Bridge.debug")
 # モジュールグローバル状態
 # ---------------------------------------------------------------------------
 
+# flush 時にレポートを出力するか（Debug Controller が ON にする）
+_report_requested: bool = False
 _execution_records: list[dict[str, Any]] = []
 _prompt_data: dict[str, Any] = {}
-_last_record_perf_time: float = 0.0
 
 _MAX_LOG_FILES = 20
-_NEW_RUN_THRESHOLD_S = 5.0
+# Debug Controller 不在時に蓄積が無制限になるのを防ぐ安全弁
+_MAX_RECORDS = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -37,15 +38,30 @@ _NEW_RUN_THRESHOLD_S = 5.0
 # ---------------------------------------------------------------------------
 
 
-def is_enabled() -> bool:
-    """SAX_DEBUG 環境変数が設定されているか。"""
-    return "SAX_DEBUG" in os.environ
+def enable(cls: type) -> None:
+    """Debug Controller から呼ばれる。前回分を flush し、今回のレポート出力を要求する。
+
+    同一ワークフロー内で複数回呼ばれた場合、2回目以降は _try_capture_prompt が no-op になり
+    最初の prompt が保持される（_prompt_data の上書きガードによる）。
+    """
+    global _report_requested
+    _do_flush()
+    _report_requested = True
+    _try_capture_prompt(cls)
+
+
+def disable() -> None:
+    """Debug Controller から呼ばれる。前回分を flush し、今回のレポート出力を取り下げる。"""
+    global _report_requested
+    _do_flush()
+    _report_requested = False
 
 
 def wrap_execute(original_func: Callable, node_class: type) -> Callable:
     """execute の生関数をラップして返す。
 
     呼び出し元（__init__.py）で classmethod() に再ラップして適用する。
+    全ノードで常に記録を蓄積する。出力可否は flush 時に判定される。
     """
     schema = node_class.GET_SCHEMA()
     class_type: str = schema.node_id
@@ -58,11 +74,9 @@ def wrap_execute(original_func: Callable, node_class: type) -> Callable:
 
     @functools.wraps(original_func)
     def wrapper(cls: type, *args: Any, **kwargs: Any) -> Any:
-        _maybe_flush_if_new_run()
+        _enforce_record_limit()
 
         node_id = _try_get_unique_id(cls)
-        _try_capture_prompt(cls)
-
         input_summary = _build_input_summary(param_names, args, kwargs)
 
         start = time.perf_counter()
@@ -91,8 +105,7 @@ def wrap_execute(original_func: Callable, node_class: type) -> Callable:
                 "error": error_msg,
                 "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             }
-            _append_record(record)
-            _log_node_execution(record)
+            _execution_records.append(record)
 
         return result
 
@@ -100,46 +113,54 @@ def wrap_execute(original_func: Callable, node_class: type) -> Callable:
 
 
 def maybe_flush() -> None:
-    """前回のワークフロー実行の記録が残っていればレポート出力 + JSONL 書き出し + 状態リセット。"""
-    if _execution_records:
-        _do_flush()
+    """外部から明示的に flush を要求する公開 API。
+
+    _report_requested フラグはリセットされない。次回の enable/disable 呼び出しまで
+    現在の値が維持されるため、連続する flush 呼び出しで出力可否の判定は一貫する。
+    """
+    _do_flush()
 
 
 # ---------------------------------------------------------------------------
-# 内部: 新ワークフロー検出 & フラッシュ
+# 内部: 蓄積上限ガード & flush
 # ---------------------------------------------------------------------------
 
 
-def _maybe_flush_if_new_run() -> None:
-    """前回の最終記録から一定時間経過していれば前回分をフラッシュする。"""
-    if not _execution_records:
-        return
-    if time.perf_counter() - _last_record_perf_time > _NEW_RUN_THRESHOLD_S:
-        _do_flush()
+def _enforce_record_limit() -> None:
+    """Debug Controller 不在時の無限蓄積を防ぐ安全弁。
 
-
-def _append_record(record: dict[str, Any]) -> None:
-    global _last_record_perf_time
-    _execution_records.append(record)
-    _last_record_perf_time = time.perf_counter()
+    上限到達時は FIFO（古い順）で削除し、最新の記録を保持する。
+    直近のノード実行状況を優先的に残すことで、問題発生時のデバッグ精度を維持する。
+    """
+    global _execution_records
+    if len(_execution_records) >= _MAX_RECORDS:
+        # warning が毎回出るのを防ぐため、上限ちょうどで到達した瞬間のみ記録する
+        if len(_execution_records) == _MAX_RECORDS:
+            logger.warning(
+                "debug_log: record buffer reached %d, dropping oldest records (FIFO)",
+                _MAX_RECORDS,
+            )
+        _execution_records = _execution_records[-(_MAX_RECORDS - 1):]
 
 
 def _do_flush() -> None:
-    """蓄積された記録からレポートを出力し、状態をリセットする。"""
-    global _execution_records, _prompt_data, _last_record_perf_time
+    """蓄積された記録を処理し、状態をリセットする。
+
+    _report_requested=True なら出力、False なら破棄。
+    """
+    global _execution_records, _prompt_data
 
     if not _execution_records:
         return
 
-    report = _format_flow_report(_execution_records, _prompt_data)
-    if report:
-        logger.info("\n%s", report)
-
-    _write_jsonl(_execution_records)
+    if _report_requested:
+        report = _format_flow_report(_execution_records, _prompt_data)
+        if report:
+            logger.info("\n%s", report)
+        _write_jsonl(_execution_records)
 
     _execution_records = []
     _prompt_data = {}
-    _last_record_perf_time = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -191,11 +212,12 @@ def _try_capture_prompt(cls: type) -> None:
 # ---------------------------------------------------------------------------
 
 
+# 機密情報保護のため、長い文字列は長さのみ表示する
 _MAX_STR_DISPLAY_LEN = 50
 
 
 def _summarize_value(value: Any) -> str:
-    """値をサマリ文字列に変換する。文字列は長さのみ表示（機密情報保護）。"""
+    """値をサマリ文字列に変換する。長い文字列は長さのみ表示。"""
     if isinstance(value, str):
         if len(value) <= _MAX_STR_DISPLAY_LEN:
             return value
@@ -226,22 +248,6 @@ def _build_output_summary(result: Any) -> dict[str, str]:
             f"output_{i}": _summarize_value(v) for i, v in enumerate(args)
         }
     return {"result": _summarize_value(result)}
-
-
-# ---------------------------------------------------------------------------
-# 内部: コンソールログ
-# ---------------------------------------------------------------------------
-
-
-def _log_node_execution(record: dict[str, Any]) -> None:
-    """個別のノード実行記録をコンソールに出力する。"""
-    status_mark = "OK" if record["status"] == "OK" else "ERROR"
-    node_label = record["display_name"]
-    if record["node_id"] != "?":
-        node_label += f" (node#{record['node_id']})"
-    logger.info(
-        "[%s] %s %.2fs", status_mark, node_label, record["elapsed_s"]
-    )
 
 
 # ---------------------------------------------------------------------------

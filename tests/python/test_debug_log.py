@@ -1,8 +1,8 @@
 """SAX_Bridge Debug Log のテスト。"""
 
 import json
+import os
 import types
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -13,14 +13,15 @@ from nodes.debug_log import (
     _build_input_summary,
     _build_output_summary,
     _cleanup_old_files,
+    _enforce_record_limit,
     _format_flow_report,
-    _maybe_flush_if_new_run,
     _order_records,
     _topological_sort,
     _try_capture_prompt,
     _try_get_unique_id,
     _write_jsonl,
-    is_enabled,
+    enable,
+    disable,
     maybe_flush,
     wrap_execute,
 )
@@ -35,13 +36,13 @@ import nodes.debug_log as debug_log_mod
 @pytest.fixture(autouse=True)
 def _reset_module_state():
     """各テスト前後で debug_log のグローバル状態をリセットする。"""
+    debug_log_mod._report_requested = False
     debug_log_mod._execution_records = []
     debug_log_mod._prompt_data = {}
-    debug_log_mod._last_record_perf_time = 0.0
     yield
+    debug_log_mod._report_requested = False
     debug_log_mod._execution_records = []
     debug_log_mod._prompt_data = {}
-    debug_log_mod._last_record_perf_time = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -49,14 +50,54 @@ def _reset_module_state():
 # ---------------------------------------------------------------------------
 
 
-class TestIsEnabled:
-    def test_enabled_when_sax_debug_set(self, monkeypatch):
-        monkeypatch.setenv("SAX_DEBUG", "1")
-        assert is_enabled() is True
+class TestEnableDisable:
+    def test_enable_sets_flag(self):
+        cls = types.SimpleNamespace(hidden=types.SimpleNamespace(prompt={}, unique_id="1"))
+        enable(cls)
+        assert debug_log_mod._report_requested is True
 
-    def test_disabled_when_sax_debug_not_set(self, monkeypatch):
-        monkeypatch.delenv("SAX_DEBUG", raising=False)
-        assert is_enabled() is False
+    def test_disable_clears_flag(self):
+        debug_log_mod._report_requested = True
+        disable()
+        assert debug_log_mod._report_requested is False
+
+    def test_enable_captures_prompt(self):
+        prompt_data = {"1": {"class_type": "Foo", "inputs": {"a": ["2", 0]}}}
+        cls = types.SimpleNamespace(
+            hidden=types.SimpleNamespace(prompt=prompt_data, unique_id="1")
+        )
+        enable(cls)
+        assert debug_log_mod._prompt_data != {}
+
+    def test_enable_flushes_previous_records(self):
+        # 前回分の記録が残っている状態で enable を呼ぶと flush される
+        debug_log_mod._report_requested = True
+        debug_log_mod._execution_records = [
+            {"node_id": "1", "class_type": "T", "display_name": "N",
+             "input_summary": {}, "output_summary": {}, "elapsed_s": 0.1,
+             "status": "OK", "error": None, "timestamp": "2026-01-01T00:00:00+00:00"}
+        ]
+        cls = types.SimpleNamespace(hidden=types.SimpleNamespace(prompt={}, unique_id="1"))
+        with patch.object(debug_log_mod, "_write_jsonl") as mock_write:
+            enable(cls)
+        # 前回分が flush されて execution_records が空になる
+        assert debug_log_mod._execution_records == []
+        mock_write.assert_called_once()
+        # 今回のフラグは True にセットされる
+        assert debug_log_mod._report_requested is True
+
+    def test_disable_flushes_previous_records(self):
+        debug_log_mod._report_requested = True
+        debug_log_mod._execution_records = [
+            {"node_id": "1", "class_type": "T", "display_name": "N",
+             "input_summary": {}, "output_summary": {}, "elapsed_s": 0.1,
+             "status": "OK", "error": None, "timestamp": "2026-01-01T00:00:00+00:00"}
+        ]
+        with patch.object(debug_log_mod, "_write_jsonl") as mock_write:
+            disable()
+        assert debug_log_mod._execution_records == []
+        mock_write.assert_called_once()
+        assert debug_log_mod._report_requested is False
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +358,20 @@ class TestWrapExecute:
         cls.GET_SCHEMA.return_value = schema
         return cls
 
+    def test_records_even_when_report_not_requested(self):
+        # 常時記録方式: _report_requested が False でも記録される
+        node_class = self._make_node_class()
+        result_obj = types.SimpleNamespace(args=("output",))
+
+        def original(cls, a, b):
+            return result_obj
+
+        wrapped = wrap_execute(original, node_class)
+        result = wrapped(MagicMock(), "val_a", "val_b")
+
+        assert result is result_obj
+        assert len(debug_log_mod._execution_records) == 1
+
     def test_normal_execution(self):
         node_class = self._make_node_class()
         result_obj = types.SimpleNamespace(args=("output",))
@@ -392,15 +447,30 @@ class TestWrapExecute:
 
 
 class TestMaybeFlush:
-    def test_flush_when_records_exist(self):
+    def test_flush_when_report_requested(self):
+        debug_log_mod._report_requested = True
         debug_log_mod._execution_records = [
             {"node_id": "1", "class_type": "T", "display_name": "N",
              "input_summary": {}, "output_summary": {}, "elapsed_s": 0.1,
              "status": "OK", "error": None, "timestamp": "2026-01-01T00:00:00+00:00"}
         ]
-        with patch.object(debug_log_mod, "_write_jsonl"):
+        with patch.object(debug_log_mod, "_write_jsonl") as mock_write:
             maybe_flush()
         assert debug_log_mod._execution_records == []
+        mock_write.assert_called_once()
+
+    def test_discard_when_report_not_requested(self):
+        # _report_requested=False の場合は出力せず破棄のみ
+        debug_log_mod._report_requested = False
+        debug_log_mod._execution_records = [
+            {"node_id": "1", "class_type": "T", "display_name": "N",
+             "input_summary": {}, "output_summary": {}, "elapsed_s": 0.1,
+             "status": "OK", "error": None, "timestamp": "2026-01-01T00:00:00+00:00"}
+        ]
+        with patch.object(debug_log_mod, "_write_jsonl") as mock_write:
+            maybe_flush()
+        assert debug_log_mod._execution_records == []
+        mock_write.assert_not_called()
 
     def test_noop_when_no_records(self):
         maybe_flush()
@@ -408,33 +478,30 @@ class TestMaybeFlush:
 
 
 # ---------------------------------------------------------------------------
-# _maybe_flush_if_new_run
+# _enforce_record_limit
 # ---------------------------------------------------------------------------
 
 
-class TestMaybeFlushIfNewRun:
-    def test_flush_after_threshold(self):
-        debug_log_mod._execution_records = [{"node_id": "1", "class_type": "T",
-            "display_name": "N", "input_summary": {}, "output_summary": {},
-            "elapsed_s": 0.1, "status": "OK", "error": None,
-            "timestamp": "2026-01-01T00:00:00+00:00"}]
-        debug_log_mod._last_record_perf_time = time.perf_counter() - 10.0
+class TestEnforceRecordLimit:
+    def test_fifo_when_limit_reached(self):
+        # 1000件到達時に古い記録から削除し、999件を保持する
+        debug_log_mod._execution_records = [{"node_id": str(i)} for i in range(1000)]
+        _enforce_record_limit()
+        assert len(debug_log_mod._execution_records) == 999
+        # 最古の記録（"0"）が削除され、最新の記録（"999"）が保持される
+        assert debug_log_mod._execution_records[0]["node_id"] == "1"
+        assert debug_log_mod._execution_records[-1]["node_id"] == "999"
 
-        with patch.object(debug_log_mod, "_write_jsonl"):
-            _maybe_flush_if_new_run()
+    def test_keeps_when_under_limit(self):
+        debug_log_mod._execution_records = [{"node_id": str(i)} for i in range(100)]
+        _enforce_record_limit()
+        assert len(debug_log_mod._execution_records) == 100
 
-        assert debug_log_mod._execution_records == []
-
-    def test_no_flush_within_threshold(self):
-        debug_log_mod._execution_records = [{"node_id": "1"}]
-        debug_log_mod._last_record_perf_time = time.perf_counter()
-
-        _maybe_flush_if_new_run()
-        assert len(debug_log_mod._execution_records) == 1
-
-    def test_noop_when_empty(self):
-        _maybe_flush_if_new_run()
-        assert debug_log_mod._execution_records == []
+    def test_no_drop_at_999(self):
+        # 999件では発動しない
+        debug_log_mod._execution_records = [{"node_id": str(i)} for i in range(999)]
+        _enforce_record_limit()
+        assert len(debug_log_mod._execution_records) == 999
 
 
 # ---------------------------------------------------------------------------
@@ -476,7 +543,6 @@ class TestCleanupOldFiles:
         for i in range(25):
             f = tmp_path / f"sax_debug_{i:04d}.jsonl"
             f.write_text("")
-            import os
             os.utime(f, (i, i))
 
         _cleanup_old_files(tmp_path)

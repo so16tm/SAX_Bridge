@@ -388,6 +388,41 @@ def _format_pipe_summary(pipe: Any) -> str:
 # SAX Debug Inspector
 # ---------------------------------------------------------------------------
 
+class SAX_Bridge_Debug_Controller(io.ComfyNode):
+    """ワークフロー内のデバッグログを ON/OFF するコントローラノード。"""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Debug_Controller",
+            display_name="SAX Debug Controller",
+            category="SAX/Bridge/Debug",
+            description="Enables debug logging for all SAX nodes in this workflow when toggled ON.",
+            is_output_node=True,
+            inputs=[
+                io.Boolean.Input(
+                    "enabled",
+                    default=True,
+                    label_on="ON",
+                    label_off="OFF",
+                ),
+            ],
+            outputs=[],
+            hidden=[io.Hidden.prompt, io.Hidden.unique_id],
+        )
+
+    @classmethod
+    def execute(cls, enabled) -> io.NodeOutput:
+        from . import debug_log
+
+        if enabled:
+            debug_log.enable(cls)
+        else:
+            debug_log.disable()
+        status = "Debug logging: ON" if enabled else "Debug logging: OFF"
+        return io.NodeOutput(ui={"text": [status]})
+
+
 class SAX_Bridge_Debug_Inspector(io.ComfyNode):
     """Pipe の内部フィールドを UI に表示するデバッグノード。"""
 
