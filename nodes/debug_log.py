@@ -172,12 +172,27 @@ def _do_flush() -> None:
 
 
 def _try_get_unique_id(cls: type) -> str:
-    """hidden.unique_id があれば取得、なければ "?" を返す。"""
+    """node_id を取得する。
+
+    優先順位:
+    1. cls.hidden.unique_id（is_output_node=True のノードのみ利用可能）
+    2. ComfyUI の execution context（全ノードで取得可能）
+    3. フォールバック "?"
+    """
     hidden = getattr(cls, "hidden", None)
     if hidden is not None:
         uid = getattr(hidden, "unique_id", None)
         if uid is not None:
             return str(uid)
+
+    try:
+        from comfy_execution.utils import get_executing_context
+        ctx = get_executing_context()
+        if ctx is not None and ctx.node_id is not None:
+            return str(ctx.node_id)
+    except ImportError:
+        pass
+
     return "?"
 
 
