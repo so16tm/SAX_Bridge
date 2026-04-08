@@ -3,7 +3,6 @@
 import json
 import os
 import types
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -69,9 +68,8 @@ class TestEnableDisable:
         enable(cls)
         assert debug_log_mod._prompt_data != {}
 
-    def test_enable_flushes_previous_records(self):
-        # 前回分の記録が残っている状態で enable を呼ぶと flush される
-        debug_log_mod._report_requested = True
+    def test_enable_outputs_current_workflow_records(self):
+        # Controller 末端実行時点で蓄積済みの今回分を「出力」として flush する
         debug_log_mod._execution_records = [
             {"node_id": "1", "class_type": "T", "display_name": "N",
              "input_summary": {}, "output_summary": {}, "elapsed_s": 0.1,
@@ -80,14 +78,12 @@ class TestEnableDisable:
         cls = types.SimpleNamespace(hidden=types.SimpleNamespace(prompt={}, unique_id="1"))
         with patch.object(debug_log_mod, "_write_jsonl") as mock_write:
             enable(cls)
-        # 前回分が flush されて execution_records が空になる
         assert debug_log_mod._execution_records == []
         mock_write.assert_called_once()
-        # 今回のフラグは True にセットされる
         assert debug_log_mod._report_requested is True
 
-    def test_disable_flushes_previous_records(self):
-        debug_log_mod._report_requested = True
+    def test_disable_discards_current_workflow_records(self):
+        # Controller 末端実行時点で蓄積済みの今回分を「破棄」として flush する
         debug_log_mod._execution_records = [
             {"node_id": "1", "class_type": "T", "display_name": "N",
              "input_summary": {}, "output_summary": {}, "elapsed_s": 0.1,
@@ -96,7 +92,7 @@ class TestEnableDisable:
         with patch.object(debug_log_mod, "_write_jsonl") as mock_write:
             disable()
         assert debug_log_mod._execution_records == []
-        mock_write.assert_called_once()
+        mock_write.assert_not_called()
         assert debug_log_mod._report_requested is False
 
 

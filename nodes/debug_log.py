@@ -39,22 +39,23 @@ _MAX_RECORDS = 1000
 
 
 def enable(cls: type) -> None:
-    """Debug Controller から呼ばれる。前回分を flush し、今回のレポート出力を要求する。
+    """Debug Controller から呼ばれる。今回のワークフロー分を「出力」としてフラッシュする。
 
-    同一ワークフロー内で複数回呼ばれた場合、2回目以降は _try_capture_prompt が no-op になり
-    最初の prompt が保持される（_prompt_data の上書きガードによる）。
+    Debug Controller は is_output_node=True でワークフロー末端に実行されるため、
+    この時点で _execution_records には今回のワークフローの全ノード記録が蓄積済み。
+    フラグを True に設定してから flush することで、今回分が正しく出力される。
     """
     global _report_requested
-    _do_flush()
-    _report_requested = True
     _try_capture_prompt(cls)
+    _report_requested = True
+    _do_flush()
 
 
 def disable() -> None:
-    """Debug Controller から呼ばれる。前回分を flush し、今回のレポート出力を取り下げる。"""
+    """Debug Controller から呼ばれる。今回のワークフロー分を「破棄」としてフラッシュする。"""
     global _report_requested
-    _do_flush()
     _report_requested = False
+    _do_flush()
 
 
 def wrap_execute(original_func: Callable, node_class: type) -> Callable:
@@ -62,10 +63,15 @@ def wrap_execute(original_func: Callable, node_class: type) -> Callable:
 
     呼び出し元（__init__.py）で classmethod() に再ラップして適用する。
     全ノードで常に記録を蓄積する。出力可否は flush 時に判定される。
+    Debug Controller 自身は記録に混入するのを防ぐためラップ対象から除外する。
     """
     schema = node_class.GET_SCHEMA()
     class_type: str = schema.node_id
     display_name: str = schema.display_name
+
+    # Debug Controller は自身のログを記録しないため、ラップせず生関数をそのまま返す
+    if class_type == "SAX_Bridge_Debug_Controller":
+        return original_func
     # シグネチャをクロージャ生成時にキャッシュ（毎回の inspect.signature 呼び出しを回避）
     sig = inspect.signature(original_func)
     param_names: list[str] = [
