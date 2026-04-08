@@ -399,9 +399,6 @@ class SAX_Bridge_Debug_Controller(io.ComfyNode):
             category="SAX/Bridge/Debug",
             description="Enables debug logging for all SAX nodes in this workflow when toggled ON.",
             is_output_node=True,
-            # not_idempotent: ComfyUI のキャッシュをバイパスし毎回実行する。
-            # これにより enable()/disable() が毎回呼ばれ、_report_requested の状態が常に最新になる。
-            not_idempotent=True,
             inputs=[
                 io.Boolean.Input(
                     "enabled",
@@ -413,6 +410,12 @@ class SAX_Bridge_Debug_Controller(io.ComfyNode):
             outputs=[],
             hidden=[io.Hidden.prompt, io.Hidden.unique_id],
         )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs) -> float:
+        # NaN は自分自身と等しくないためキャッシュミスを強制し、毎回必ず execute が呼ばれる。
+        # Controller のフラグ設定を毎回確実に反映するために必要。
+        return float("nan")
 
     @classmethod
     def execute(cls, enabled) -> io.NodeOutput:
