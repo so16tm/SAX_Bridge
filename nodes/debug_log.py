@@ -186,7 +186,7 @@ def _try_get_unique_id(cls: type) -> str:
             return str(uid)
 
     try:
-        from comfy_execution.utils import get_executing_context
+        from comfy_execution.utils import get_executing_context  # type: ignore[import-untyped]
         ctx = get_executing_context()
         if ctx is not None and ctx.node_id is not None:
             return str(ctx.node_id)
@@ -364,7 +364,6 @@ def _format_flow_report(
 
     if jsonl_path is not None:
         lines.append(f"Details   : {jsonl_path}")
-        lines.append(f"Analyze   : /sax-debug-analyze {jsonl_path}")
 
     lines.append("========================")
     return "\n".join(lines)
@@ -486,16 +485,16 @@ def register_lifecycle_hook() -> None:
         実際のキャッシュ処理は行わず、on_prompt_start / on_prompt_end のタイミングフックのみを利用する。
         """
 
-        async def on_lookup(self, context):  # type: ignore[override]
+        async def on_lookup(self, _context):  # type: ignore[override]
             return None
 
-        async def on_store(self, context, value):  # type: ignore[override]
+        async def on_store(self, _context, _value):  # type: ignore[override]
             return None
 
-        def should_cache(self, context, value=None):  # type: ignore[override]
+        def should_cache(self, _context, _value=None):  # type: ignore[override]
             return False
 
-        def on_prompt_start(self, prompt_id: str) -> None:  # type: ignore[override]
+        def on_prompt_start(self, _prompt_id: str) -> None:  # type: ignore[override]
             # 前回ワークフローの残留データを除去し、フラグをリセットする。
             # Debug Controller 不在のワークフローで前回のフラグが残らないよう保証し、
             # 異常終了で on_prompt_end が発火しなかった場合の残留データにも対応する。
@@ -504,7 +503,7 @@ def register_lifecycle_hook() -> None:
             _execution_records = []
             _prompt_data = {}
 
-        def on_prompt_end(self, prompt_id: str) -> None:  # type: ignore[override]
+        def on_prompt_end(self, _prompt_id: str) -> None:  # type: ignore[override]
             _do_flush()
 
     _lifecycle_hook_instance = SAXDebugLifecycleHook()
