@@ -262,6 +262,8 @@ class TestFormatFlowReport:
         assert _format_flow_report([], {}) == ""
 
     def test_with_prompt_flow_order(self):
+        # 新形式: ボトルネック表示なのでフロー順ではなく時間降順。
+        # ただし Workflow 行・Bottlenecks 行・ノード名が含まれることを確認する。
         prompt = {
             "1": {"inputs": {}},
             "2": {"inputs": {"a": ["1", 0]}},
@@ -272,9 +274,10 @@ class TestFormatFlowReport:
         ]
         report = _format_flow_report(records, prompt)
         assert "SAX Debug Report" in report
-        node_a_pos = report.find("NodeA")
-        node_b_pos = report.find("NodeB")
-        assert node_a_pos < node_b_pos
+        assert "Workflow" in report
+        assert "Bottlenecks" in report
+        assert "NodeA" in report
+        assert "NodeB" in report
 
     def test_without_prompt_execution_order(self):
         records = [
@@ -283,8 +286,8 @@ class TestFormatFlowReport:
         ]
         report = _format_flow_report(records, {})
         assert "SAX Debug Report" in report
-        assert "Total:" in report
-        assert "Bottleneck:" in report
+        assert "Workflow" in report
+        assert "Bottlenecks" in report
 
     def test_bottleneck_display(self):
         records = [

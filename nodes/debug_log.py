@@ -157,10 +157,10 @@ def _do_flush() -> None:
         return
 
     if _report_requested:
-        report = _format_flow_report(_execution_records, _prompt_data)
+        jsonl_path = _write_jsonl(_execution_records)
+        report = _format_flow_report(_execution_records, _prompt_data, jsonl_path)
         if report:
             logger.info("\n%s", report)
-        _write_jsonl(_execution_records)
 
     _execution_records = []
     _prompt_data = {}
@@ -316,8 +316,9 @@ def _topological_sort(
 def _format_flow_report(
     records: list[dict[str, Any]],
     prompt: dict[str, Any],
+    jsonl_path: Path | None = None,
 ) -> str:
-    """フロー順にサマリレポートを生成する。"""
+    """圧縮サマリ形式のレポートを生成する。"""
     if not records:
         return ""
 
@@ -325,18 +326,46 @@ def _format_flow_report(
     if not ordered:
         return ""
 
+    total = sum(r["elapsed_s"] for r in ordered)
+    error_count = sum(1 for r in ordered if r.get("status") == "ERROR")
+    node_count = len(ordered)
+
+    # ボトルネック TOP 3
+    top3 = sorted(ordered, key=lambda r: r["elapsed_s"], reverse=True)[:3]
+
+    bar_width = 20
+    bar_fill = "\u2588"
+    bar_empty = "\u2591"
+
+    def _make_bar(elapsed: float) -> str:
+        ratio = elapsed / total if total > 0 else 0.0
+        filled = round(bar_width * ratio)
+        return bar_fill * filled + bar_empty * (bar_width - filled)
+
+    def _truncate(name: str, max_len: int = 25) -> str:
+        return name if len(name) <= max_len else name[: max_len - 1] + "\u2026"
+
     lines: list[str] = ["=== SAX Debug Report ==="]
-    for i, rec in enumerate(ordered):
+    lines.append(f"Workflow : {node_count} nodes  /  {total:.2f}s total")
+    lines.append("Bottlenecks:")
+    for rank, rec in enumerate(top3, start=1):
         label = rec["display_name"]
         if rec["node_id"] != "?":
             label += f" (node#{rec['node_id']})"
-        prefix = "  " if i == 0 else "\u2192 "
-        lines.append(f"  {prefix}{label}  [{rec['elapsed_s']:.2f}s]")
+        label = _truncate(label)
+        ratio = rec["elapsed_s"] / total if total > 0 else 0.0
+        bar = _make_bar(rec["elapsed_s"])
+        pct = ratio * 100
+        lines.append(
+            f"  {rank}.  {label:<25}  {rec['elapsed_s']:>5.2f}s  {bar}  {pct:>5.1f}%"
+        )
 
-    total = sum(r["elapsed_s"] for r in ordered)
-    bottleneck = max(ordered, key=lambda r: r["elapsed_s"])
-    bn_label = f"{bottleneck['display_name']} {bottleneck['elapsed_s']:.2f}s"
-    lines.append(f"Total: {total:.2f}s / Bottleneck: {bn_label}")
+    lines.append(f"Errors    : {error_count}")
+
+    if jsonl_path is not None:
+        lines.append(f"Details   : {jsonl_path}")
+        lines.append(f"Analyze   : /sax-debug-analyze {jsonl_path}")
+
     lines.append("========================")
     return "\n".join(lines)
 
@@ -385,13 +414,13 @@ def _get_debug_output_dir() -> Path:
     return debug_dir
 
 
-def _write_jsonl(records: list[dict[str, Any]]) -> None:
-    """記録を JSONL ファイルに書き出す。"""
+def _write_jsonl(records: list[dict[str, Any]]) -> Path | None:
+    """記録を JSONL ファイルに書き出し、書き込み先パスを返す。失敗時は None を返す。"""
     try:
         debug_dir = _get_debug_output_dir()
     except Exception:
         logger.warning("JSONL output skipped: folder_paths unavailable")
-        return
+        return None
 
     ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
     filepath = debug_dir / f"sax_debug_{ts}.jsonl"
@@ -402,8 +431,10 @@ def _write_jsonl(records: list[dict[str, Any]]) -> None:
                 f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
         logger.info("Debug log written: %s", filepath)
         _cleanup_old_files(debug_dir)
+        return filepath
     except OSError as exc:
         logger.warning("JSONL write failed: %s", exc)
+        return None
 
 
 def _cleanup_old_files(debug_dir: Path) -> None:
