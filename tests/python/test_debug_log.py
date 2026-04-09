@@ -9,8 +9,10 @@ import pytest
 
 from nodes.debug_log import (
     _build_graph,
+    _build_graph_record,
     _build_input_summary,
     _build_output_summary,
+    _build_parallel_groups,
     _cleanup_old_files,
     _enforce_record_limit,
     _format_flow_report,
@@ -630,3 +632,135 @@ class TestTryCapturePrompt:
         )
         _try_capture_prompt(cls)
         assert debug_log_mod._prompt_data == {}
+
+
+# ---------------------------------------------------------------------------
+# _build_graph_record
+# ---------------------------------------------------------------------------
+
+
+class TestBuildGraphRecord:
+    def test_basic_structure(self):
+        prompt = {
+            "1": {"class_type": "A", "inputs": {}},
+            "2": {"class_type": "B", "inputs": {"x": ["1", 0]}},
+        }
+        record = _build_graph_record(prompt)
+        assert record["type"] == "graph"
+        assert "edges" in record
+        assert "reverse" in record
+        assert "parallel_groups" in record
+
+    def test_edges_and_reverse(self):
+        prompt = {
+            "1": {"class_type": "A", "inputs": {}},
+            "2": {"class_type": "B", "inputs": {"x": ["1", 0]}},
+        }
+        record = _build_graph_record(prompt)
+        assert record["edges"] == {"1": ["2"]}
+        assert record["reverse"] == {"2": ["1"]}
+
+    def test_empty_prompt(self):
+        record = _build_graph_record({})
+        assert record["type"] == "graph"
+        assert record["edges"] == {}
+        assert record["reverse"] == {}
+        assert record["parallel_groups"] == []
+
+    def test_no_connections(self):
+        prompt = {
+            "1": {"class_type": "A", "inputs": {}},
+            "2": {"class_type": "B", "inputs": {}},
+        }
+        record = _build_graph_record(prompt)
+        assert record["edges"] == {}
+        assert record["reverse"] == {}
+        # 両ノードとも wave=0 なので同一グループ
+        assert sorted(record["parallel_groups"][0]) == ["1", "2"]
+
+
+# ---------------------------------------------------------------------------
+# _build_parallel_groups
+# ---------------------------------------------------------------------------
+
+
+class TestBuildParallelGroups:
+    def test_linear_chain(self):
+        prompt = {"1": {}, "2": {}, "3": {}}
+        edges = {"1": ["2"], "2": ["3"]}
+        groups = _build_parallel_groups(prompt, edges)
+        # 各ノードが別グループ
+        assert len(groups) == 3
+        assert ["1"] in groups
+        assert ["2"] in groups
+        assert ["3"] in groups
+
+    def test_parallel_branches(self):
+        # 1 → 2, 1 → 3 （2と3は並列）
+        prompt = {"1": {}, "2": {}, "3": {}}
+        edges = {"1": ["2", "3"]}
+        groups = _build_parallel_groups(prompt, edges)
+        assert len(groups) == 2
+        assert ["1"] in groups
+        assert sorted(groups[1]) == ["2", "3"]
+
+    def test_diamond(self):
+        # 1 → 2, 1 → 3, 2 → 4, 3 → 4
+        prompt = {"1": {}, "2": {}, "3": {}, "4": {}}
+        edges = {"1": ["2", "3"], "2": ["4"], "3": ["4"]}
+        groups = _build_parallel_groups(prompt, edges)
+        # wave: 1=0, 2=1, 3=1, 4=2
+        assert len(groups) == 3
+        assert ["1"] in groups
+        assert sorted(groups[1]) == ["2", "3"]
+        assert ["4"] in groups
+
+    def test_isolated_nodes_same_group(self):
+        prompt = {"1": {}, "2": {}, "3": {}}
+        edges = {}
+        groups = _build_parallel_groups(prompt, edges)
+        assert len(groups) == 1
+        assert sorted(groups[0]) == ["1", "2", "3"]
+
+
+# ---------------------------------------------------------------------------
+# _write_jsonl (graph record)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteJsonlGraphRecord:
+    def test_graph_record_appended_when_prompt_data_set(self, tmp_path):
+        prompt_data = {
+            "1": {"class_type": "A", "inputs": {}},
+            "2": {"class_type": "B", "inputs": {"x": ["1", 0]}},
+        }
+        with patch.object(debug_log_mod, "_get_debug_output_dir", return_value=tmp_path):
+            _write_jsonl([{"node_id": "1", "status": "OK"}], prompt_data)
+
+        files = list(tmp_path.glob("sax_debug_*.jsonl"))
+        lines = files[0].read_text(encoding="utf-8").strip().split("\n")
+        # 通常レコード1行 + グラフレコード1行
+        assert len(lines) == 2
+        last = json.loads(lines[-1])
+        assert last["type"] == "graph"
+        assert "edges" in last
+        assert "reverse" in last
+        assert "parallel_groups" in last
+
+    def test_no_graph_record_when_prompt_data_none(self, tmp_path):
+        with patch.object(debug_log_mod, "_get_debug_output_dir", return_value=tmp_path):
+            _write_jsonl([{"node_id": "1", "status": "OK"}], None)
+
+        files = list(tmp_path.glob("sax_debug_*.jsonl"))
+        lines = files[0].read_text(encoding="utf-8").strip().split("\n")
+        # グラフレコードなし
+        assert len(lines) == 1
+        assert "type" not in json.loads(lines[0])
+
+    def test_no_graph_record_when_prompt_data_empty(self, tmp_path):
+        with patch.object(debug_log_mod, "_get_debug_output_dir", return_value=tmp_path):
+            _write_jsonl([{"node_id": "1", "status": "OK"}], {})
+
+        files = list(tmp_path.glob("sax_debug_*.jsonl"))
+        lines = files[0].read_text(encoding="utf-8").strip().split("\n")
+        assert len(lines) == 1

@@ -157,7 +157,7 @@ def _do_flush() -> None:
         return
 
     if _report_requested:
-        jsonl_path = _write_jsonl(_execution_records)
+        jsonl_path = _write_jsonl(_execution_records, _prompt_data)
         report = _format_flow_report(_execution_records, _prompt_data, jsonl_path)
         if report:
             logger.info("\n%s", report)
@@ -413,8 +413,15 @@ def _get_debug_output_dir() -> Path:
     return debug_dir
 
 
-def _write_jsonl(records: list[dict[str, Any]]) -> Path | None:
-    """記録を JSONL ファイルに書き出し、書き込み先パスを返す。失敗時は None を返す。"""
+def _write_jsonl(
+    records: list[dict[str, Any]],
+    prompt_data: dict[str, Any] | None = None,
+) -> Path | None:
+    """記録を JSONL ファイルに書き出し、書き込み先パスを返す。失敗時は None を返す。
+
+    prompt_data が与えられた場合のみ、末尾に {"type": "graph", ...} レコードを1行追加する。
+    スラッシュコマンド側がこのレコードからノード接続・並列構造を再構成する。
+    """
     try:
         debug_dir = _get_debug_output_dir()
     except Exception:
@@ -428,12 +435,84 @@ def _write_jsonl(records: list[dict[str, Any]]) -> Path | None:
         with open(filepath, "w", encoding="utf-8") as f:
             for rec in records:
                 f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+            # グラフレコード: ノード接続構造を末尾に1行追加
+            if prompt_data:
+                graph_record = _build_graph_record(prompt_data)
+                f.write(json.dumps(graph_record, ensure_ascii=False, default=str) + "\n")
         logger.info("Debug log written: %s", filepath)
         _cleanup_old_files(debug_dir)
         return filepath
     except OSError as exc:
         logger.warning("JSONL write failed: %s", exc)
         return None
+
+
+def _build_graph_record(prompt: dict[str, Any]) -> dict[str, Any]:
+    """prompt dict からグラフレコードを構築する。
+
+    返却形式:
+    {
+      "type": "graph",
+      "edges": {"src_node_id": ["dst_node_id", ...], ...},   # 親→子方向
+      "reverse": {"dst_node_id": ["src_node_id", ...], ...}, # 子→親方向（入力元）
+      "parallel_groups": [["node_id", ...], ...]              # 同じトポロジカル階層のノード群
+    }
+    """
+    edges = _build_graph(prompt)
+
+    # reverse edges（各ノードへの入力元）
+    reverse: dict[str, list[str]] = defaultdict(list)
+    for src, dsts in edges.items():
+        for dst in dsts:
+            reverse[dst].append(src)
+
+    # 並列グループ: トポロジカルソートで同じ「波」に属するノードを同グループに分類
+    parallel_groups = _build_parallel_groups(prompt, edges)
+
+    return {
+        "type": "graph",
+        "edges": edges,
+        "reverse": dict(reverse),
+        "parallel_groups": parallel_groups,
+    }
+
+
+def _build_parallel_groups(
+    prompt: dict[str, Any],
+    edges: dict[str, list[str]],
+) -> list[list[str]]:
+    """BFS で各ノードの「深さ（wave）」を計算し、同深さのノードを並列グループとして返す。
+
+    同じ wave に属するノードは互いに依存関係がなく、理論上並列実行可能。
+    """
+    in_degree: dict[str, int] = {nid: 0 for nid in prompt}
+    for _src, dsts in edges.items():
+        for dst in dsts:
+            if dst in in_degree:
+                in_degree[dst] += 1
+
+    # 入力エッジのないルートノードを wave=0 で初期化
+    roots = [nid for nid, deg in in_degree.items() if deg == 0]
+    wave: dict[str, int] = dict.fromkeys(roots, 0)
+    queue: deque[str] = deque(roots)
+
+    while queue:
+        node = queue.popleft()
+        for dst in edges.get(node, []):
+            if dst in in_degree:
+                # 複数の親がいる場合は最大 wave + 1 を採用。
+                # デフォルトを wave[node]+1 にすることで「未到達ノードへの最初の到達値」が正しく設定される。
+                wave[dst] = max(wave.get(dst, wave[node] + 1), wave[node] + 1)
+                in_degree[dst] -= 1
+                if in_degree[dst] == 0:
+                    queue.append(dst)
+
+    # wave 番号でグループ化
+    groups: dict[int, list[str]] = defaultdict(list)
+    for nid, w in wave.items():
+        groups[w].append(nid)
+
+    return [sorted(groups[w]) for w in sorted(groups)]
 
 
 def _cleanup_old_files(debug_dir: Path) -> None:
