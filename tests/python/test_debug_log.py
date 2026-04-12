@@ -38,10 +38,12 @@ import nodes.debug_log as debug_log_mod
 def _reset_module_state():
     """各テスト前後で debug_log のグローバル状態をリセットする。"""
     debug_log_mod._report_requested = False
+    debug_log_mod._explicitly_disabled = False
     debug_log_mod._execution_records = []
     debug_log_mod._prompt_data = {}
     yield
     debug_log_mod._report_requested = False
+    debug_log_mod._explicitly_disabled = False
     debug_log_mod._execution_records = []
     debug_log_mod._prompt_data = {}
 
@@ -61,6 +63,7 @@ class TestEnableDisable:
         debug_log_mod._report_requested = True
         disable()
         assert debug_log_mod._report_requested is False
+        assert debug_log_mod._explicitly_disabled is True
 
     def test_enable_captures_prompt(self):
         prompt_data = {"1": {"class_type": "Foo", "inputs": {"a": ["2", 0]}}}
@@ -86,7 +89,7 @@ class TestEnableDisable:
         mock_write.assert_not_called()
         assert debug_log_mod._report_requested is True
 
-    def test_disable_does_not_flush(self):
+    def test_disable_clears_records(self):
         debug_log_mod._execution_records = [
             {"node_id": "1", "class_type": "T", "display_name": "N",
              "input_summary": {}, "output_summary": {}, "elapsed_s": 0.1,
@@ -94,10 +97,11 @@ class TestEnableDisable:
         ]
         with patch.object(debug_log_mod, "_write_jsonl") as mock_write:
             disable()
-        # flush されないので records は残ったまま
-        assert len(debug_log_mod._execution_records) == 1
+        # disable() はレコードを即座にクリアし、JSONL 出力を行わない
+        assert len(debug_log_mod._execution_records) == 0
         mock_write.assert_not_called()
         assert debug_log_mod._report_requested is False
+        assert debug_log_mod._explicitly_disabled is True
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +446,21 @@ class TestWrapExecute:
         record = debug_log_mod._execution_records[0]
         assert record["class_type"] == "MyNode"
         assert record["display_name"] == "My Display Name"
+
+    def test_skips_recording_when_explicitly_disabled(self):
+        # disable() 後はレコード蓄積をスキップし、元の関数だけ実行する
+        node_class = self._make_node_class()
+        result_obj = types.SimpleNamespace(args=("output",))
+
+        def original(cls, a):
+            return result_obj
+
+        wrapped = wrap_execute(original, node_class)
+        debug_log_mod._explicitly_disabled = True
+        result = wrapped(MagicMock(), "val")
+
+        assert result is result_obj
+        assert len(debug_log_mod._execution_records) == 0
 
 
 # ---------------------------------------------------------------------------

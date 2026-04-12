@@ -25,6 +25,8 @@ logger = logging.getLogger("SAX_Bridge.debug")
 
 # flush 時にレポートを出力するか（Debug Controller が ON にする）
 _report_requested: bool = False
+# Debug Controller が明示的に disable() を呼んだか（蓄積スキップの判定に使用）
+_explicitly_disabled: bool = False
 _execution_records: list[dict[str, Any]] = []
 _prompt_data: dict[str, Any] = {}
 
@@ -44,15 +46,23 @@ def enable(cls: type) -> None:
     Debug Controller の実行順序に関わらず、ワークフロー完了時に lifecycle hook
     (SAXDebugLifecycleHook.on_prompt_end) が呼ばれて flush される。
     """
-    global _report_requested
+    global _report_requested, _explicitly_disabled
     _try_capture_prompt(cls)
     _report_requested = True
+    _explicitly_disabled = False
 
 
 def disable() -> None:
-    """Debug Controller から呼ばれる。今回のワークフロー分のレポート出力を取り下げる。"""
-    global _report_requested
+    """Debug Controller から呼ばれる。今回のワークフロー分のレポート出力を取り下げる。
+
+    レコード蓄積も即座に停止する。flush 時に _report_requested=False で破棄される
+    だけでなく、蓄積自体を行わないことで意図しない出力パスを完全に遮断する。
+    """
+    global _report_requested, _explicitly_disabled, _execution_records, _prompt_data
     _report_requested = False
+    _explicitly_disabled = True
+    _execution_records = []
+    _prompt_data = {}
 
 
 def wrap_execute(original_func: Callable, node_class: type) -> Callable:
@@ -77,6 +87,11 @@ def wrap_execute(original_func: Callable, node_class: type) -> Callable:
 
     @functools.wraps(original_func)
     def wrapper(cls: type, *args: Any, **kwargs: Any) -> Any:
+        # disable() が明示的に呼ばれた後はレコード蓄積をスキップする。
+        # Controller 未実行（初期状態）では蓄積を続け、後から enable される可能性に備える。
+        if _explicitly_disabled:
+            return original_func(cls, *args, **kwargs)
+
         _enforce_record_limit()
 
         node_id = _try_get_unique_id(cls)
@@ -577,8 +592,9 @@ def register_lifecycle_hook() -> None:
             # 前回ワークフローの残留データを除去し、フラグをリセットする。
             # Debug Controller 不在のワークフローで前回のフラグが残らないよう保証し、
             # 異常終了で on_prompt_end が発火しなかった場合の残留データにも対応する。
-            global _report_requested, _execution_records, _prompt_data
+            global _report_requested, _explicitly_disabled, _execution_records, _prompt_data
             _report_requested = False
+            _explicitly_disabled = False
             _execution_records = []
             _prompt_data = {}
 
