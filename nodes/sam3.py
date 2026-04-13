@@ -146,9 +146,20 @@ try:
     from sam3.model import box_ops
     from sam3.model.data_misc import interpolate
     _SAM3_AVAILABLE = True
-except ImportError:
+    _SAM3_IMPORT_ERROR: ImportError | None = None
+except ImportError as e:
     _SAM3_AVAILABLE = False
+    _SAM3_IMPORT_ERROR = e
     Sam3Processor = object
+
+
+def _sam3_unavailable_error() -> RuntimeError:
+    # 元のImportErrorを含めて表示することで、triton未導入など間接的な依存失敗も切り分け可能にする
+    return RuntimeError(
+        f"[SAX_Bridge] Failed to load SAM3 module: {_SAM3_IMPORT_ERROR}. "
+        "See README (Dependencies > SAM3) for installation instructions, "
+        "including Windows triton setup."
+    )
 
 
 class CustomSam3Processor(Sam3Processor):
@@ -353,10 +364,7 @@ class SAX_Bridge_Loader_SAM3(io.ComfyNode):
     @classmethod
     def execute(cls, model_name: str, precision: str = "fp32") -> io.NodeOutput:
         if not _SAM3_AVAILABLE:
-            raise RuntimeError(
-                "[SAX_Bridge] sam3 package is not installed. "
-                "Please install it: pip install sam3"
-            )
+            raise _sam3_unavailable_error()
 
         from sam3.model_builder import build_sam3_image_model
 
@@ -509,10 +517,7 @@ class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
         mask=None,
     ) -> io.NodeOutput:
         if not _SAM3_AVAILABLE:
-            raise RuntimeError(
-                "[SAX_Bridge] sam3 package is not installed. "
-                "Please install it: pip install sam3"
-            )
+            raise _sam3_unavailable_error()
 
         images = image
 

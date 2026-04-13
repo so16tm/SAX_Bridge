@@ -149,6 +149,19 @@ sam3 のインストール：
 pip install git+https://github.com/facebookresearch/sam3.git
 ```
 
+#### Windows 環境では triton が必要
+
+sam3 は [triton](https://github.com/triton-lang/triton) に依存します。triton は従来 Linux 専用でしたが、Windows でも以下のいずれかを **sam3 のインストール前に** 導入することで利用できます。
+
+| 環境 | コマンド |
+|---|---|
+| PyTorch 2.7 以降 + CUDA 12.8 以降 | `pip install triton` |
+| それ以前の PyTorch / CUDA | `pip install triton-windows` |
+
+`triton-windows` は Windows 向けの互換 wheel で、TinyCC と最小 CUDA toolchain を同梱しているため追加セットアップは不要です。詳細は [triton-lang/triton-windows](https://github.com/triton-lang/triton-windows) を参照してください。
+
+SAM3 のロードに失敗した場合、SAX_Bridge は元の `ImportError`（例: `No module named 'triton'`）をそのまま表示するため、不足している依存を切り分けられます。
+
 [↑ トップへ](#sax_bridge)
 
 ---
