@@ -1,3 +1,5 @@
+import logging
+
 import torch
 import torch.nn.functional as F
 import nodes
@@ -12,6 +14,8 @@ try:
     _HAS_DIFF_DIFFUSION = True
 except ImportError:
     _HAS_DIFF_DIFFUSION = False
+
+_logger = logging.getLogger(__name__)
 
 
 def unsharp_mask(image_bchw: torch.Tensor, strength: float, sigma: float) -> torch.Tensor:
@@ -172,26 +176,135 @@ def uncrop_and_blend(original: torch.Tensor, cropped: torch.Tensor, mask: torch.
 
 
 _GRAIN_SEED_OFFSET = 10000  # shadow grain と latent noise のシード分離用オフセット
+_SHADOW_STRENGTH_SCALE = 0.2  # shadow_enhance を grain 振幅へ変換する係数（経験値）
+
+CYCLE_MODES: tuple[str, ...] = ("latent_persistent", "image_roundtrip")
+
+
+def _apply_image_preprocess(
+    cropped_images: torch.Tensor,
+    mask_in_bbox: torch.Tensor,
+    shadow_strength: float,
+    edge_weight: float,
+    edge_blur_sigma: float,
+    context_blur_sigma: float,
+    context_blur_radius: int,
+    grain_seed: int,
+) -> torch.Tensor:
+    """画像領域での前処理（shadow grain → edge unsharp → context blur）を順に適用する。"""
+    if shadow_strength > 0:
+        crop_rgb = cropped_images[:, :, :, :3].permute(0, 3, 1, 2)
+        luminance = 0.299 * crop_rgb[:, 0:1] + 0.587 * crop_rgb[:, 1:2] + 0.114 * crop_rgb[:, 2:3]
+        grain_weight = (1.0 - luminance).clamp(0.0, 1.0)
+        generator = torch.Generator(device='cpu')
+        generator.manual_seed(grain_seed)
+        grain = torch.randn(
+            crop_rgb.shape, generator=generator, dtype=crop_rgb.dtype, device='cpu'
+        ).to(crop_rgb.device)
+        crop_mask_2d = mask_in_bbox.unsqueeze(1).float().to(crop_rgb.device)
+        crop_rgb = torch.clamp(
+            crop_rgb + grain * shadow_strength * grain_weight * crop_mask_2d, 0.0, 1.0
+        )
+        cropped_images = torch.cat(
+            [crop_rgb.permute(0, 2, 3, 1), cropped_images[:, :, :, 3:]], dim=3
+        )
+
+    if edge_weight > 0:
+        rgb_bchw = cropped_images[:, :, :, :3].permute(0, 3, 1, 2)
+        rgb_bchw = unsharp_mask(rgb_bchw, edge_weight, edge_blur_sigma)
+        cropped_images = torch.cat(
+            [rgb_bchw.permute(0, 2, 3, 1), cropped_images[:, :, :, 3:]], dim=3
+        )
+
+    if context_blur_sigma > 0:
+        crop_rgb = cropped_images[:, :, :, :3].permute(0, 3, 1, 2)
+        crop_rgb = blur_context_boundary(
+            crop_rgb, mask_in_bbox, context_blur_sigma, context_blur_radius
+        )
+        cropped_images = torch.cat(
+            [crop_rgb.permute(0, 2, 3, 1), cropped_images[:, :, :, 3:]], dim=3
+        )
+
+    return cropped_images
+
+
+def _build_noise_mask(
+    mask_in_bbox: torch.Tensor,
+    latent_shape_hw: tuple[int, int],
+    device: torch.device,
+    noise_mask_feather: int,
+) -> torch.Tensor:
+    """latent サイズに合わせた noise_mask を生成する。feather 適用込み。"""
+    h_lat, w_lat = latent_shape_hw
+    noise_mask = F.interpolate(
+        mask_in_bbox.unsqueeze(1).float().to(device),
+        size=(h_lat, w_lat),
+        mode="bilinear",
+        align_corners=False,
+    ).squeeze(1)
+
+    if noise_mask_feather > 0:
+        noise_mask = SAXNoiseEngine.gaussian_blur(
+            noise_mask.unsqueeze(1), float(noise_mask_feather) / 3.0
+        ).squeeze(1).clamp(0.0, 1.0)
+
+    return noise_mask
+
+
+def _add_latent_noise(
+    t: torch.Tensor,
+    latent_noise_intensity: float,
+    noise_type: str,
+    noise_mask: torch.Tensor,
+    seed: int,
+) -> torch.Tensor:
+    """latent にマスク領域限定でノイズを加算した新しいテンソルを返す（t は変更しない）。"""
+    if latent_noise_intensity <= 0:
+        return t
+    generator = torch.Generator(device='cpu')
+    generator.manual_seed(seed)
+    if noise_type == "gaussian":
+        lat_noise = torch.randn(t.shape, generator=generator, dtype=t.dtype, device='cpu')
+    else:
+        lat_noise = torch.rand(t.shape, generator=generator, dtype=t.dtype, device='cpu') * 2.0 - 1.0
+    return t + lat_noise.to(t.device) * latent_noise_intensity * noise_mask.unsqueeze(1)
 
 
 def _run_detail_loop(
-    model, vae, images, positive, negative, seed,
-    steps, cfg, sampler_name, scheduler_name,
-    denoise, denoise_decay, cycle,
-    noise_mask_feather, blend_feather, crop_factor,
-    context_blur_sigma, context_blur_radius,
-    mask=None,
+    model, vae, images: torch.Tensor, positive, negative, seed: int,
+    steps: int, cfg: float, sampler_name: str, scheduler_name: str,
+    denoise: float, denoise_decay: float, cycle: int,
+    noise_mask_feather: int, blend_feather: int, crop_factor: float,
+    context_blur_sigma: float, context_blur_radius: int,
+    mask: torch.Tensor | None = None,
     # Enhanced Detailer のみ有効（デフォルト=無効）
-    latent_noise_intensity=0.0, noise_type="gaussian",
-    shadow_enhance=0.0, shadow_decay=0.0,
-    edge_weight=0.0, edge_blur_sigma=1.0,
+    latent_noise_intensity: float = 0.0, noise_type: str = "gaussian",
+    shadow_enhance: float = 0.0, shadow_decay: float = 0.0,
+    edge_weight: float = 0.0, edge_blur_sigma: float = 1.0,
     # Guidance（共通）
-    guidance_mode="off", guidance_strength=0.0, pag_strength=0.0,
-):
+    guidance_mode: str = "off", guidance_strength: float = 0.0, pag_strength: float = 0.0,
+    # Cycle 戦略
+    cycle_mode: str = "latent_persistent",
+) -> torch.Tensor | None:
     """
     Detailer / Enhanced Detailer 共通のディテーリングループ。
     マスク領域が存在しない場合は None を返す。
+
+    cycle_mode:
+      - "latent_persistent": cycle 間で latent を保持し、VAE encode/decode を各 1 回に削減。
+        画像領域の前処理（shadow_enhance / edge_weight / context_blur_sigma）は初回のみ適用。
+        latent_noise_intensity は denoise_decay と連動して各 cycle で減衰する。
+        shadow_decay は機能しない。
+      - "image_roundtrip": 旧来の挙動。cycle 毎に encode/decode を繰り返す。
+        latent_noise_intensity は cycle 毎に同強度（cycle 毎に latent がリセットされるため）。
     """
+    if cycle_mode not in CYCLE_MODES:
+        _logger.warning(
+            "[SAX_Bridge] Unknown cycle_mode %r, falling back to %r",
+            cycle_mode, "image_roundtrip",
+        )
+        cycle_mode = "image_roundtrip"
+
     if mask is None:
         b, h, w, c = images.shape
         mask = torch.ones((b, h, w), dtype=torch.float32, device=images.device)
@@ -226,84 +339,130 @@ def _run_detail_loop(
     else:
         sample_model = base_model
 
+    if cycle_mode == "latent_persistent":
+        return _run_latent_persistent(
+            sample_model, vae, images, mask, bbox, mask_in_bbox,
+            positive, negative, seed,
+            steps, cfg, sampler_name, scheduler_name,
+            denoise, denoise_decay, cycle,
+            noise_mask_feather, blend_feather,
+            context_blur_sigma, context_blur_radius,
+            latent_noise_intensity, noise_type,
+            shadow_enhance, edge_weight, edge_blur_sigma,
+        )
+
+    return _run_image_roundtrip(
+        sample_model, vae, images, mask, bbox, mask_in_bbox,
+        positive, negative, seed,
+        steps, cfg, sampler_name, scheduler_name,
+        denoise, denoise_decay, cycle,
+        noise_mask_feather, blend_feather,
+        context_blur_sigma, context_blur_radius,
+        latent_noise_intensity, noise_type,
+        shadow_enhance, shadow_decay, edge_weight, edge_blur_sigma,
+    )
+
+
+def _run_latent_persistent(
+    sample_model, vae, images: torch.Tensor,
+    mask: torch.Tensor, bbox: tuple, mask_in_bbox: torch.Tensor,
+    positive, negative, seed: int,
+    steps: int, cfg: float, sampler_name: str, scheduler_name: str,
+    denoise: float, denoise_decay: float, cycle: int,
+    noise_mask_feather: int, blend_feather: int,
+    context_blur_sigma: float, context_blur_radius: int,
+    latent_noise_intensity: float, noise_type: str,
+    shadow_enhance: float, edge_weight: float, edge_blur_sigma: float,
+) -> torch.Tensor:
+    """
+    VAE encode/decode を各 1 回に抑え、cycle 間は latent を保持して反復する。
+
+    画像領域の前処理（shadow_enhance / edge_weight / context_blur_sigma）は
+    encode 直前に 1 回だけ適用する。shadow_decay はこのモードでは受け取らない。
+
+    cycle 内では `t_noisy = t + latent_noise` のように一時変数を作り、ksampler の
+    出力で `t` を更新する。これにより noise が cycle 間で累積しない（独立加算）。
+    また latent_noise_intensity は denoise_decay と連動して各 cycle で減衰する。
+    """
+    cropped_images = crop_bbox(images, bbox)
+    initial_shadow = shadow_enhance * _SHADOW_STRENGTH_SCALE
+    cropped_images = _apply_image_preprocess(
+        cropped_images, mask_in_bbox,
+        initial_shadow, edge_weight, edge_blur_sigma,
+        context_blur_sigma, context_blur_radius,
+        grain_seed=seed + _GRAIN_SEED_OFFSET,
+    )
+
+    t = vae.encode(cropped_images[:, :, :, :3])
+    noise_mask = _build_noise_mask(
+        mask_in_bbox, (t.shape[2], t.shape[3]), t.device, noise_mask_feather
+    )
+
+    for i in range(cycle):
+        current_seed = seed + i
+        decay_factor = max(0.0, 1.0 - i * denoise_decay / cycle)
+        current_denoise = denoise * decay_factor
+        current_noise_intensity = latent_noise_intensity * decay_factor
+
+        t_noisy = _add_latent_noise(t, current_noise_intensity, noise_type, noise_mask, current_seed)
+
+        sampler = nodes.common_ksampler(
+            sample_model, current_seed, steps, cfg, sampler_name, scheduler_name,
+            positive, negative, {"samples": t_noisy, "noise_mask": noise_mask},
+            denoise=current_denoise,
+        )
+        t = sampler[0]["samples"]
+
+    decoded_images = vae.decode(t)
+    return uncrop_and_blend(images, decoded_images, mask, bbox, feather=blend_feather)
+
+
+def _run_image_roundtrip(
+    sample_model, vae, images: torch.Tensor,
+    mask: torch.Tensor, bbox: tuple, mask_in_bbox: torch.Tensor,
+    positive, negative, seed: int,
+    steps: int, cfg: float, sampler_name: str, scheduler_name: str,
+    denoise: float, denoise_decay: float, cycle: int,
+    noise_mask_feather: int, blend_feather: int,
+    context_blur_sigma: float, context_blur_radius: int,
+    latent_noise_intensity: float, noise_type: str,
+    shadow_enhance: float, shadow_decay: float,
+    edge_weight: float, edge_blur_sigma: float,
+) -> torch.Tensor:
+    """旧来の挙動: cycle 毎に encode/decode を繰り返す（後方互換用）。
+
+    cycle 毎に latent がリセットされるため、latent_noise_intensity は
+    denoise_decay と連動させない（リセットによって発散が自然に防がれる）。
+    shadow_decay はこのモードでのみ機能する。
+    """
     result_images = images
     for i in range(cycle):
         current_seed = seed + i
         current_denoise = denoise * max(0.0, 1.0 - i * denoise_decay / cycle)
+        current_shadow = shadow_enhance * _SHADOW_STRENGTH_SCALE * max(0.0, 1.0 - i * shadow_decay / cycle)
 
         cropped_images = crop_bbox(result_images, bbox)
-
-        if shadow_enhance > 0:
-            current_shadow = shadow_enhance * 0.2 * max(0.0, 1.0 - i * shadow_decay / cycle)
-            if current_shadow > 0:
-                crop_rgb = cropped_images[:, :, :, :3].permute(0, 3, 1, 2)
-                luminance = 0.299 * crop_rgb[:, 0:1] + 0.587 * crop_rgb[:, 1:2] + 0.114 * crop_rgb[:, 2:3]
-                grain_weight = (1.0 - luminance).clamp(0.0, 1.0)
-                generator = torch.Generator(device='cpu')
-                generator.manual_seed(current_seed + _GRAIN_SEED_OFFSET)
-                grain = torch.randn(
-                    crop_rgb.shape, generator=generator, dtype=crop_rgb.dtype, device='cpu'
-                ).to(crop_rgb.device)
-                crop_mask_2d = mask_in_bbox.unsqueeze(1).float().to(crop_rgb.device)
-                crop_rgb = torch.clamp(
-                    crop_rgb + grain * current_shadow * grain_weight * crop_mask_2d, 0.0, 1.0
-                )
-                cropped_images = torch.cat(
-                    [crop_rgb.permute(0, 2, 3, 1), cropped_images[:, :, :, 3:]], dim=3
-                )
-
-        if edge_weight > 0:
-            rgb_bchw = cropped_images[:, :, :, :3].permute(0, 3, 1, 2)
-            rgb_bchw = unsharp_mask(rgb_bchw, edge_weight, edge_blur_sigma)
-            cropped_images = torch.cat(
-                [rgb_bchw.permute(0, 2, 3, 1), cropped_images[:, :, :, 3:]], dim=3
-            )
-
-        if context_blur_sigma > 0:
-            crop_rgb = cropped_images[:, :, :, :3].permute(0, 3, 1, 2)
-            crop_rgb = blur_context_boundary(
-                crop_rgb, mask_in_bbox, context_blur_sigma, context_blur_radius
-            )
-            cropped_images = torch.cat(
-                [crop_rgb.permute(0, 2, 3, 1), cropped_images[:, :, :, 3:]], dim=3
-            )
+        cropped_images = _apply_image_preprocess(
+            cropped_images, mask_in_bbox,
+            current_shadow, edge_weight, edge_blur_sigma,
+            context_blur_sigma, context_blur_radius,
+            grain_seed=current_seed + _GRAIN_SEED_OFFSET,
+        )
 
         t = vae.encode(cropped_images[:, :, :, :3])
-
-        h_lat, w_lat = t.shape[2], t.shape[3]
-        noise_mask = F.interpolate(
-            mask_in_bbox.unsqueeze(1).float().to(t.device),
-            size=(h_lat, w_lat),
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(1)
-
-        if latent_noise_intensity > 0:
-            generator = torch.Generator(device='cpu')
-            generator.manual_seed(current_seed)
-            if noise_type == "gaussian":
-                lat_noise = torch.randn(t.shape, generator=generator, dtype=t.dtype, device='cpu')
-            else:
-                lat_noise = torch.rand(t.shape, generator=generator, dtype=t.dtype, device='cpu') * 2.0 - 1.0
-
-            t = t + lat_noise.to(t.device) * latent_noise_intensity * noise_mask.unsqueeze(1)
-
-        if noise_mask_feather > 0:
-            noise_mask = SAXNoiseEngine.gaussian_blur(
-                noise_mask.unsqueeze(1), float(noise_mask_feather) / 3.0
-            ).squeeze(1).clamp(0.0, 1.0)
-
-        samples_dict = {"samples": t, "noise_mask": noise_mask}
+        noise_mask = _build_noise_mask(
+            mask_in_bbox, (t.shape[2], t.shape[3]), t.device, noise_mask_feather
+        )
+        t = _add_latent_noise(t, latent_noise_intensity, noise_type, noise_mask, current_seed)
 
         sampler = nodes.common_ksampler(
             sample_model, current_seed, steps, cfg, sampler_name, scheduler_name,
-            positive, negative, samples_dict,
+            positive, negative, {"samples": t, "noise_mask": noise_mask},
             denoise=current_denoise,
         )
         samples = sampler[0]["samples"]
 
         decoded_images = vae.decode(samples)
-
         result_images = uncrop_and_blend(result_images, decoded_images, mask, bbox, feather=blend_feather)
 
     return result_images
@@ -362,6 +521,8 @@ class SAX_Bridge_Detailer(io.ComfyNode):
                                tooltip="Guidance effect intensity. 0.0=none, 1.0=maximum."),
                 io.Float.Input("pag_strength", default=0.0, min=0.0, max=1.0, step=0.05, optional=True,
                                tooltip="Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."),
+                io.Combo.Input("cycle_mode", options=list(CYCLE_MODES), default="latent_persistent", optional=True,
+                               tooltip="latent_persistent=keeps latent across cycles (1 VAE round-trip total, recommended). image_roundtrip=legacy behavior with VAE encode/decode per cycle."),
                 io.String.Input("positive_prompt", multiline=True, force_input=True, optional=True),
             ],
             outputs=[
@@ -374,6 +535,7 @@ class SAX_Bridge_Detailer(io.ComfyNode):
     def execute(cls, pipe, denoise, cycle, crop_factor, noise_mask_feather, blend_feather,
                 mask=None, steps_override=0, cfg_override=0.0,
                 guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
+                cycle_mode="latent_persistent",
                 positive_prompt=None) -> io.NodeOutput:
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
@@ -396,6 +558,7 @@ class SAX_Bridge_Detailer(io.ComfyNode):
             0.0, 48,
             mask=mask,
             guidance_mode=guidance_mode, guidance_strength=guidance_strength, pag_strength=pag_strength,
+            cycle_mode=cycle_mode,
         )
 
         if result_images is None:
@@ -423,7 +586,8 @@ class SAX_Bridge_Detailer_Enhanced(io.ComfyNode):
                 io.Int.Input("noise_mask_feather", default=5, min=0, max=100, step=1),
                 io.Int.Input("blend_feather", default=5, min=0, max=100, step=1),
                 io.Float.Input("shadow_enhance", default=0.0, min=0.0, max=1.0, step=0.01),
-                io.Float.Input("shadow_decay", default=0.25, min=0.0, max=1.0, step=0.05),
+                io.Float.Input("shadow_decay", default=0.25, min=0.0, max=1.0, step=0.05,
+                               tooltip="Decays shadow grain across cycles. Effective only when cycle_mode=image_roundtrip."),
                 io.Float.Input("edge_weight", default=0.0, min=0.0, max=1.0, step=0.05),
                 io.Float.Input("edge_blur_sigma", default=1.0, min=0.1, max=10.0, step=0.1),
                 io.Float.Input("latent_noise_intensity", default=0.1, min=0.0, max=2.0, step=0.01),
@@ -443,6 +607,8 @@ class SAX_Bridge_Detailer_Enhanced(io.ComfyNode):
                                tooltip="Guidance effect intensity. 0.0=none, 1.0=maximum."),
                 io.Float.Input("pag_strength", default=0.0, min=0.0, max=1.0, step=0.05, optional=True,
                                tooltip="Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."),
+                io.Combo.Input("cycle_mode", options=list(CYCLE_MODES), default="latent_persistent", optional=True,
+                               tooltip="latent_persistent=keeps latent across cycles (1 VAE round-trip total, recommended). latent_noise_intensity decays with denoise_decay in this mode. image_roundtrip=legacy behavior with VAE encode/decode per cycle. shadow_decay only effective in image_roundtrip mode."),
                 io.String.Input("positive_prompt", multiline=True, force_input=True, optional=True),
             ],
             outputs=[
@@ -459,6 +625,7 @@ class SAX_Bridge_Detailer_Enhanced(io.ComfyNode):
                 context_blur_sigma, context_blur_radius,
                 mask=None, steps_override=0, cfg_override=0.0,
                 guidance_mode="off", guidance_strength=0.5, pag_strength=0.0,
+                cycle_mode="latent_persistent",
                 positive_prompt=None) -> io.NodeOutput:
         p = _extract_pipe(pipe)
         if p["model"] is None or p["images"] is None or p["vae"] is None \
@@ -487,6 +654,7 @@ class SAX_Bridge_Detailer_Enhanced(io.ComfyNode):
             edge_weight=edge_weight,
             edge_blur_sigma=edge_blur_sigma,
             guidance_mode=guidance_mode, guidance_strength=guidance_strength, pag_strength=pag_strength,
+            cycle_mode=cycle_mode,
         )
 
         if result_images is None:
