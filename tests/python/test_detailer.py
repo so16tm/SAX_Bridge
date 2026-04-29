@@ -174,7 +174,7 @@ class TestDetailerExecute:
         result = SAX_Bridge_Detailer_Enhanced.execute(
             pipe, denoise=0.45, denoise_decay=0.0, cycle=1,
             crop_factor=3.0, noise_mask_feather=5, blend_feather=5,
-            shadow_enhance=0.0, shadow_decay=0.25,
+            shadow_enhance=0.0,
             edge_weight=0.0, edge_blur_sigma=1.0,
             latent_noise_intensity=0.0, noise_type="gaussian",
             context_blur_sigma=0.0, context_blur_radius=48,

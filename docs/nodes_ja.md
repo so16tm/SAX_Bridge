@@ -220,39 +220,29 @@
 
 ### SAX Detailer
 
-`SAX_Bridge_Detailer` — マスク領域をクロップして i2i 再描画し、元画像にブレンドして合成します。Differential Diffusion を内蔵しており、境界の自然な馴染みを実現します。
+`SAX_Bridge_Detailer` — マスク領域をクロップして i2i 再描画し、元画像にブレンドして合成します。Differential Diffusion を内蔵しており、境界の自然な馴染みを実現します。複数 cycle 実行時は VAE encode/decode を各 1 回に抑え、cycle 間は latent を保持して反復します。
 
 **入力**
 
-| パラメータ | 型 | 説明 |
-|-----------|-----|------|
-| `pipe` | PIPE_LINE | 入力パイプ（Model, VAE, Conditioning を使用） |
-| `mask` | MASK (optional) | 詳細化対象マスク |
-| `denoise` | Float (0.0〜1.0) | 初回ステップのデノイズ強度 |
-| `denoise_decay` | Float (0.0〜1.0) | 繰り返しごとのデノイズ減衰率 |
-| `cycle` | Int (1〜10) | 繰り返し回数 |
-| `crop_factor` | Float (1.0〜10.0) | バウンディングボックス拡張倍率 |
-| `noise_mask_feather` | Int (0〜100) | Latent 空間でのマスク境界ぼかし量（Differential Diffusion） |
-| `blend_feather` | Int (0〜100) | 画像空間でのブレンド境界ぼかし量 |
-| `context_blur_sigma` | Float (0.0〜64.0) | マスク境界近傍のコンテキスト領域ぼかし強度（0 = 無効） |
-| `context_blur_radius` | Int (0〜256) | コンテキストぼかし対象のリング幅 px（0 = 全コンテキスト） |
-| `positive_prompt` | String (optional) | Positive プロンプト上書き |
-| `steps_override` | Int (0〜200, optional) | i2i の steps 上書き（0 = Loader 設定を継承） |
-| `cfg_override` | Float (0.0〜100.0, optional) | i2i の CFG 上書き（0.0 = Loader 設定を継承） |
+| パラメータ | 型 | デフォルト | 説明 |
+|-----------|-----|-----------|------|
+| `pipe` | PIPE_LINE | — | 入力パイプ（Model, VAE, Conditioning を使用） |
+| `denoise` | Float (0.0〜1.0) | 0.45 | i2i のデノイズ強度 |
+| `cycle` | Int (1〜10) | 1 | 繰り返し回数 |
+| `crop_factor` | Float (1.0〜10.0) | 3.0 | バウンディングボックス拡張倍率 |
+| `noise_mask_feather` | Int (0〜100) | 5 | Latent 空間でのマスク境界ぼかし量（Differential Diffusion） |
+| `blend_feather` | Int (0〜100) | 5 | 画像空間でのブレンド境界ぼかし量 |
+| `mask` | MASK (optional) | — | 詳細化対象マスク（未指定時は全画像） |
+| `steps_override` | Int (0〜200, optional) | 0 | i2i の steps 上書き（0 = Loader 設定を継承） |
+| `cfg_override` | Float (0.0〜100.0, optional) | 0.0 | i2i の CFG 上書き（0.0 = Loader 設定を継承） |
+| `guidance_mode` | Combo (optional) | `off` | CFG ガイダンス強化（`agc` / `fdg` / `agc+fdg` / `post_fdg`） |
+| `guidance_strength` | Float (0.0〜1.0, optional) | 0.5 | ガイダンス効果強度 |
+| `pag_strength` | Float (0.0〜1.0, optional) | 0.0 | Perturbed Attention Guidance 強度（任意 CFG で動作。1 ステップ毎に追加 forward pass） |
+| `positive_prompt` | String (optional) | — | Positive プロンプト上書き |
 
 **出力**: `PIPE`, `IMAGE`
 
 > `negative` が Pipe に存在しない場合、CLIP で空文字列をエンコードして自動補完します。
-
-**denoise_decay 計算式**:
-
-各サイクル `i`（0 始まり）における実効 denoise は次式で算出します。
-
-```
-effective_denoise(i) = denoise * max(0.0, 1.0 - i * denoise_decay / cycle)
-```
-
-例: `cycle=3`, `denoise=1.0`, `denoise_decay=0.9` のとき → `[1.0, 0.7, 0.4]`
 
 [↑ トップへ](#top)
 
@@ -260,20 +250,49 @@ effective_denoise(i) = denoise * max(0.0, 1.0 - i * denoise_decay / cycle)
 
 ### SAX Enhanced Detailer
 
-`SAX_Bridge_Detailer_Enhanced` — SAX Detailer の全機能に加え、Shadow Enhancement・Edge Enhancement・Latent Noise 注入を追加したエンハンスト版です。
+`SAX_Bridge_Detailer_Enhanced` — SAX Detailer の全機能に加え、`denoise_decay`・Shadow Enhancement・Edge Enhancement・Latent Noise 注入・Context Blur を追加したエンハンスト版です。
 
-**入力**（SAX Detailer の全入力に加え）
+画像領域の前処理（`shadow_enhance` / `edge_weight` / `context_blur_sigma`）は VAE encode 直前に 1 回のみ適用されます。`latent_noise_intensity` は cycle 毎に独立加算され、`denoise_decay` と連動して各 cycle で減衰します。
 
-| パラメータ | 型 | 説明 |
-|-----------|-----|------|
-| `latent_noise_intensity` | Float (0.0〜2.0) | Latent ノイズ注入強度（i2i ディテール補強） |
-| `noise_type` | Combo | `gaussian` / `uniform` |
-| `shadow_enhance` | Float (0.0〜1.0) | 暗部への陰影描き込み強度 |
-| `shadow_decay` | Float (0.0〜1.0) | 繰り返しごとの Shadow 強度減衰率 |
-| `edge_weight` | Float (0.0〜1.0) | エッジ鮮鋭化強度（Unsharp Mask） |
-| `edge_blur_sigma` | Float (0.1〜10.0) | Unsharp Mask 用ガウスカーネル幅 |
+**入力**
+
+| パラメータ | 型 | デフォルト | 説明 |
+|-----------|-----|-----------|------|
+| `pipe` | PIPE_LINE | — | 入力パイプ |
+| `denoise` | Float (0.0〜1.0) | 0.45 | i2i のデノイズ強度 |
+| `denoise_decay` | Float (0.0〜1.0) | 0.0 | 繰り返しごとのデノイズ減衰率（`latent_noise_intensity` も連動） |
+| `cycle` | Int (1〜10) | 1 | 繰り返し回数 |
+| `crop_factor` | Float (1.0〜10.0) | 3.0 | バウンディングボックス拡張倍率 |
+| `noise_mask_feather` | Int (0〜100) | 5 | Latent 空間でのマスク境界ぼかし量 |
+| `blend_feather` | Int (0〜100) | 5 | 画像空間でのブレンド境界ぼかし量 |
+| `shadow_enhance` | Float (0.0〜1.0) | 0.0 | 暗部への陰影描き込み強度（初回 encode 直前に 1 回適用） |
+| `edge_weight` | Float (0.0〜1.0) | 0.0 | エッジ鮮鋭化強度（Unsharp Mask、初回 encode 直前に 1 回適用） |
+| `edge_blur_sigma` | Float (0.1〜10.0) | 1.0 | Unsharp Mask 用ガウスカーネル幅 |
+| `latent_noise_intensity` | Float (0.0〜2.0) | 0.1 | Latent ノイズ注入強度（cycle 毎に独立加算、`denoise_decay` で減衰） |
+| `noise_type` | Combo | `gaussian` | `gaussian` / `uniform` |
+| `context_blur_sigma` | Float (0.0〜64.0) | 0.0 | マスク境界近傍のコンテキスト領域ぼかし強度（0 = 無効。初回 encode 直前に 1 回適用） |
+| `context_blur_radius` | Int (0〜256) | 48 | コンテキストぼかし対象のリング幅 px（0 = 全コンテキスト） |
+| `mask` | MASK (optional) | — | 詳細化対象マスク |
+| `steps_override` | Int (0〜200, optional) | 0 | i2i の steps 上書き |
+| `cfg_override` | Float (0.0〜100.0, optional) | 0.0 | i2i の CFG 上書き |
+| `guidance_mode` | Combo (optional) | `off` | CFG ガイダンス強化 |
+| `guidance_strength` | Float (0.0〜1.0, optional) | 0.5 | ガイダンス効果強度 |
+| `pag_strength` | Float (0.0〜1.0, optional) | 0.0 | Perturbed Attention Guidance 強度 |
+| `positive_prompt` | String (optional) | — | Positive プロンプト上書き |
 
 **出力**: `PIPE`, `IMAGE`
+
+**denoise_decay 計算式**:
+
+各サイクル `i`（0 始まり）における実効 denoise と latent noise 強度は次式で算出します。
+
+```
+decay_factor(i) = max(0.0, 1.0 - i * denoise_decay / cycle)
+effective_denoise(i) = denoise * decay_factor(i)
+effective_noise_intensity(i) = latent_noise_intensity * decay_factor(i)
+```
+
+例: `cycle=3`, `denoise=1.0`, `denoise_decay=0.9` のとき → `[1.0, 0.7, 0.4]`
 
 [↑ トップへ](#top)
 
