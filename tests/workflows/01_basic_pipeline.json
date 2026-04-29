@@ -1,8 +1,8 @@
 {
   "id": "test-01-basic-pipeline",
   "revision": 0,
-  "last_node_id": 9,
-  "last_link_id": 10,
+  "last_node_id": 10,
+  "last_link_id": 12,
   "nodes": [
     {
       "id": 1,
@@ -57,8 +57,8 @@
         { "name": "pipe", "type": "PIPE_LINE", "link": 2 }
       ],
       "outputs": [
-        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": null },
-        { "name": "IMAGE", "type": "IMAGE", "links": [3, 5, 7] }
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": [11] },
+        { "name": "IMAGE", "type": "IMAGE", "links": [3, 5] }
       ],
       "properties": { "Node name for S&R": "SAX_Bridge_KSampler" },
       "widgets_values": [true]
@@ -67,7 +67,7 @@
       "id": 4,
       "type": "SAX_Bridge_Output",
       "pos": [1040, 50],
-      "size": [300, 450],
+      "size": [300, 380],
       "flags": {},
       "order": 3,
       "mode": 0,
@@ -83,7 +83,7 @@
       "title": "Output (save=false, preview only)",
       "widgets_values": [
         false, "{date:%Y-%m-%d}", "{datetime:%Y%m%d_%H%M%S}",
-        1, 3, "suffix", "webp", 90, false, 0, 1, false
+        1, 3, "suffix", "webp", 90, false
       ]
     },
     {
@@ -105,8 +105,8 @@
     {
       "id": 6,
       "type": "SAX_Bridge_Output",
-      "pos": [1040, 530],
-      "size": [300, 450],
+      "pos": [1040, 460],
+      "size": [300, 380],
       "flags": {},
       "order": 4,
       "mode": 0,
@@ -122,13 +122,13 @@
       "title": "Output (save=true, webp)",
       "widgets_values": [
         true, "{date:%Y-%m-%d}", "{datetime:%Y%m%d_%H%M%S}",
-        1, 3, "suffix", "webp", 90, false, 0, 1, false
+        1, 3, "suffix", "webp", 90, false
       ]
     },
     {
       "id": 7,
       "type": "PreviewImage",
-      "pos": [1390, 530],
+      "pos": [1390, 460],
       "size": [300, 300],
       "flags": {},
       "order": 7,
@@ -142,42 +142,64 @@
       "widgets_values": []
     },
     {
-      "id": 8,
-      "type": "SAX_Bridge_Output",
-      "pos": [1040, 1010],
-      "size": [300, 450],
+      "id": 10,
+      "type": "SAX_Bridge_Finisher",
+      "pos": [1040, 870],
+      "size": [300, 420],
       "flags": {},
       "order": 5,
       "mode": 0,
       "inputs": [
+        { "name": "pipe", "type": "PIPE_LINE", "link": 11 },
+        { "name": "reference_image", "type": "IMAGE", "link": null }
+      ],
+      "outputs": [
+        { "name": "PIPE", "type": "PIPE_LINE", "links": null },
+        { "name": "IMAGE", "type": "IMAGE", "links": [12] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Finisher" },
+      "title": "Finisher (sharpen + grayscale)",
+      "widgets_values": [
+        0.0, 0.0, 0.5, 1.0, 0.0, 0.7, 8.0, 0.0, 0.0, true
+      ]
+    },
+    {
+      "id": 8,
+      "type": "SAX_Bridge_Output",
+      "pos": [1390, 870],
+      "size": [300, 380],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
         { "name": "pipe", "type": "PIPE_LINE", "link": null },
-        { "name": "image", "type": "IMAGE", "link": 7 },
+        { "name": "image", "type": "IMAGE", "link": 12 },
         { "name": "prompt_text", "type": "STRING", "link": null }
       ],
       "outputs": [
         { "name": "IMAGE", "type": "IMAGE", "links": [10] }
       ],
       "properties": { "Node name for S&R": "SAX_Bridge_Output" },
-      "title": "Output (png + sharpen + grayscale)",
+      "title": "Output (finisher + png)",
       "widgets_values": [
         true, "{date:%Y-%m-%d}", "{datetime:%Y%m%d_%H%M%S}",
-        1, 3, "suffix", "png", 90, false, 0.5, 1.0, true
+        1, 3, "suffix", "png", 90, false
       ]
     },
     {
       "id": 9,
       "type": "PreviewImage",
-      "pos": [1390, 1010],
+      "pos": [1740, 870],
       "size": [300, 300],
       "flags": {},
-      "order": 8,
+      "order": 9,
       "mode": 0,
       "inputs": [
         { "name": "images", "type": "IMAGE", "link": 10 }
       ],
       "outputs": [],
       "properties": { "Node name for S&R": "PreviewImage" },
-      "title": "A-2: Preview (png+sharpen+grayscale)",
+      "title": "A-2: Preview (finisher + png)",
       "widgets_values": []
     }
   ],
@@ -188,9 +210,10 @@
     [4, 4, 0, 5, 0, "IMAGE"],
     [5, 3, 1, 6, 1, "IMAGE"],
     [6, 6, 0, 7, 0, "IMAGE"],
-    [7, 3, 1, 8, 1, "IMAGE"],
     [9, 2, 1, 4, 2, "STRING"],
-    [10, 8, 0, 9, 0, "IMAGE"]
+    [10, 8, 0, 9, 0, "IMAGE"],
+    [11, 3, 0, 10, 0, "PIPE_LINE"],
+    [12, 10, 1, 8, 1, "IMAGE"]
   ],
   "groups": [],
   "config": {},

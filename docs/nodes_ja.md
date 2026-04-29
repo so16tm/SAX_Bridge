@@ -14,7 +14,7 @@
 | [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
 | [Pipe](#pipe) | Pipe の構築・切替 | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
-| [Enhance](#enhance) | Detailer / Upscaler / ガイダンス | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) |
+| [Enhance](#enhance) | Detailer / Upscaler / Finisher | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
 | [Option](#option) | 独立ユーティリティ（ノイズ注入等） | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | SAM3 によるセグメンテーション | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | [Output](#output) | 出力・プレビュー | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
@@ -327,6 +327,41 @@ effective_noise_intensity(i) = latent_noise_intensity * decay_factor(i)
 
 ---
 
+### SAX Finisher
+
+`SAX_Bridge_Finisher` — 最終画像にポストエフェクトと画質調整を適用する仕上げノードです。Detailer / Upscaler の後、Output の前に配置します。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | 入力パイプ |
+| `reference_image` | IMAGE (optional) | `color_correction` の参照画像。未接続なら色補正はスキップ |
+| `color_correction` | Float (0.0〜1.0) | 参照画像との mean/std マッチングによる色分布補正（0 = 無効） |
+| `smooth` | Float (0.0〜1.0) | 高周波抑制（ジャギー・過剰エッジの低減）。0 = 無効 |
+| `sharpen_strength` | Float (0.0〜2.0) | Unsharp Mask シャープ強度。0 = 無効 |
+| `sharpen_sigma` | Float (0.1〜5.0) | シャープカーネル幅 |
+| `bloom` | Float (0.0〜1.0) | 明部から滲む光の強度。0 = 無効 |
+| `bloom_threshold` | Float (0.0〜1.0) | 抽出する明度の閾値（低いほど広範囲が光る） |
+| `bloom_radius` | Float (1.0〜32.0) | ブルームの広がり半径（ガウスシグマ） |
+| `vignette` | Float (0.0〜1.0) | 周辺減光の強度。0 = 無効 |
+| `color_temp` | Float (-1.0〜+1.0) | 色温度シフト。正値 = 暖色 / 負値 = 寒色 |
+| `grayscale` | Boolean | ITU-R BT.709 グレースケール変換（最終段で適用） |
+
+**出力**: `PIPE`, `IMAGE`
+
+**適用順**:
+
+```
+color_correction → smooth → sharpen → bloom → vignette → color_temp → grayscale
+```
+
+すべての効果が無効値（0 / False）かつ `reference_image` 未接続なら、入力 pipe をそのまま返してパススルーします。Finisher の出力は `pipe.images` にも反映されるため、後段ノードに加工済み画像が伝播します。
+
+[↑ トップへ](#top)
+
+---
+
 ## Option
 
 ### SAX Image Noise
@@ -448,14 +483,14 @@ effective_noise_intensity(i) = latent_noise_intensity * decay_factor(i)
 
 ### SAX Output
 
-`SAX_Bridge_Output` — シャープ化・グレースケール変換・ファイル保存・メタデータ埋め込みを集約した最終出力ノードです。
+`SAX_Bridge_Output` — ファイル保存・メタデータ埋め込みに専念した最終出力ノードです。シャープ化・グレースケール等の画質調整は [SAX Finisher](#sax-finisher) で行います。
 
 **入力**
 
 | パラメータ | 型 | 説明 |
 |-----------|-----|------|
 | `pipe` | PIPE_LINE (optional) | 画像ソース（`image` 未接続時）兼メタデータ供給元 |
-| `image` | IMAGE (optional) | 処理対象画像。未接続の場合は `pipe.images` を使用 |
+| `image` | IMAGE (optional) | 保存対象画像。未接続の場合は `pipe.images` を使用 |
 | `save` | Boolean | `True` で保存実行。`False` でプレビューのみ |
 | `output_dir` | String | 保存先ディレクトリ。テンプレート変数使用可。空欄 = `ComfyUI/output/` |
 | `filename_template` | String | ファイル名テンプレート。テンプレート変数使用可 |
@@ -465,9 +500,6 @@ effective_noise_intensity(i) = latent_noise_intensity * decay_factor(i)
 | `format` | Combo | `webp` / `png` |
 | `webp_quality` | Int (1〜100) | WebP 品質（`lossless=True` の場合は無効） |
 | `webp_lossless` | Boolean | WebP ロスレス保存 |
-| `sharpen_strength` | Float (0.0〜2.0) | Unsharp Mask シャープ強度（0.0 = 無効） |
-| `sharpen_sigma` | Float (0.1〜5.0) | シャープカーネル幅 |
-| `grayscale` | Boolean | ITU-R BT.709 グレースケール変換 |
 | `prompt_text` | String (optional) | メタデータに埋め込むプロンプトテキスト |
 
 **出力**: `IMAGE`

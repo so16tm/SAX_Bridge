@@ -12,8 +12,6 @@ from nodes.output import (
     _expand_filename,
     _build_indexed_name,
     _build_metadata_str,
-    _apply_sharpen,
-    _apply_grayscale,
 )
 
 
@@ -68,22 +66,6 @@ class TestBuildMetadataStr:
         assert result == ""
 
 
-class TestApplySharpen:
-    def test_zero_strength_passthrough(self):
-        import torch
-        img = torch.rand(1, 64, 64, 3)
-        result = _apply_sharpen(img, 0.0, 1.0)
-        assert torch.equal(result, img)
-
-
-class TestApplyGrayscale:
-    def test_output_shape(self):
-        import torch
-        img = torch.rand(2, 64, 64, 3)
-        result = _apply_grayscale(img)
-        assert result.shape == img.shape
-
-
 class TestOutputExecute:
     def _make_pipe(self):
         import torch
@@ -105,7 +87,6 @@ class TestOutputExecute:
             save=False, output_dir="", filename_template="test",
             filename_index=1, index_digits=3, index_position="suffix",
             format="png", webp_quality=90, webp_lossless=False,
-            sharpen_strength=0.0, sharpen_sigma=1.0, grayscale=False,
             pipe=pipe, image=direct_image,
         )
         assert result[0].shape == direct_image.shape
@@ -120,7 +101,6 @@ class TestOutputExecute:
             save=False, output_dir="", filename_template="test",
             filename_index=1, index_digits=3, index_position="suffix",
             format="png", webp_quality=90, webp_lossless=False,
-            sharpen_strength=0.0, sharpen_sigma=1.0, grayscale=False,
             pipe=pipe, image=None,
         )
         assert result[0].shape == pipe["images"].shape
@@ -132,7 +112,6 @@ class TestOutputExecute:
                 save=False, output_dir="", filename_template="test",
                 filename_index=1, index_digits=3, index_position="suffix",
                 format="png", webp_quality=90, webp_lossless=False,
-                sharpen_strength=0.0, sharpen_sigma=1.0, grayscale=False,
                 pipe=None, image=None,
             )
 
@@ -149,7 +128,6 @@ class TestOutputExecute:
                 save=True, output_dir="", filename_template="test",
                 filename_index=5, index_digits=3, index_position="suffix",
                 format="png", webp_quality=90, webp_lossless=False,
-                sharpen_strength=0.0, sharpen_sigma=1.0, grayscale=False,
                 pipe=pipe, image=None,
             )
         assert result.ui["filename_index"] == [6]
@@ -164,7 +142,6 @@ class TestOutputExecute:
             save=False, output_dir="", filename_template="test",
             filename_index=5, index_digits=3, index_position="suffix",
             format="png", webp_quality=90, webp_lossless=False,
-            sharpen_strength=0.0, sharpen_sigma=1.0, grayscale=False,
             pipe=pipe, image=None,
         )
         assert result.ui["filename_index"] == [5]

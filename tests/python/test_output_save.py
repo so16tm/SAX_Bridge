@@ -14,16 +14,11 @@ def _make_img_np(h=16, w=16):
     return (np.random.rand(h, w, 3) * 255).astype(np.uint8)
 
 
-def _make_gray_img_np(h=16, w=16):
-    """grayscale 用の (H, W, 1) 相当の画像（_save_image は [..., 0] を使うので 3ch でも可）"""
-    return (np.random.rand(h, w, 3) * 255).astype(np.uint8)
-
-
 class TestSaveImagePng:
     def test_basic_png_save(self, tmp_path):
         img = _make_img_np()
         path = str(tmp_path / "test.png")
-        _save_image(img, path, "png", 90, False, "", False)
+        _save_image(img, path, "png", 90, False, "")
         assert os.path.exists(path)
         with Image.open(path) as reloaded:
             assert reloaded.format == "PNG"
@@ -32,7 +27,7 @@ class TestSaveImagePng:
     def test_png_embeds_parameters(self, tmp_path):
         img = _make_img_np()
         path = str(tmp_path / "test.png")
-        _save_image(img, path, "png", 90, False, "Seed: 42, Steps: 20", False)
+        _save_image(img, path, "png", 90, False, "Seed: 42, Steps: 20")
         with Image.open(path) as reloaded:
             assert reloaded.text.get("parameters") == "Seed: 42, Steps: 20"
 
@@ -40,7 +35,7 @@ class TestSaveImagePng:
         img = _make_img_np()
         path = str(tmp_path / "test.png")
         prompt = {"1": {"class_type": "Node", "inputs": {"x": 1}}}
-        _save_image(img, path, "png", 90, False, "", False, prompt=prompt)
+        _save_image(img, path, "png", 90, False, "", prompt=prompt)
         with Image.open(path) as reloaded:
             assert json.loads(reloaded.text["prompt"]) == prompt
 
@@ -48,7 +43,7 @@ class TestSaveImagePng:
         img = _make_img_np()
         path = str(tmp_path / "test.png")
         extra = {"workflow": {"nodes": []}, "other": {"a": 1}}
-        _save_image(img, path, "png", 90, False, "", False, extra_pnginfo=extra)
+        _save_image(img, path, "png", 90, False, "", extra_pnginfo=extra)
         with Image.open(path) as reloaded:
             assert json.loads(reloaded.text["workflow"]) == extra["workflow"]
             assert json.loads(reloaded.text["other"]) == extra["other"]
@@ -56,7 +51,7 @@ class TestSaveImagePng:
     def test_png_empty_metadata_no_parameters_key(self, tmp_path):
         img = _make_img_np()
         path = str(tmp_path / "test.png")
-        _save_image(img, path, "png", 90, False, "", False)
+        _save_image(img, path, "png", 90, False, "")
         with Image.open(path) as reloaded:
             assert "parameters" not in reloaded.text
 
@@ -65,7 +60,7 @@ class TestSaveImageWebp:
     def test_basic_webp_save(self, tmp_path):
         img = _make_img_np()
         path = str(tmp_path / "test.webp")
-        _save_image(img, path, "webp", 90, False, "", False)
+        _save_image(img, path, "webp", 90, False, "")
         assert os.path.exists(path)
         with Image.open(path) as reloaded:
             assert reloaded.format == "WEBP"
@@ -74,7 +69,7 @@ class TestSaveImageWebp:
     def test_webp_lossless(self, tmp_path):
         img = _make_img_np()
         path = str(tmp_path / "test_lossless.webp")
-        _save_image(img, path, "webp", 90, True, "", False)
+        _save_image(img, path, "webp", 90, True, "")
         assert os.path.exists(path)
         # lossless モードでも正常に読み込めること
         with Image.open(path) as reloaded:
@@ -83,7 +78,7 @@ class TestSaveImageWebp:
     def test_webp_embeds_parameters_in_exif(self, tmp_path):
         img = _make_img_np()
         path = str(tmp_path / "test.webp")
-        _save_image(img, path, "webp", 90, False, "Seed: 42", False)
+        _save_image(img, path, "webp", 90, False, "Seed: 42")
         with Image.open(path) as reloaded:
             exif = reloaded.getexif()
             # EXIF 0x010E (ImageDescription) に metadata_str が入る
@@ -93,7 +88,7 @@ class TestSaveImageWebp:
         img = _make_img_np()
         path = str(tmp_path / "test.webp")
         prompt = {"1": {"class_type": "Test"}}
-        _save_image(img, path, "webp", 90, False, "", False, prompt=prompt)
+        _save_image(img, path, "webp", 90, False, "", prompt=prompt)
         with Image.open(path) as reloaded:
             exif = reloaded.getexif()
             # EXIF 0x0110 (Model) に "prompt:<json>" で埋め込まれる
@@ -107,21 +102,15 @@ class TestSaveImageWebp:
         img = _make_img_np()
         for q in [1, 50, 100]:
             path = str(tmp_path / f"q_{q}.webp")
-            _save_image(img, path, "webp", q, False, "", False)
+            _save_image(img, path, "webp", q, False, "")
             assert os.path.exists(path)
 
 
-class TestSaveImageGrayscale:
-    def test_grayscale_png(self, tmp_path):
-        img = _make_gray_img_np()
-        path = str(tmp_path / "gray.png")
-        _save_image(img, path, "png", 90, False, "", True)
-        with Image.open(path) as reloaded:
-            assert reloaded.mode == "L"
-
+class TestSaveImageColor:
     def test_color_png_is_rgb(self, tmp_path):
+        # grayscale 機能は SAX Finisher へ移動したため、Output は常に RGB 保存となる
         img = _make_img_np()
         path = str(tmp_path / "color.png")
-        _save_image(img, path, "png", 90, False, "", False)
+        _save_image(img, path, "png", 90, False, "")
         with Image.open(path) as reloaded:
             assert reloaded.mode == "RGB"

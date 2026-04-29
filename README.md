@@ -42,17 +42,19 @@ Both Detailer nodes include an optional **CFG Guidance Enhancement** feature —
 
 ### Finishing touches — Finisher
 
-**SAX Finisher** applies post-processing effects to the final image. Place it between the Detailer and Output.
+**SAX Finisher** applies post-processing effects and image quality adjustments to the final image. Place it between the Detailer and Output.
 
 | Effect | Parameter | Description |
 |---|---|---|
+| Color Correction | `color_correction` | Matches color distribution to a reference image |
 | Smooth | `smooth` | Reduces jaggies and oversharpened edges via high-frequency suppression |
+| Sharpen | `sharpen_strength` / `sharpen_sigma` | Unsharp Mask edge sharpening |
 | Bloom | `bloom` | Soft glow from bright areas for atmospheric lighting |
 | Vignette | `vignette` | Darkens edges to draw focus to the center |
 | Color Temp | `color_temp` | Warm (+) or cool (−) color temperature shift |
-| Color Correction | `color_correction` | Matches color distribution to a reference image |
+| Grayscale | `grayscale` | ITU-R BT.709 monochrome conversion (applied last) |
 
-All parameters default to 0 (disabled). Set any value above 0 to enable the effect.
+All parameters default to 0 / False (disabled). Effects are applied in the order listed above.
 
 [↑ Back to top](#sax_bridge)
 

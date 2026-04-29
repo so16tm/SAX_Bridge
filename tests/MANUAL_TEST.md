@@ -15,7 +15,7 @@
 ## A. 基本パイプライン
 
 > **Workflow**: `workflows/01_basic_pipeline.json`
-> **構成**: Loader → Prompt → KSampler → Output ×3 分岐
+> **構成**: Loader → Prompt → KSampler → Output ×2 + (Finisher → Output) 分岐
 
 実行すると3つの Output が同時に動作する:
 
@@ -23,12 +23,12 @@
 |---|---|
 | A-1: Preview (save=false) | 画像が表示される。ファイルは保存されない |
 | A-1: Preview (save=true, webp) | 画像が表示される。WebP ファイルが保存される。index がインクリメントされる |
-| *(3番目の Output)* | PNG + sharpen + grayscale で保存される |
+| A-2: Preview (finisher + png) | Finisher で sharpen + grayscale を適用した画像が PNG で保存される |
 
 - [ ] 3つ全てに画像が表示される
 - [ ] save=false の Output はファイルを保存しない
 - [ ] save=true(webp) の Output は WebP ファイルを保存する
-- [ ] PNG + sharpen Output はシャープ化+グレースケールで保存される
+- [ ] Finisher 経由の Output は sharpen + grayscale 適用済みで PNG 保存される
 - [ ] 保存した PNG のメタデータに seed, steps, CFG, prompt が含まれる（prompt_text 接続あり）
 
 ---

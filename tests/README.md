@@ -37,7 +37,7 @@ node --experimental-vm-modules tests/js/collector_serialize.test.mjs
 
 | ファイル | MANUAL_TEST | 含まれるノード |
 |---|---|---|
-| `01_basic_pipeline.json` | A | Loader → Prompt → KSampler → Output ×3 (save/format/sharpen分岐) |
+| `01_basic_pipeline.json` | A | Loader → Prompt → KSampler → Output ×2 + Finisher→Output (save/format/finisher分岐) |
 | `02_prompt_lora.json` | B | Loader → Prompt + Prompt Concat → KSampler → Output |
 | `03_guidance.json` | C | Loader → Prompt → Guidance ×5 (全モード分岐) → KSampler → Preview |
 | `04_detailer.json` | D | Loader → Prompt → KSampler → Detailer/Enhanced ×3 (パラメータ分岐) |

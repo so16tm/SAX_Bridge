@@ -14,7 +14,7 @@
 | [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
 | [Pipe](#pipe) | Pipe construction and switching | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | Prompt encoding and concatenation | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
-| [Enhance](#enhance) | Detailer / Upscaler / Guidance | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) |
+| [Enhance](#enhance) | Detailer / Upscaler / Finisher | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
 | [Option](#option) | Standalone utilities (noise injection etc.) | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | Segmentation via SAM3 | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
@@ -327,6 +327,41 @@ Example: with `cycle=3`, `denoise=1.0`, `denoise_decay=0.9` → `[1.0, 0.7, 0.4]
 
 ---
 
+### SAX Finisher
+
+`SAX_Bridge_Finisher` — Finishing node that applies post-processing effects and image quality adjustments. Place between Detailer / Upscaler and Output.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `pipe` | PIPE_LINE | Input pipe |
+| `reference_image` | IMAGE (optional) | Reference image for `color_correction`. Color correction is skipped when not connected |
+| `color_correction` | Float (0.0 to 1.0) | Matches color distribution to reference via mean/std (0 = off) |
+| `smooth` | Float (0.0 to 1.0) | High-frequency suppression (reduces jaggies and harsh edges). 0 = off |
+| `sharpen_strength` | Float (0.0 to 2.0) | Unsharp Mask sharpening strength. 0 = off |
+| `sharpen_sigma` | Float (0.1 to 5.0) | Sharpening kernel width |
+| `bloom` | Float (0.0 to 1.0) | Soft glow from bright areas. 0 = off |
+| `bloom_threshold` | Float (0.0 to 1.0) | Brightness threshold for bloom extraction (lower = more glow) |
+| `bloom_radius` | Float (1.0 to 32.0) | Bloom spread radius (gaussian sigma) |
+| `vignette` | Float (0.0 to 1.0) | Edge darkening to focus the center. 0 = off |
+| `color_temp` | Float (-1.0 to +1.0) | Color temperature shift. Positive = warm / negative = cool |
+| `grayscale` | Boolean | ITU-R BT.709 grayscale conversion (applied last) |
+
+**Outputs**: `PIPE`, `IMAGE`
+
+**Order of application**:
+
+```
+color_correction → smooth → sharpen → bloom → vignette → color_temp → grayscale
+```
+
+If all effects are disabled (0 / False) and `reference_image` is not connected, the input pipe is passed through unchanged. The Finisher's output is also written back to `pipe.images`, so downstream nodes receive the adjusted image.
+
+[↑ Back to top](#top)
+
+---
+
 ## Option
 
 ### SAX Image Noise
@@ -448,14 +483,14 @@ Each entry row consists of the following elements:
 
 ### SAX Output
 
-`SAX_Bridge_Output` — Final output node that consolidates sharpening, grayscale conversion, file saving, and metadata embedding.
+`SAX_Bridge_Output` — Final output node focused on file saving and metadata embedding. Sharpening, grayscale, and other image adjustments are handled by [SAX Finisher](#sax-finisher).
 
 **Inputs**
 
 | Parameter | Type | Description |
 |-----------|-----|------|
 | `pipe` | PIPE_LINE (optional) | Image source (when `image` is not connected) and metadata provider |
-| `image` | IMAGE (optional) | Target image. Uses `pipe.images` if not connected |
+| `image` | IMAGE (optional) | Image to save. Uses `pipe.images` if not connected |
 | `save` | Boolean | `True` saves the file. `False` shows preview only |
 | `output_dir` | String | Save directory. Supports template variables. Empty = `ComfyUI/output/` |
 | `filename_template` | String | Filename template. Supports template variables |
@@ -465,9 +500,6 @@ Each entry row consists of the following elements:
 | `format` | Combo | `webp` / `png` |
 | `webp_quality` | Int (1 to 100) | WebP quality (ignored when `lossless=True`) |
 | `webp_lossless` | Boolean | WebP lossless save |
-| `sharpen_strength` | Float (0.0 to 2.0) | Unsharp Mask sharpening strength (0.0 = disabled) |
-| `sharpen_sigma` | Float (0.1 to 5.0) | Sharpening kernel width |
-| `grayscale` | Boolean | ITU-R BT.709 grayscale conversion |
 | `prompt_text` | String (optional) | Prompt text to embed in metadata |
 
 **Outputs**: `IMAGE`

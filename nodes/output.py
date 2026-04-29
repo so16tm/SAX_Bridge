@@ -1,11 +1,11 @@
+import datetime
+import glob
 import json
 import logging
 import os
 import re
-import datetime
 import uuid
 
-import torch
 import numpy as np
 from PIL import Image, PngImagePlugin
 import folder_paths
@@ -16,33 +16,6 @@ from .detailer import _extract_pipe
 from .io_types import PipeLine
 
 logger = logging.getLogger("SAX_Bridge")
-
-
-# ---------------------------------------------------------------------------
-# 画像処理ユーティリティ
-# ---------------------------------------------------------------------------
-
-def _apply_sharpen(image: torch.Tensor, strength: float, sigma: float) -> torch.Tensor:
-    """Unsharp Mask シャープ化。image: (B, H, W, C) float32"""
-    if strength <= 0.0:
-        return image
-    import torch.nn.functional as F
-
-    bchw = image.permute(0, 3, 1, 2)
-    kernel_size = max(3, int(6 * sigma + 1) | 1)
-    x = torch.arange(kernel_size, dtype=torch.float32, device=bchw.device) - kernel_size // 2
-    g = torch.exp(-0.5 * (x / sigma) ** 2)
-    g = g / g.sum()
-    kernel = (g.unsqueeze(0) * g.unsqueeze(1)).unsqueeze(0).unsqueeze(0)
-    kernel = kernel.expand(bchw.shape[1], 1, kernel_size, kernel_size).contiguous()
-    blurred = F.conv2d(bchw, kernel, padding=kernel_size // 2, groups=bchw.shape[1])
-    return torch.clamp(bchw + strength * (bchw - blurred), 0.0, 1.0).permute(0, 2, 3, 1)
-
-
-def _apply_grayscale(image: torch.Tensor) -> torch.Tensor:
-    """ITU-R BT.709 グレースケール変換。image: (B, H, W, C) float32"""
-    gray = 0.2126 * image[..., 0] + 0.7152 * image[..., 1] + 0.0722 * image[..., 2]
-    return gray.unsqueeze(-1).expand_as(image)
 
 
 # ---------------------------------------------------------------------------
@@ -152,12 +125,11 @@ def _save_image(
     webp_quality: int,
     webp_lossless: bool,
     metadata_str: str,
-    grayscale: bool,
     prompt=None,
     extra_pnginfo=None,
 ) -> None:
     """PIL を使って画像を保存する。"""
-    pil_img = Image.fromarray(img_np[..., 0], mode="L") if grayscale else Image.fromarray(img_np)
+    pil_img = Image.fromarray(img_np)
 
     if fmt == "png":
         pnginfo = PngImagePlugin.PngInfo()
@@ -208,13 +180,13 @@ class SAX_Bridge_Output(io.ComfyNode):
     """
     最終出力処理を集約するノード。
 
-    - シャープ化（Unsharp Mask）: 全体への微細シャープ調整
-    - グレースケール変換: ITU-R BT.709 係数による変換
     - 保存スイッチ: False でプレビューのみ（試行錯誤中の保存抑制）
     - 出力ディレクトリ指定: 絶対パス または output/ からの相対パス
     - ファイル名テンプレート: {seed} {date} {time} {datetime} {model} {steps} {cfg}
     - インデックス: filename_index から開始し保存ごとにカウントアップ
     - メタデータ埋め込み: Pipe から seed・steps・CFG・モデル名等を自動取得
+
+    画質調整（シャープ化・グレースケール等）は SAX Finisher で行う。
 
     画像ソースの優先順位:
       1. image（直接接続）
@@ -227,14 +199,15 @@ class SAX_Bridge_Output(io.ComfyNode):
             node_id="SAX_Bridge_Output",
             display_name="SAX Output",
             description=(
-                "Final output node combining sharpening, grayscale conversion, WebP/PNG saving, and metadata embedding. "
-                "Set save=False to skip saving during experimentation."
+                "Final output node for saving images with metadata embedding. "
+                "Set save=False to skip saving during experimentation. "
+                "Use SAX Finisher upstream for sharpening, grayscale, and other image adjustments."
             ),
             category="SAX/Bridge/Output",
             is_output_node=True,
             inputs=[
                 io.Boolean.Input("save", default=True,
-                    tooltip="True to save. False for preview only (sharpening and grayscale are still applied)."),
+                    tooltip="True to save. False for preview only."),
                 io.String.Input("output_dir", default="{date:%Y-%m-%d}",
                     tooltip="Output directory. Template variables supported. Leave empty for ComfyUI/output/. Relative paths are based on output/. Absolute paths also accepted."),
                 io.String.Input("filename_template", default="{datetime:%Y%m%d_%H%M%S}",
@@ -249,15 +222,10 @@ class SAX_Bridge_Output(io.ComfyNode):
                 io.Int.Input("webp_quality", default=90, min=1, max=100,
                     tooltip="WebP quality (1–100). Ignored when lossless=True."),
                 io.Boolean.Input("webp_lossless", default=False),
-                io.Float.Input("sharpen_strength", default=0.0, min=0.0, max=2.0, step=0.05,
-                    tooltip="Unsharp Mask sharpening strength. 0.0 = disabled."),
-                io.Float.Input("sharpen_sigma", default=1.0, min=0.1, max=5.0, step=0.1,
-                    tooltip="Sharpening kernel width. Smaller values affect finer edges and details."),
-                io.Boolean.Input("grayscale", default=False),
                 PipeLine.Input("pipe", optional=True,
                     tooltip="Image source and metadata supplier (seed, steps, CFG, model name, etc.) when image is not connected."),
                 io.Image.Input("image", optional=True,
-                    tooltip="Target image to process. Falls back to pipe.images if not connected."),
+                    tooltip="Target image to save. Falls back to pipe.images if not connected."),
                 io.String.Input("prompt_text", optional=True, force_input=True,
                     tooltip="Prompt text to embed in metadata. Recommended: connect SAX Prompt's POPULATED_TEXT."),
             ],
@@ -269,7 +237,6 @@ class SAX_Bridge_Output(io.ComfyNode):
     @classmethod
     def execute(cls, save, output_dir, filename_template, filename_index,
                 index_digits, index_position, format, webp_quality, webp_lossless,
-                sharpen_strength, sharpen_sigma, grayscale,
                 pipe=None, image=None, prompt_text="") -> io.NodeOutput:
         prompt = cls.hidden.prompt
         extra_pnginfo = cls.hidden.extra_pnginfo
@@ -283,11 +250,6 @@ class SAX_Bridge_Output(io.ComfyNode):
                 "[SAX_Bridge] Output: no image found. Connect image or pipe.images."
             )
 
-        result = _apply_sharpen(src, sharpen_strength, sharpen_sigma)
-
-        if grayscale:
-            result = _apply_grayscale(result)
-
         if save:
             now = datetime.datetime.now()
             p = _pipe_to_meta(pipe) if pipe is not None else {}
@@ -295,7 +257,7 @@ class SAX_Bridge_Output(io.ComfyNode):
             resolved_dir = _resolve_dir(output_dir, p, now)
             ext = f".{format}"
             template_result = _expand_filename(filename_template, p, now)
-            imgs_np = (result.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+            imgs_np = (src.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
 
             batch_size = len(imgs_np)
             for i, img_np in enumerate(imgs_np):
@@ -309,11 +271,11 @@ class SAX_Bridge_Output(io.ComfyNode):
                     filepath = os.path.join(resolved_dir, f"{name}_{counter:04d}{ext}")
                     counter += 1
 
-                _save_image(img_np, filepath, format, webp_quality, webp_lossless, metadata_str, grayscale, prompt, extra_pnginfo)
+                _save_image(img_np, filepath, format, webp_quality, webp_lossless, metadata_str, prompt, extra_pnginfo)
                 logger.info(f"[SAX_Bridge] Output: saved → {filepath}")
 
         next_index = filename_index + 1 if save else filename_index
-        return io.NodeOutput(result, ui={"filename_index": [next_index]})
+        return io.NodeOutput(src, ui={"filename_index": [next_index]})
 
 
 class SAX_Bridge_Image_Preview(io.ComfyNode):
@@ -358,7 +320,6 @@ class SAX_Bridge_Image_Preview(io.ComfyNode):
         if images is None:
             return io.NodeOutput(ui={"images": []})
 
-        import glob
         temp_dir = folder_paths.get_temp_directory()
         node_id = getattr(cls, "hidden", None)
         node_id = node_id.unique_id if node_id else None
