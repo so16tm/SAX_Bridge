@@ -98,6 +98,9 @@ function loadPysssssAutoComplete() {
 /**
  * textarea に danbooru タグオートコンプリートをアタッチする。
  * pyssss 未導入時は何もしない（手動入力にフォールバック）。
+ *
+ * Manager Dialog のオーバーレイ (z-index 10000) より前に出すため、
+ * dropdown の z-index を個別に引き上げる。pyssss 既定は 9999。
  */
 async function attachAutoComplete(textarea) {
     const TextAreaAutoComplete = await loadPysssssAutoComplete();
@@ -105,7 +108,10 @@ async function attachAutoComplete(textarea) {
     // textarea が既に DOM から外されていた場合はアタッチしない
     if (!textarea.isConnected) return;
     try {
-        new TextAreaAutoComplete(textarea);
+        const instance = new TextAreaAutoComplete(textarea);
+        if (instance?.dropdown) {
+            instance.dropdown.style.zIndex = "10001";
+        }
     } catch {
         // pyssss 側の API 変更等で例外発生 → 黙ってフォールバック
     }
