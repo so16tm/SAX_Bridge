@@ -111,6 +111,7 @@ Pass the generated mask to **SAX Detailer** for refinement, then compare the ori
 - **Hybrid tag input** with auto-normalization (trim + lowercase), favorite tags pinned to the front
 - **Tag-aware sorting** keeps related items grouped and matches the tag toggle order
 - Output empty string for unset / orphan Relations — drops cleanly into `SAX Prompt Concat`
+- Text editor supports **danbooru tag autocomplete** when [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) is installed (falls back to manual input otherwise)
 
 See [Node Reference: SAX Text Catalog](docs/nodes_en.md#sax-text-catalog) for full details.
 
@@ -159,6 +160,7 @@ git clone https://github.com/so16tm/SAX_Bridge
 |---|---|---|
 | ComfyUI | Runtime | ✅ |
 | `comfyui-impact-pack` | Wildcard feature (SAX Prompt) | Optional |
+| `ComfyUI-Custom-Scripts` (pyssss) | Danbooru tag autocomplete in SAX Text Catalog | Optional |
 | `sam3` | SAX SAM3 nodes | Only when using SAM3 |
 
 > sam3 is not required if you do not use SAX SAM3 nodes.

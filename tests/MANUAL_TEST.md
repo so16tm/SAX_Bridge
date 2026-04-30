@@ -226,6 +226,19 @@
 - [ ] ComfyUI を再読込 → ノード状態が完全復元される（Item, tags, favorites, Relations すべて）
 - [ ] Slot の接続も復元されている
 
+### I-9. オートコンプリート連携（pyssss ComfyUI-Custom-Scripts）
+
+#### pyssss 導入時
+- [ ] Item Text 編集 textarea にフォーカスし `1g` と入力 → `1girl` 等の候補ポップアップが出る
+- [ ] ↑↓ キーで候補移動、Enter / Tab で確定
+- [ ] 確定後、自動でカンマ + スペース (`, `) が挿入される
+- [ ] カテゴリ別の色分けが反映される
+- [ ] Esc で候補を閉じる、textarea からフォーカスが外れた時も閉じる
+
+#### pyssss 未導入時
+- [ ] Item Text 編集 textarea で何を入力しても候補は出ない（ノードはエラーなく動作する）
+- [ ] ブラウザコンソールに目立ったエラーが出ない
+
 ---
 
 ## R. ワークフロー互換性

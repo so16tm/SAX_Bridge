@@ -781,6 +781,12 @@ applied_loras: {'lora_a'} (1 entries)
 - お気に入りタグ：`[★/☆]` トグルで指定、Manage Tags 内で `[↑↓]` 並び替え
 - タグフィルタは 1 行固定、件数超過時は `[Show all]` ボタンで別ダイアログ展開
 
+**Text 編集エリアのオートコンプリート（オプション）**
+- [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) が導入されていれば、Item Text 編集 textarea で danbooru タグ補完が有効になる
+- カテゴリ別の色分け、エイリアス対応、↑↓ Enter/Tab で確定など、pyssss 標準動作をそのまま継承
+- カンマ区切り（`globalSeparator = ", "`）を自動付与
+- 未導入時は何もしない（手動入力にフォールバック）
+
 **並び順仕様**
 - タグ：お気に入り（コンテキスト連動）→ アイテム数降順 → アルファベット順
 - アイテム：タグ順序に基づくタプル辞書順（タグなしは末尾）

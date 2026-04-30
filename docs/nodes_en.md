@@ -781,6 +781,12 @@ applied_loras: {'lora_a'} (1 entries)
 - Favorite tags: `[★/☆]` toggle, `[↑↓]` reorder inside Manage Tags
 - Tag filter is fixed to a single line; if it overflows, a `[Show all]` button opens a separate dialog
 
+**Text Editor Autocomplete (Optional)**
+- If [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) is installed, the Item Text editor textarea gets danbooru tag autocomplete
+- Inherits pyssss defaults: category color coding, alias support, ↑↓ Enter/Tab confirmation
+- Auto-appends comma separator (`globalSeparator = ", "`)
+- Falls back silently to manual input if pyssss is not installed
+
 **Sort Order**
 - Tags: favorites (context-aware) → item count desc → alphabetical
 - Items: tuple-lexicographic order based on tag positions (untagged items go last)

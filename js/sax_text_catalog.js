@@ -57,6 +57,61 @@ function hideWidget(widget) {
 }
 
 // ---------------------------------------------------------------------------
+// danbooru タグオートコンプリート（pyssss ComfyUI-Custom-Scripts 連携）
+// ---------------------------------------------------------------------------
+
+/**
+ * pyssss `TextAreaAutoComplete` の動的ロード。
+ * pyssss が未導入 or 配信パスが異なる場合は null を返してフォールバック（手動入力）。
+ *
+ * 結果はモジュールスコープでメモ化し、Dialog 開閉ごとの再 import を避ける。
+ */
+let _pysssssAutoCompletePromise = null;
+
+function loadPysssssAutoComplete() {
+    if (_pysssssAutoCompletePromise) return _pysssssAutoCompletePromise;
+    const candidatePaths = [
+        "/extensions/pysssss/js/common/autocomplete.js",
+        "/extensions/ComfyUI-Custom-Scripts/js/common/autocomplete.js",
+    ];
+    _pysssssAutoCompletePromise = (async () => {
+        for (const path of candidatePaths) {
+            try {
+                const mod = await import(path);
+                if (mod?.TextAreaAutoComplete) {
+                    // globalSeparator はインスタンス間で共有される static プロパティ。
+                    // pyssss 既定（""）を ", " に上書きして区切りを補完時に自動挿入する
+                    if (mod.TextAreaAutoComplete.globalSeparator === "") {
+                        mod.TextAreaAutoComplete.globalSeparator = ", ";
+                    }
+                    return mod.TextAreaAutoComplete;
+                }
+            } catch {
+                // 次の候補パスへ
+            }
+        }
+        return null;
+    })();
+    return _pysssssAutoCompletePromise;
+}
+
+/**
+ * textarea に danbooru タグオートコンプリートをアタッチする。
+ * pyssss 未導入時は何もしない（手動入力にフォールバック）。
+ */
+async function attachAutoComplete(textarea) {
+    const TextAreaAutoComplete = await loadPysssssAutoComplete();
+    if (!TextAreaAutoComplete) return;
+    // textarea が既に DOM から外されていた場合はアタッチしない
+    if (!textarea.isConnected) return;
+    try {
+        new TextAreaAutoComplete(textarea);
+    } catch {
+        // pyssss 側の API 変更等で例外発生 → 黙ってフォールバック
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 状態モデル
 // ---------------------------------------------------------------------------
 
@@ -557,6 +612,9 @@ function showManagerDialog(getState, applyDraft) {
             dirty = true;
         });
         editorEl.appendChild(textArea);
+        // pyssss ComfyUI-Custom-Scripts が導入されていれば danbooru タグ補完を有効化。
+        // 未導入時は黙って手動入力にフォールバックする
+        attachAutoComplete(textArea);
 
         // -- Action buttons --
         const refs = countRelationsReferencing({ ...original, catalog: draft }, item.id);
