@@ -150,6 +150,84 @@
 
 ---
 
+## I. Text Catalog
+
+> **Workflow**: `workflows/09_text_catalog.json`
+> **構成**: SAX Text Catalog 1 ノード（事前登録の 3 Item / 4 Relation を含む）
+
+### I-1. 基本表示と起動口
+
+- [ ] ワークフロー読込でノード本体に 4 行の Relation が表示される
+- [ ] Relation 1 = `scene_day`、Relation 2 = `neg_default`
+- [ ] Relation 3 が `(unset)` を灰色で表示
+- [ ] Relation 4 が `<orphan>` を警告色で表示（削除済み Item `ghost` 参照）
+- [ ] 出力ピン名がそれぞれの Item 名 / unset / orphan 表記と一致
+- [ ] `[📖 Manage Texts...]` ボタンで Manager Dialog が開く
+- [ ] ノード右クリックメニューにも `📖 Manage Texts...` が表示され、同じ Dialog が開く
+
+### I-2. Manager Dialog（編集）
+
+- [ ] 左ペインに 3 件の Item が表示される
+- [ ] 起動時の初期選択がリスト先頭の Item（タグソート適用後）になっている
+- [ ] Item 行右に `×N` 参照数バッジが表示される（`scene_day` は ×1、`scene_night` は ×0、`neg_default` は ×1）
+- [ ] 左ペインの Item をクリックすると右ペインの Editor が切り替わる
+- [ ] Name 編集 → 左ペインの表示名がリアルタイム更新
+- [ ] Text 編集 → リアルタイムには反映されないが Save 後に出力に反映される
+- [ ] `[+ New]` で新規 Item 追加、初期選択がそれに切り替わる
+- [ ] `[Duplicate]` で複製、`(copy)` 付きの名前になり選択も切り替わる
+- [ ] 参照中 Item（`×N` バッジあり）の `[Delete]` で確認ダイアログが出る
+- [ ] 削除実行後、該当 Relation が `(unset)` になる
+
+### I-3. タグ機能
+
+- [ ] Editor の Tags 行で `+ tag` 入力 → Enter でタグ追加
+- [ ] 大文字や前後空白を含めて入力 → 自動で `trim` + 小文字化される
+- [ ] タグバッジの `×` クリックでタグ除去
+- [ ] タグフィルタ行のタグをクリック → 該当タグ持ちの Item に絞り込まれる
+- [ ] 検索ボックスに入力 → Item 名 / タグの部分一致で絞り込まれる
+- [ ] 検索 + タグ選択は AND 条件
+- [ ] タグ件数 13 個以上では `[Show all (N more)]` ボタンが現れる
+
+### I-4. お気に入りタグ
+
+- [ ] `[Manage Tags…]` でサブダイアログが開く
+- [ ] `[☆]` クリックでお気に入りに追加され、Favorites セクションに移動
+- [ ] Favorites 内の `[↑] [↓]` で順序変更
+- [ ] お気に入りタグはフィルタ行の先頭に `★` 付きバッジで表示される
+- [ ] お気に入りでもコンテキスト外（フィルタ後 items に登場しない）なら表示されない
+- [ ] `[★]` クリックでお気に入りから外す
+- [ ] お気に入りタグの並び順が Item の表示順 / Item 内タグの表示順にも反映される
+
+### I-5. 並び順の連動
+
+- [ ] タグトグルで上位に来るタグを持つ Item がリスト先頭に並ぶ
+- [ ] Item 行のタグバッジ（最大 3 個）の並びがタグトグル並びと一致
+- [ ] Editor のタグバッジの並びもタグトグル並びと一致
+- [ ] タグなしの Item はリスト末尾に集約される
+
+### I-6. Save / Close
+
+- [ ] `[Save]` 押下で変更が反映され、Dialog は開いたまま継続
+- [ ] Save 後すぐに `[Close]` → 確認なしで閉じる
+- [ ] 編集後に `[Close]` → 「未保存変更を破棄して閉じる？」確認
+- [ ] Cancel すると Dialog に戻る
+- [ ] 確認で OK → 変更破棄して Close
+
+### I-7. スロット接続維持
+
+- [ ] Relation 1 を任意の STRING 入力ノード（例：Note）に接続
+- [ ] Manager で `scene_day` の Text を編集して Save → 接続が維持されている
+- [ ] ピッカーで Relation 1 の Item を `scene_night` に変更 → Slot 1 の接続が維持されている
+- [ ] `[+ Add Relation]` で 5 つ目の Relation を追加 → 既存 Slot 1 の接続が維持されている
+
+### I-8. ワークフロー保存・読込
+
+- [ ] Manager でいくつか変更し Save → ワークフローを保存
+- [ ] ComfyUI を再読込 → ノード状態が完全復元される（Item, tags, favorites, Relations すべて）
+- [ ] Slot の接続も復元されている
+
+---
+
 ## R. ワークフロー互換性
 
 > V3 移行前に保存した既存ワークフローを使用

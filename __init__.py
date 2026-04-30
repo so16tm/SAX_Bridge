@@ -6,6 +6,7 @@ from .nodes import node_collector as node_collector_node
 from .nodes import pipe_collector as pipe_collector_node
 from .nodes import image_collector as image_collector_node
 from .nodes import primitive_store as primitive_store_node
+from .nodes import text_catalog as text_catalog_node
 from .nodes import guidance as guidance_node
 from .nodes import sam3 as sam3_node
 from .nodes import debug_log as debug_log_module
@@ -65,6 +66,7 @@ for v3_node in [
     # Utility
     cache_node.SAX_Bridge_Cache,
     primitive_store_node.SAX_Bridge_Primitive_Store,
+    text_catalog_node.SAX_Bridge_Text_Catalog,
     toggle_manager_node.SAX_Bridge_Toggle_Manager,
 ]:
     _schema = v3_node.GET_SCHEMA()

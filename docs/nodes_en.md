@@ -20,7 +20,7 @@
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
 | [Debug](#debug) | Debugging & testing | [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
-| [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
+| [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
@@ -733,6 +733,80 @@ applied_loras: {'lora_a'} (1 entries)
 | `BOL` | Boolean | Click to toggle instantly (ON / OFF) |
 
 > Renaming is not supported. To rename, delete and re-add the item.
+
+[↑ Back to top](#top)
+
+---
+
+### SAX Text Catalog
+
+`SAX_Bridge_Text_Catalog` — Manages named texts (prompts, etc.) as an in-node catalog and assigns them to output slots via Relations. Lets you maintain multiple prompts as a binder and switch between them without rewiring the workflow.
+
+**Outputs**: STRING outputs dynamically generated per Relation
+
+#### Four-Element Model
+
+| Element | Role | Edit Location |
+|---------|------|---------------|
+| **Catalog** | Container for Items | Manager Dialog |
+| **Item** | A named text entry (`id` / `name` / `text` / `tags`) | Manager Dialog |
+| **Relation** | Mapping between Catalog.Item and Slot | Node body widget |
+| **Slot** | ComfyUI output pin (auto-generated from Relations) | (not directly editable) |
+
+#### Main Features
+
+**Node Body Widget**
+- `📖 Manage Texts...` button / right-click menu opens the Manager Dialog
+- `[+ Add Relation]` adds a Relation and a corresponding output Slot
+- Each Relation row has `[✎]` (item picker) / `[↑↓]` (reorder) / `[×]` (delete)
+- Unset Relations show `(unset)` in gray
+- Relations referencing deleted Items show `<orphan>` with warning color
+
+**Manager Dialog (Text Management)**
+- Left pane: Item list (search, tag filter, `×N` reference count badge)
+- Right pane: edit Name / Tags / Text of the selected Item (text editor area is enlarged)
+- `[+ New]` to add, `[Duplicate]` / `[Delete]` to copy / remove
+- Confirmation dialog when deleting an Item that is currently referenced
+- `[Manage Tags]` opens a sub-dialog for favorite tag management
+- Footer: `[Close]` (asks before discarding unsaved changes) / `[Save]` (commits, dialog stays open)
+
+**Item Picker (Relation Editing)**
+- Same search + tag filter UI as the Manager
+- "(unset)" pinned at the top (to revert to unassigned)
+- AND filtering (search query + all selected tags must match)
+
+**Tag Features**
+- Hybrid input: pick from existing candidates or type freely (auto-added to `tag_definitions`)
+- Auto-normalization: `trim()` + lowercase (`"Positive  "` → `"positive"`)
+- Favorite tags: `[★/☆]` toggle, `[↑↓]` reorder inside Manage Tags
+- Tag filter is fixed to a single line; if it overflows, a `[Show all]` button opens a separate dialog
+
+**Sort Order**
+- Tags: favorites (context-aware) → item count desc → alphabetical
+- Items: tuple-lexicographic order based on tag positions (untagged items go last)
+- Per-item tag display: matches the tag toggle order
+
+#### Limits
+
+| Item | Value |
+|------|-------|
+| Max Items | 32 |
+| Max Relations | 32 |
+| Tags per Item | 8 |
+| Max Item id length | 128 chars (DoS protection) |
+
+#### Output Contract
+
+| Case | Output |
+|------|--------|
+| Relation correctly references an Item | `Item.text` |
+| Relation is unset (`item_id: null`) | `""` |
+| Relation references a deleted Item | `""` |
+
+This aligns with the empty-string skip behavior of downstream nodes such as `SAX Prompt Concat`.
+
+> **Data Scope**: Per-node (saved in `items_json`, included in the workflow). No global sharing.
+> **Sharing one Item across multiple Relations**: A single Item can be referenced by multiple Relations to fan out the same text.
 
 [↑ Back to top](#top)
 

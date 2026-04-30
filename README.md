@@ -100,6 +100,24 @@ Pass the generated mask to **SAX Detailer** for refinement, then compare the ori
 
 ---
 
+<a id="text-catalog"></a>
+
+### Manage prompt variations as a binder — Text Catalog
+
+**SAX Text Catalog** stores named texts (prompts, negatives, fragments) inside a single node and assigns them to output slots via Relations. Switch between scene variations, share a common negative across multiple samplers, or organize text snippets by tags — without rewiring your workflow.
+
+- **Catalog → Item → Relation → Slot** four-element model lets you separate text storage from output routing
+- **Manager Dialog** with search, tag filter, and a wide text editor for batch authoring
+- **Hybrid tag input** with auto-normalization (trim + lowercase), favorite tags pinned to the front
+- **Tag-aware sorting** keeps related items grouped and matches the tag toggle order
+- Output empty string for unset / orphan Relations — drops cleanly into `SAX Prompt Concat`
+
+See [Node Reference: SAX Text Catalog](docs/nodes_en.md#sax-text-catalog) for full details.
+
+[↑ Back to top](#sax_bridge)
+
+---
+
 <a id="collector"></a>
 
 ### Simplify complex wiring — Collector

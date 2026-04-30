@@ -20,7 +20,7 @@
 | [Output](#output) | 出力・プレビュー | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | ノード・画像・Pipe の集約 | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
 | [Debug](#debug) | デバッグ・テスト用 | [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
-| [Utility](#utility) | Pipe 内部ヘルパー | [SAX Primitive Store](#sax-primitive-store) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
+| [Utility](#utility) | Pipe 内部ヘルパー | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
@@ -733,6 +733,80 @@ applied_loras: {'lora_a'} (1 entries)
 | `BOL` | Boolean | クリックで即トグル（ON / OFF） |
 
 > 名前変更は非対応です。名前を変えたい場合は削除して再追加してください。
+
+[↑ トップへ](#top)
+
+---
+
+### SAX Text Catalog
+
+`SAX_Bridge_Text_Catalog` — 名前付きテキスト（プロンプト等）をノード内のカタログとして保管し、Relation 経由で出力スロットに割り当てるノードです。複数のプロンプトをバインダー的に管理し、ワークフロー側を書き換えずに切替できます。
+
+**出力**: Relation ごとに動的生成された STRING 出力
+
+#### 4 要素モデル
+
+| 要素 | 役割 | 編集場所 |
+|------|------|---------|
+| **Catalog** | Item の保管庫 | Manager Dialog |
+| **Item** | 名前付きテキスト 1 件（`id` / `name` / `text` / `tags`） | Manager Dialog |
+| **Relation** | Catalog.Item と Slot の紐づけ | ノード本体ウィジェット |
+| **Slot** | ComfyUI 出力ピン（Relation 配列から自動生成） | （直接操作不可） |
+
+#### 主な機能
+
+**ノード本体ウィジェット**
+- `📖 Manage Texts...` ボタン / 右クリックメニューで Manager Dialog を起動
+- `[+ Add Relation]` で Relation を追加すると同時に出力 Slot も増える
+- 各 Relation 行に `[✎]`（Item 選択）/ `[↑↓]`（並び替え）/ `[×]`（削除）
+- 未割当 Relation は `(unset)` を灰色で表示
+- 削除済み Item を参照する Relation は `<orphan>` を警告色で表示
+
+**Manager Dialog（テキスト管理）**
+- 左ペイン：Item 一覧（検索、タグフィルタ、参照中 Relation 数 `×N` 表示）
+- 右ペイン：選択中 Item の Name / Tags / Text を編集（テキスト入力エリアは大きく確保）
+- `[+ New]` で新規 Item 追加、`[Duplicate]` / `[Delete]` で複製・削除
+- 参照中の Item を削除する場合は確認ダイアログ表示
+- `[Manage Tags]` でお気に入りタグ管理サブダイアログを開く
+- フッター：`[Close]`（未保存時は確認）/ `[Save]`（反映、Dialog 継続）
+
+**Item ピッカー（Relation 編集）**
+- Manager と同じ検索 + タグフィルタ UI
+- 「(unset)」を最上部に常時表示（未割当に戻すため）
+- AND 条件で絞り込み（検索クエリ + 選択タグ全て一致）
+
+**タグ機能**
+- ハイブリッド入力：既存タグ候補から選択 + 自由入力（自動で `tag_definitions` に追加）
+- 自動正規化：`trim()` + 小文字化（`"Positive  "` → `"positive"`）
+- お気に入りタグ：`[★/☆]` トグルで指定、Manage Tags 内で `[↑↓]` 並び替え
+- タグフィルタは 1 行固定、件数超過時は `[Show all]` ボタンで別ダイアログ展開
+
+**並び順仕様**
+- タグ：お気に入り（コンテキスト連動）→ アイテム数降順 → アルファベット順
+- アイテム：タグ順序に基づくタプル辞書順（タグなしは末尾）
+- Item 内タグ表示：タグトグル並びと連動
+
+#### 制約値
+
+| 項目 | 値 |
+|------|-----|
+| 最大 Item 数 | 32 |
+| 最大 Relation 数 | 32 |
+| Item あたりタグ数 | 8 |
+| Item id 最大長 | 128 文字（DoS 対策） |
+
+#### 出力契約
+
+| ケース | 出力値 |
+|--------|--------|
+| Relation が Item を正しく参照 | `Item.text` |
+| Relation が未割当（`item_id: null`） | `""` |
+| Relation が削除済み Item を参照 | `""` |
+
+下流ノード（`SAX Prompt Concat` 等）の空文字スキップ実装と整合します。
+
+> **データ保管範囲**: ノード単位（items_json でワークフローに含まれる）。グローバル共有はしません。
+> **接続したいプロンプトが複数ある場合**: 1 つの Item を複数 Relation から参照することもできます。
 
 [↑ トップへ](#top)
 
