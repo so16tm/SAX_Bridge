@@ -82,7 +82,7 @@ def _encode_with_break(clip, text):
                 "_v_weight": d.get("_v_weight"),
                 "_v_bias": d.get("_v_bias"),
             }))
-            del m._v
+            del d["_v"]
 
     try:
         result = None
@@ -119,42 +119,48 @@ def _apply_loras(model, clip, loras):
         else:
             path = None
 
-        if path is not None:
-            logger.info(
-                "[SAX_Bridge] LOAD LORA: %s: model=%s, clip=%s, LBW=%s, LOADER=%s",
-                lora_name, model_weight, clip_weight, lbw, loader,
-            )
-
-            if loader == "nunchaku":
-                if "NunchakuFluxLoraLoader" in nodes.NODE_CLASS_MAPPINGS:
-                    cls = nodes.NODE_CLASS_MAPPINGS["NunchakuFluxLoraLoader"]
-                    model = cls().load_lora(model, lora_name, model_weight)[0]
-                    applied_names.append(orig_lora_name)
-                else:
-                    logger.warning(
-                        "[SAX_Bridge] 'NunchakuFluxLoraLoader' not found. "
-                        "LOADER=nunchaku is ignored."
-                    )
-            elif lbw is not None and "LoraLoaderBlockWeight //Inspire" in nodes.NODE_CLASS_MAPPINGS:
-                cls = nodes.NODE_CLASS_MAPPINGS["LoraLoaderBlockWeight //Inspire"]
-                model, clip, _ = cls().doit(
-                    model, clip, lora_name,
-                    model_weight, clip_weight,
-                    False, 0, lbw_a, lbw_b, "", lbw
-                )
-                applied_names.append(orig_lora_name)
-            else:
-                if lbw is not None:
-                    logger.warning(
-                        "[SAX_Bridge] 'Inspire Pack' is not installed. "
-                        "LBW= attribute is ignored."
-                    )
-                model, clip = nodes.LoraLoader().load_lora(
-                    model, clip, lora_name, model_weight, clip_weight
-                )
-                applied_names.append(orig_lora_name)
-        else:
+        if path is None:
             logger.warning("[SAX_Bridge] LORA NOT FOUND: %s", orig_lora_name)
+            continue
+
+        logger.info(
+            "[SAX_Bridge] LOAD LORA: %s: model=%s, clip=%s, LBW=%s, LOADER=%s",
+            lora_name, model_weight, clip_weight, lbw, loader,
+        )
+
+        applied = False
+
+        if loader == "nunchaku":
+            if "NunchakuFluxLoraLoader" in nodes.NODE_CLASS_MAPPINGS:
+                cls = nodes.NODE_CLASS_MAPPINGS["NunchakuFluxLoraLoader"]
+                model = cls().load_lora(model, lora_name, model_weight)[0]
+                applied = True
+            else:
+                logger.warning(
+                    "[SAX_Bridge] 'NunchakuFluxLoraLoader' not found. "
+                    "LOADER=nunchaku is ignored."
+                )
+        elif lbw is not None and "LoraLoaderBlockWeight //Inspire" in nodes.NODE_CLASS_MAPPINGS:
+            cls = nodes.NODE_CLASS_MAPPINGS["LoraLoaderBlockWeight //Inspire"]
+            model, clip, _ = cls().doit(
+                model, clip, lora_name,
+                model_weight, clip_weight,
+                False, 0, lbw_a, lbw_b, "", lbw
+            )
+            applied = True
+        else:
+            if lbw is not None:
+                logger.warning(
+                    "[SAX_Bridge] 'Inspire Pack' is not installed. "
+                    "LBW= attribute is ignored."
+                )
+            model, clip = nodes.LoraLoader().load_lora(
+                model, clip, lora_name, model_weight, clip_weight
+            )
+            applied = True
+
+        if applied:
+            applied_names.append(orig_lora_name)
 
     return model, clip, applied_names
 
