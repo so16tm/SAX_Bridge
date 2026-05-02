@@ -120,10 +120,9 @@ def _apply_loras(model, clip, loras):
             path = None
 
         if path is not None:
-            logging.info(
-                f"[SAX_Bridge] LOAD LORA: {lora_name}: "
-                f"model={model_weight}, clip={clip_weight}, "
-                f"LBW={lbw}, LOADER={loader}"
+            logger.info(
+                "[SAX_Bridge] LOAD LORA: %s: model=%s, clip=%s, LBW=%s, LOADER=%s",
+                lora_name, model_weight, clip_weight, lbw, loader,
             )
 
             if loader == "nunchaku":
@@ -132,16 +131,11 @@ def _apply_loras(model, clip, loras):
                     model = cls().load_lora(model, lora_name, model_weight)[0]
                     applied_names.append(orig_lora_name)
                 else:
-                    logging.warning(
+                    logger.warning(
                         "[SAX_Bridge] 'NunchakuFluxLoraLoader' not found. "
                         "LOADER=nunchaku is ignored."
                     )
             else:
-                def default_lora():
-                    return nodes.LoraLoader().load_lora(
-                        model, clip, lora_name, model_weight, clip_weight
-                    )
-
                 if lbw is not None:
                     if "LoraLoaderBlockWeight //Inspire" in nodes.NODE_CLASS_MAPPINGS:
                         cls = nodes.NODE_CLASS_MAPPINGS["LoraLoaderBlockWeight //Inspire"]
@@ -152,17 +146,21 @@ def _apply_loras(model, clip, loras):
                         )
                         applied_names.append(orig_lora_name)
                     else:
-                        logging.warning(
+                        logger.warning(
                             "[SAX_Bridge] 'Inspire Pack' is not installed. "
                             "LBW= attribute is ignored."
                         )
-                        model, clip = default_lora()
+                        model, clip = nodes.LoraLoader().load_lora(
+                            model, clip, lora_name, model_weight, clip_weight
+                        )
                         applied_names.append(orig_lora_name)
                 else:
-                    model, clip = default_lora()
+                    model, clip = nodes.LoraLoader().load_lora(
+                        model, clip, lora_name, model_weight, clip_weight
+                    )
                     applied_names.append(orig_lora_name)
         else:
-            logging.warning(f"[SAX_Bridge] LORA NOT FOUND: {orig_lora_name}")
+            logger.warning("[SAX_Bridge] LORA NOT FOUND: %s", orig_lora_name)
 
     return model, clip, applied_names
 

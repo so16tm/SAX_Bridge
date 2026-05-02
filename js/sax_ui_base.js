@@ -99,8 +99,14 @@ export const PRIMITIVE_BADGE_TEXT_COLOR = "#fff";
 let _themeCache = null;
 
 // パレット変更（documentElement の style 変更 or head への style 追加）を検知してキャッシュを無効化する
+// MutationObserver は短時間に大量発火しうるため 100ms trailing-edge デバウンスで invalidate 回数を抑える
+// （leading-edge だと連続発火の途中変更が捨てられ、最後の状態を見逃すリスクがある）
 {
-    const _inv = () => { _themeCache = null; };
+    let _invTimer = null;
+    const _inv = () => {
+        if (_invTimer != null) clearTimeout(_invTimer);
+        _invTimer = setTimeout(() => { _themeCache = null; _invTimer = null; }, 100);
+    };
     const _obs = new MutationObserver(_inv);
     _obs.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
     _obs.observe(document.head, { childList: true });
@@ -611,7 +617,7 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
                     const refresh = () => {
                         btns.forEach(({ btn, opt }) => {
                             const active = ed[f.key] === opt.value;
-                            const color  = opt.color || "var(--primary-background,#0b8ce9)";
+                            const color  = opt.color || SAX_COLORS.primaryBg;
                             btn.style.background  = active ? color : "var(--comfy-input-bg,#222)";
                             btn.style.borderColor = active ? color : "var(--content-bg,#4e4e4e)";
                             btn.style.color       = active ? "#fff" : "var(--input-text,#ddd)";
@@ -1998,9 +2004,16 @@ export function buildPickerContent({
     searchWrap.appendChild(makeFoldBtn("▶", "Collapse all", () => toggleAllSections(false)));
 
     // 描画関数
+    // 検索入力の連続発火による DOM 全再構築を防ぐため 150ms デバウンス
+    // （100+ ノードのグラフで体感的な遅延が発生していたため）
     const doRender = () => renderContent(searchInput.value, scroll);
+    let _searchTimer = null;
+    const doRenderDebounced = () => {
+        if (_searchTimer != null) clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(() => { _searchTimer = null; doRender(); }, 150);
+    };
     doRender();
-    searchInput.addEventListener("input", doRender);
+    searchInput.addEventListener("input", doRenderDebounced);
 
     // ボタン行
     const btnRow = h("div", "display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;");
@@ -2035,6 +2048,8 @@ export function buildPickerContent({
 
     const cleanup = () => {
         document.removeEventListener("keydown", onKeyDown);
+        // ダイアログ閉鎖後に残留タイマーが切り離し済み DOM へ doRender を呼ぶのを防ぐ
+        if (_searchTimer != null) { clearTimeout(_searchTimer); _searchTimer = null; }
     };
 
     // コンテナ要素

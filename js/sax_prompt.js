@@ -12,7 +12,7 @@ async function loadWildcardsFromAPI() {
         const res = await api.fetchApi("/impact/wildcards/list");
         if (res.ok) {
             const data = await res.json();
-            _wildcards_list_cache = data.data || [];
+            _wildcards_list_cache = Array.isArray(data.data) ? data.data : [];
             return _wildcards_list_cache;
         }
     } catch (e) {
