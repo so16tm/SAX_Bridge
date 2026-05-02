@@ -2,7 +2,6 @@
 
 import json
 import os
-import pytest
 import numpy as np
 from PIL import Image
 

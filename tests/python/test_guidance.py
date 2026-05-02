@@ -1,7 +1,6 @@
 """SAX_Bridge_Guidance ノードのテスト。"""
 
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from nodes.guidance import (
     SAX_Bridge_Guidance,
     apply_guidance_to_model,

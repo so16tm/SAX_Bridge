@@ -1,6 +1,5 @@
 """SAX_Bridge_Output / SAX_Bridge_Image_Preview ノードのテスト。"""
 
-import os
 import pytest
 import datetime
 from unittest.mock import MagicMock, patch
@@ -8,8 +7,6 @@ from nodes.output import (
     SAX_Bridge_Output,
     SAX_Bridge_Image_Preview,
     _expand_template,
-    _resolve_dir,
-    _expand_filename,
     _build_indexed_name,
     _build_metadata_str,
 )
@@ -92,7 +89,6 @@ class TestOutputExecute:
         assert result[0].shape == direct_image.shape
 
     def test_pipe_fallback_when_no_image(self):
-        import torch
         pipe = self._make_pipe()
         SAX_Bridge_Output.hidden = MagicMock()
         SAX_Bridge_Output.hidden.prompt = None
@@ -116,7 +112,6 @@ class TestOutputExecute:
             )
 
     def test_index_increments_on_save(self):
-        import torch
         pipe = self._make_pipe()
         SAX_Bridge_Output.hidden = MagicMock()
         SAX_Bridge_Output.hidden.prompt = None
@@ -133,7 +128,6 @@ class TestOutputExecute:
         assert result.ui["filename_index"] == [6]
 
     def test_index_unchanged_when_no_save(self):
-        import torch
         pipe = self._make_pipe()
         SAX_Bridge_Output.hidden = MagicMock()
         SAX_Bridge_Output.hidden.prompt = None
