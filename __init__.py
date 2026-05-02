@@ -13,16 +13,18 @@ from .nodes import mask_adjust as mask_adjust_node
 from .nodes import debug_log as debug_log_module
 from .nodes.schedulers import register_schedulers
 
+# loader.py の Combo.Input("scheduler_name", options=KSampler.SCHEDULERS) が import 時に
+# 評価されるため、AYS スケジューラを SCHEDULER_NAMES へ追加してから loader 系を import する。
 register_schedulers()
 
-from .nodes import prompt as prompt_node
-from .nodes import pipe as pipe_node
-from .nodes import loader as loader_node
-from .nodes import sampler as sampler_node
-from .nodes import cache as cache_node
-from .nodes import noise as noise_node
-from .nodes import upscaler as upscaler_node
-from .nodes import finisher as finisher_node
+from .nodes import prompt as prompt_node  # noqa: E402
+from .nodes import pipe as pipe_node  # noqa: E402
+from .nodes import loader as loader_node  # noqa: E402
+from .nodes import sampler as sampler_node  # noqa: E402
+from .nodes import cache as cache_node  # noqa: E402
+from .nodes import noise as noise_node  # noqa: E402
+from .nodes import upscaler as upscaler_node  # noqa: E402
+from .nodes import finisher as finisher_node  # noqa: E402
 
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
