@@ -286,6 +286,95 @@ class TestMalformedData:
 
 
 # ---------------------------------------------------------------------------
+# Relation トグル (`on` フィールド)
+# ---------------------------------------------------------------------------
+
+class TestRelationToggle:
+    def test_on_true_returns_text(self):
+        payload = _make_payload(
+            items=[{"id": "a", "name": "x", "text": "hello", "tags": []}],
+            relations=[{"item_id": "a", "on": True}],
+        )
+        result = _resolve_relations(payload)
+        assert result[0] == "hello"
+
+    def test_on_false_returns_empty_string(self):
+        payload = _make_payload(
+            items=[{"id": "a", "name": "x", "text": "hello", "tags": []}],
+            relations=[{"item_id": "a", "on": False}],
+        )
+        result = _resolve_relations(payload)
+        assert result[0] == ""
+
+    def test_on_missing_defaults_to_true(self):
+        """旧ワークフロー（`on` 欠損）は ON 扱いで読み込む（後方互換）"""
+        payload = _make_payload(
+            items=[{"id": "a", "name": "x", "text": "hello", "tags": []}],
+            relations=[{"item_id": "a"}],
+        )
+        result = _resolve_relations(payload)
+        assert result[0] == "hello"
+
+    def test_on_truthy_non_boolean_treated_as_true(self):
+        """非 boolean の truthy 値（数値、文字列）は True 扱い"""
+        for truthy in [1, "yes", [1]]:
+            payload = _make_payload(
+                items=[{"id": "a", "name": "x", "text": "hello", "tags": []}],
+                relations=[{"item_id": "a", "on": truthy}],
+            )
+            result = _resolve_relations(payload)
+            assert result[0] == "hello", f"failed for on={truthy!r}"
+
+    def test_on_falsy_non_boolean_treated_as_false(self):
+        """非 boolean の falsy 値（0、空文字、None、空配列）は False 扱い"""
+        for falsy in [0, "", None, []]:
+            payload = _make_payload(
+                items=[{"id": "a", "name": "x", "text": "hello", "tags": []}],
+                relations=[{"item_id": "a", "on": falsy}],
+            )
+            result = _resolve_relations(payload)
+            assert result[0] == "", f"failed for on={falsy!r}"
+
+    def test_on_false_with_unset_relation_returns_empty(self):
+        """OFF & 未割当の Relation も空文字"""
+        payload = _make_payload(
+            items=[],
+            relations=[{"item_id": None, "on": False}],
+        )
+        result = _resolve_relations(payload)
+        assert result[0] == ""
+
+    def test_on_false_with_orphan_relation_returns_empty_and_logs(self, caplog):
+        """OFF でも参照切れの警告は維持する（ON 復帰時の予期しない空文字を防ぐため）"""
+        payload = _make_payload(
+            items=[{"id": "a", "name": "x", "text": "hello", "tags": []}],
+            relations=[{"item_id": "ghost", "on": False}],
+        )
+        with caplog.at_level(logging.WARNING):
+            result = _resolve_relations(payload)
+        assert result[0] == ""
+        assert any("missing item" in m for m in caplog.messages)
+
+    def test_on_mixed_relations(self):
+        """ON / OFF 混在の Relation 配列"""
+        payload = _make_payload(
+            items=[
+                {"id": "a", "name": "x", "text": "AAA", "tags": []},
+                {"id": "b", "name": "y", "text": "BBB", "tags": []},
+            ],
+            relations=[
+                {"item_id": "a", "on": True},
+                {"item_id": "b", "on": False},
+                {"item_id": "a", "on": True},
+            ],
+        )
+        result = _resolve_relations(payload)
+        assert result[0] == "AAA"
+        assert result[1] == ""
+        assert result[2] == "AAA"
+
+
+# ---------------------------------------------------------------------------
 # ノードクラスの統合
 # ---------------------------------------------------------------------------
 

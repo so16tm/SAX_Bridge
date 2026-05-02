@@ -6,6 +6,7 @@ import nodes
 from nodes import ConditioningConcat
 from comfy_api.latest import io
 
+from .picker_options import get_lora_options, get_wildcard_options
 from .io_types import PipeLine, filter_new_loras, record_applied_loras
 
 
@@ -196,15 +197,6 @@ class SAX_Bridge_Prompt(io.ComfyNode):
 
     @classmethod
     def define_schema(cls) -> io.Schema:
-        wildcard_list = ["Select the Wildcard to add to the text"]
-        try:
-            import impact.wildcards
-            wl = impact.wildcards.get_wildcard_list()
-            if wl:
-                wildcard_list = wildcard_list + wl
-        except Exception:
-            pass
-
         return io.Schema(
             node_id="SAX_Bridge_Prompt",
             display_name="SAX Prompt",
@@ -216,11 +208,8 @@ class SAX_Bridge_Prompt(io.ComfyNode):
                     multiline=True,
                     tooltip="Enter your prompt using wildcard syntax. LoRA syntax and BREAK syntax are also supported.",
                 ),
-                io.Combo.Input(
-                    "select_to_add_lora",
-                    options=["Select the LoRA to add to the text"] + folder_paths.get_filename_list("loras"),
-                ),
-                io.Combo.Input("select_to_add_wildcard", options=wildcard_list),
+                io.Combo.Input("select_to_add_lora", options=get_lora_options()),
+                io.Combo.Input("select_to_add_wildcard", options=get_wildcard_options()),
             ],
             outputs=[
                 PipeLine.Output(display_name="PIPE"),

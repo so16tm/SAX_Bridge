@@ -4,6 +4,7 @@ import {
     makeItemListWidget,
     captureOutputLinks, restoreOutputLinks,
     showDialog,
+    showFilePicker,
 } from "./sax_ui_base.js";
 
 const EXT_NAME      = "SAX.TextCatalog";
@@ -48,6 +49,31 @@ function newId() {
 /** タグ正規化: trim + 小文字化 */
 function normalizeTag(s) {
     return String(s ?? "").trim().toLowerCase();
+}
+
+/**
+ * confirm() 等のダイアログ表示用に文字列を安全化する。
+ * 制御文字・ゼロ幅文字・双方向制御文字を除去し最大長で打ち切る。
+ * 用途: ログインジェクション防止と、ゼロ幅文字による UI 偽装（誤承認）の防止。
+ *
+ * 範囲:
+ *   \x00-\x1f, \x7f : ASCII 制御文字
+ *   U+200B-U+200F      : ゼロ幅文字（ZWSP, ZWNJ, ZWJ, LRM, RLM）
+ *   U+202A-U+202E      : 双方向制御文字（LRE, RLE, PDF, LRO, RLO）
+ *   U+2060-U+206F      : ワードジョイナー / 不可視操作
+ */
+function sanitizeForDialog(s, maxLen = 80) {
+    // ソースに不可視文字を直接書くことを避けるため、コードポイントから動的に RegExp を構築する。
+    if (!sanitizeForDialog._re) {
+        const ranges = [
+            [0x00, 0x1f], [0x7f, 0x7f],
+            [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x206f],
+        ];
+        const cls = ranges.map(([a, b]) => 
+            String.fromCodePoint(a) + (a === b ? "" : "-" + String.fromCodePoint(b))).join("");
+        sanitizeForDialog._re = new RegExp("[" + cls + "]", "g");
+    }
+    return String(s ?? "").replace(sanitizeForDialog._re, " ").slice(0, maxLen);
 }
 
 /** 隠しウィジェットを描画から除外する（Primitive Store と同パターン） */
@@ -118,6 +144,136 @@ async function attachAutoComplete(textarea) {
 }
 
 // ---------------------------------------------------------------------------
+// LoRA / Wildcard ピッカー（Editor の挿入補助）
+// ---------------------------------------------------------------------------
+
+const LORA_COMBO_NAME       = "select_to_add_lora";
+const WILDCARD_COMBO_NAME   = "select_to_add_wildcard";
+const LORA_PLACEHOLDER      = "Select the LoRA to add to the text";
+const WILDCARD_PLACEHOLDER  = "Select the Wildcard to add to the text";
+
+/** 表示用に LoRA フルパスから .safetensors とディレクトリを除去 */
+const loraDisplayName = (full) =>
+    String(full).replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "");
+
+/** combo widget の選択肢からプレースホルダを除外して取得 */
+function getComboOptions(node, comboName, placeholder) {
+    const combo = node.widgets?.find(w => w.name === comboName);
+    return (combo?.options?.values ?? []).filter(v => v !== placeholder);
+}
+
+/**
+ * textarea のカーソル位置に文字列を挿入し、input イベントを発火する。
+ *
+ * 注意: pyssss TextAreaAutoComplete が attach されている場合、`textarea.value`
+ * への直接代入は autocomplete 内部状態と競合する可能性がある。`input` イベント
+ * 発火で再同期させるが、pyssss 側の API 変更時は再検証が必要。
+ */
+function insertAtCursor(textarea, text) {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end   = textarea.selectionEnd   ?? textarea.value.length;
+    const before = textarea.value.slice(0, start);
+    const after  = textarea.value.slice(end);
+    textarea.value = before + text + after;
+    const newPos = start + text.length;
+    textarea.setSelectionRange(newPos, newPos);
+    textarea.focus();
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+// API レスポンスの安全制限（信頼境界外データに対する型・サイズガード）
+const WILDCARD_NAME_MAX_LENGTH = 200;
+const WILDCARD_LIST_MAX_ITEMS  = 1000;
+
+/**
+ * Wildcard 一覧を Impact-Pack の REST API から遅延ロードし、
+ * combo の options.values にマージする。Impact-Pack 未導入時は無視。
+ *
+ * 成功時のみメモ化フラグを立てるため、ネットワーク一時失敗からの再試行が可能。
+ * 「成功」の定義は API レスポンスの取得成功（list が空でもフラグを立てる）。
+ * 例外発生時のみフラグを立てず再試行できる状態に留める。
+ * `await` 完了後にフラグ判定するため複数 Dialog 起動時の race も保護される。
+ */
+async function ensureWildcardList(node) {
+    if (node._textCatalogWildcardLoaded) return;
+    const combo = node.widgets?.find(w => w.name === WILDCARD_COMBO_NAME);
+    if (!combo) return;
+    // 既に Wildcard が取得済み（define_schema 経由でプレースホルダ以外が含まれる）ならスキップ
+    const values = combo.options?.values ?? [];
+    if (values.length >= 2 || (values.length === 1 && values[0] !== WILDCARD_PLACEHOLDER)) {
+        node._textCatalogWildcardLoaded = true;
+        return;
+    }
+    try {
+        const { api } = await import("../../scripts/api.js");
+        const res = await api.fetchApi("/impact/wildcards/list");
+        if (!res.ok) return;
+        const data = await res.json();
+        // 信頼境界外: 文字列要素のみ採用、長さ・件数の上限で DoS / プロトタイプ汚染を防ぐ
+        const raw = Array.isArray(data?.data) ? data.data : [];
+        const list = raw
+            .filter(v => typeof v === "string" && v.length > 0 && v.length <= WILDCARD_NAME_MAX_LENGTH)
+            .slice(0, WILDCARD_LIST_MAX_ITEMS);
+        if (list.length > 0) {
+            combo.options.values = [WILDCARD_PLACEHOLDER, ...list];
+        }
+        node._textCatalogWildcardLoaded = true;
+    } catch {
+        // Impact-Pack 未導入時はピッカーが空リストになる（ボタン無効化で対応）。
+        // フラグは立てないため、Impact-Pack を後からロードした場合に再試行できる。
+    }
+}
+
+// `showFilePicker` も内部で showDialog を使うため、Manager Dialog と同じ z-index:10000
+// になる。後から body.appendChild される DOM 順により前面表示される（実害なし）。
+// 各ピッカーは独自 className を持つため Manager のクラス名重複削除と競合しない。
+/** LoRA ピッカーを開き、選択肢を textarea のカーソル位置に挿入 */
+function showLoraPicker(node, textarea) {
+    const items = getComboOptions(node, LORA_COMBO_NAME, LORA_PLACEHOLDER);
+    if (items.length === 0) return;
+    showFilePicker({
+        items,
+        title: "Select LoRA to Insert",
+        placeholder: "Search LoRA name…",
+        mode: "single",
+        className: "__sax_text_catalog_lora_picker",
+        displayName: loraDisplayName,
+        onSelect(name) {
+            // 表示名と挿入名を統一する（拡張子＋ディレクトリ部を両方除去）。
+            // ComfyUI LoraLoader はパス付き名でも解決できるが、可読性と
+            // 表示一貫性のため短縮名を採用する。
+            const cleanName = loraDisplayName(String(name));
+            insertAtCursor(textarea, `<lora:${cleanName}>`);
+        },
+    });
+}
+
+/** Wildcard ピッカーを開き、選択肢を textarea のカーソル位置に挿入 */
+function showWildcardPicker(node, textarea) {
+    const items = getComboOptions(node, WILDCARD_COMBO_NAME, WILDCARD_PLACEHOLDER);
+    if (items.length === 0) return;
+    showFilePicker({
+        items,
+        title: "Select Wildcard to Insert",
+        placeholder: "Search wildcard…",
+        mode: "single",
+        className: "__sax_text_catalog_wc_picker",
+        onSelect(name) {
+            // 信頼境界外（Impact-Pack API 由来）の値を items_json にシリアライズする経路があるため、
+            // 制御文字を除去し最大長で打ち切る。
+            const safeName = String(name).replace(/[\x00-\x1f\x7f]/g, "").slice(0, WILDCARD_NAME_MAX_LENGTH);
+            if (!safeName) return;
+            // 区切り判定はカーソル前のテキスト末尾に対して行う（textarea 全体ではない）。
+            // カーソルが中間にある場合に直前文字が ", " かどうかで判定する。
+            const cursor = textarea.selectionStart ?? textarea.value.length;
+            const before = textarea.value.slice(0, cursor);
+            const prefix = before && !before.endsWith(", ") ? ", " : "";
+            insertAtCursor(textarea, prefix + safeName);
+        },
+    });
+}
+
+// ---------------------------------------------------------------------------
 // 状態モデル
 // ---------------------------------------------------------------------------
 
@@ -168,6 +324,9 @@ function parseState(raw) {
             },
             relations: relations.map(rel => ({
                 item_id: rel && typeof rel.item_id === "string" ? rel.item_id : null,
+                // `on` 欠損は ON 扱い（旧ワークフローとの後方互換）。
+                // boolean 以外は明示的に Boolean() で正規化する。
+                on: rel && rel.on !== undefined ? Boolean(rel.on) : true,
             })),
         };
     } catch {
@@ -186,7 +345,11 @@ function serializeState(state) {
             tag_definitions: [...state.catalog.tag_definitions],
             favorite_tags: [...(state.catalog.favorite_tags ?? [])],
         },
-        relations: state.relations.map(({ item_id }) => ({ item_id })),
+        // `on` の正規化は parseState と対称に書く（欠損 → true、それ以外は Boolean()）
+        relations: state.relations.map(({ item_id, on }) => ({
+            item_id,
+            on: on !== undefined ? Boolean(on) : true,
+        })),
     };
     return JSON.stringify(payload);
 }
@@ -436,7 +599,7 @@ function showAllTagsDialog(computeContext, activeTags, favSetGetter, onChange) {
     });
 }
 
-function showManagerDialog(getState, applyDraft) {
+function showManagerDialog(node, getState, applyDraft) {
     // draft は Dialog ローカルの「書き換え可能な作業コピー」として扱う。
     // 設計方針:
     //   - 親 state（node._textCatalogState）はイミュータブル更新を厳守する
@@ -622,6 +785,30 @@ function showManagerDialog(getState, applyDraft) {
         // 未導入時は黙って手動入力にフォールバックする
         attachAutoComplete(textArea);
 
+        // -- LoRA / Wildcard 挿入ボタン（カーソル位置に構文を挿入） --
+        // LoRA combo は define_schema 時点で folder_paths から確定するため遅延ロード不要。
+        // Wildcard は Impact-Pack の API 経由で遅延取得され、ensureWildcardList の完了後に
+        // renderEditor が再走することでボタンの enabled 状態が更新される。
+        const insertRow = h("div", "display:flex;gap:6px;margin-top:6px;flex-shrink:0;");
+        const loraCount = getComboOptions(node, LORA_COMBO_NAME, LORA_PLACEHOLDER).length;
+        const wcCount   = getComboOptions(node, WILDCARD_COMBO_NAME, WILDCARD_PLACEHOLDER).length;
+
+        const loraBtn = h("button", STYLE.btn, "+ LoRA");
+        loraBtn.disabled = loraCount === 0;
+        loraBtn.title = loraCount === 0 ? "No LoRA found" : "Insert <lora:name> at cursor";
+        if (loraCount === 0) loraBtn.style.opacity = "0.5";
+        loraBtn.addEventListener("click", () => showLoraPicker(node, textArea));
+        insertRow.appendChild(loraBtn);
+
+        const wcBtn = h("button", STYLE.btn, "+ Wildcard");
+        wcBtn.disabled = wcCount === 0;
+        wcBtn.title = wcCount === 0 ? "No wildcards found (Impact-Pack required)" : "Insert wildcard name at cursor";
+        if (wcCount === 0) wcBtn.style.opacity = "0.5";
+        wcBtn.addEventListener("click", () => showWildcardPicker(node, textArea));
+        insertRow.appendChild(wcBtn);
+
+        editorEl.appendChild(insertRow);
+
         // -- Action buttons --
         const refs = countRelationsReferencing({ ...original, catalog: draft }, item.id);
         const actionsRow = h("div", "display:flex;gap:6px;margin-top:8px;flex-shrink:0;");
@@ -642,7 +829,7 @@ function showManagerDialog(getState, applyDraft) {
         const delBtn = h("button", STYLE.btn + "color:#fcc;border-color:#622;", `Delete${refs > 0 ? ` (${refs} refs)` : ""}`);
         delBtn.addEventListener("click", () => {
             if (refs > 0) {
-                const safeName = item.name.replace(/[\n\r]/g, " ").slice(0, 80);
+                const safeName = sanitizeForDialog(item.name, 80);
                 if (!confirm(`"${safeName}" is referenced by ${refs} relation(s).\n\nDelete it? Affected relations will become unset.`)) {
                     return;
                 }
@@ -671,6 +858,12 @@ function showManagerDialog(getState, applyDraft) {
         maxHeight: "85vh",
         className: "__sax_text_catalog_manager",
         build(dlg, close) {
+            // Wildcard リストを Impact-Pack の API から遅延ロード（define_schema 取得失敗時の補完）。
+            // 取得後にボタン無効化を再評価するため、完了時 renderEditor を再実行する。
+            ensureWildcardList(node).then(() => {
+                if (selectedId) renderEditor();
+            });
+
             // 検索 + タグフィルタ行
             const filterContainer = h("div", "display:flex;flex-direction:column;gap:6px;flex-shrink:0;");
             const searchRow = h("div", "display:flex;gap:6px;align-items:center;");
@@ -867,7 +1060,7 @@ function showManagerDialog(getState, applyDraft) {
                     const delBtn = h("button", STYLE.btn + "padding:3px 8px;font-size:11px;color:#fcc;flex-shrink:0;", "Remove");
                     delBtn.addEventListener("click", () => {
                         if (refs > 0) {
-                            const safeTag = tag.replace(/[\n\r]/g, " ").slice(0, 60);
+                            const safeTag = sanitizeForDialog(tag, 60);
                             if (!confirm(`Tag "${safeTag}" is used by ${refs} item(s).\n\nRemove it? Affected items will lose this tag.`)) {
                                 return;
                             }
@@ -1077,7 +1270,7 @@ function syncOutputSlots(node, state) {
 // Relation 行のカスタム描画（status に応じて警告色）
 // ---------------------------------------------------------------------------
 
-function drawRelationContent(ctx, state, relation, x, y, w, rowH) {
+function drawRelationContent(ctx, state, relation, x, y, w, rowH, on = true) {
     const t = getComfyTheme();
     const midY = y + rowH / 2;
 
@@ -1094,6 +1287,8 @@ function drawRelationContent(ctx, state, relation, x, y, w, rowH) {
         textColor = "#888";
     }
 
+    // orphan 警告背景はフル不透明のまま描画する（OFF 状態でも参照切れを目立たせるため）。
+    // OFF 表現は文字側の globalAlpha のみで担当し、背景と役割を分離する。
     if (bgColor) {
         ctx.save();
         ctx.fillStyle = bgColor;
@@ -1102,7 +1297,11 @@ function drawRelationContent(ctx, state, relation, x, y, w, rowH) {
     }
 
     const prefix = status === "orphan" ? "⚠ " : status === "unset" ? "" : "";
+    // OFF 状態は文字を半透明にして無効化を視覚的に伝える（既存トグル付きノードと同じ手法）。
+    ctx.save();
+    if (!on) ctx.globalAlpha = 0.4;
     txt(ctx, prefix + label, x + 4, midY, textColor, "left", 11);
+    ctx.restore();
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,7 +1317,7 @@ function makeCatalogWidget(node) {
     };
 
     const openManager = () => {
-        showManagerDialog(getState, (draftCatalog) => {
+        showManagerDialog(node, getState, (draftCatalog) => {
             const state = getState();
             // Save 直前に Canvas 上の最新リンク状態を state.relations[i]._links に取り込む。
             // restoreOutputLinks は items[i]._links を再接続のソースとするため、
@@ -1129,9 +1328,13 @@ function makeCatalogWidget(node) {
             // （仕様: Item 削除時に該当 Relation は未割当状態に自動遷移）
             const validIds = new Set(draftCatalog.items.map(it => it.id));
             const newRelations = state.relations.map(rel => {
+                // `on` は parseState で必ず補完されるが、外部経路から `on` 欠損の
+                // Relation が混入した場合のランタイム誤描画（OFF 扱い）を防ぐため、
+                // ここでも明示的に既定値を保証する。
+                const base = { ...rel, on: rel.on ?? true };
                 const updated = rel.item_id && !validIds.has(rel.item_id)
-                    ? { ...rel, item_id: null }
-                    : { ...rel };
+                    ? { ...base, item_id: null }
+                    : base;
                 // _links は restoreOutputLinks のキーなので、新オブジェクトにも引き継ぐ
                 updated._links = rel._links;
                 return updated;
@@ -1156,6 +1359,10 @@ function makeCatalogWidget(node) {
         },
         beforeModify: (relations) => captureOutputLinks(node, relations),
 
+        // `hasToggle: true` により行頭 pill が描画され、クリックで `relation.on` がトグルされる。
+        // makeItemListWidget が saveItems を呼ぶため、syncOutputSlots / serializeState が連鎖実行される。
+        hasToggle: true,
+
         params: [
             {
                 key: "edit",
@@ -1172,7 +1379,8 @@ function makeCatalogWidget(node) {
                         // 編集対象も _links を引き継ぐ（item_id だけ変更）
                         const newRelations = state.relations.map(r => {
                             if (r !== relation) return r;
-                            const updated = { ...r, item_id: selectedId };
+                            // `on` 欠損混入時の誤描画を防ぐため明示的に既定値を保証する。
+                            const updated = { ...r, item_id: selectedId, on: r.on ?? true };
                             updated._links = r._links;
                             return updated;
                         });
@@ -1183,8 +1391,8 @@ function makeCatalogWidget(node) {
         ],
 
         content: {
-            draw(ctx, relation, x, y, w, rowH) {
-                drawRelationContent(ctx, getState(), relation, x, y, w, rowH);
+            draw(ctx, relation, x, y, w, rowH, on) {
+                drawRelationContent(ctx, getState(), relation, x, y, w, rowH, on);
             },
         },
 
@@ -1192,13 +1400,16 @@ function makeCatalogWidget(node) {
         hasDelete:     true,
 
         addButton: {
+            // フレームワークから渡される items / saveItems は使用しない。
+            // captureOutputLinks → saveStateAndSync の順序保証と
+            // restoreOutputLinks 経由のリンク復元を、本ノード側で完結させるため。
             label: "+ Add Relation",
             onAdd: (_n, _items, _save) => {
                 const state = getState();
                 if (state.relations.length >= MAX_RELATIONS) return;
                 // 既存 relations の最新 Canvas 接続を保存（追加スロットには影響しない）
                 captureOutputLinks(node, state.relations);
-                const newRelations = [...state.relations, { item_id: null }];
+                const newRelations = [...state.relations, { item_id: null, on: true }];
                 saveStateAndSync({ ...state, relations: newRelations });
             },
         },
@@ -1223,13 +1434,21 @@ app.registerExtension({
             btn.serialize = false;
         };
 
+        // LoRA / Wildcard combo は JS 側ピッカーが options.values を引くために必要だが、
+        // ノード本体には表示しないため hideWidget で描画から除外する。
+        const hideHiddenWidgets = (node) => {
+            for (const name of ["items_json", LORA_COMBO_NAME, WILDCARD_COMBO_NAME]) {
+                const w = node.widgets?.find(w => w.name === name);
+                if (w) hideWidget(w);
+            }
+        };
+
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
             this._textCatalogState = emptyState();
 
-            const hw = this.widgets?.find(w => w.name === "items_json");
-            if (hw) hideWidget(hw);
+            hideHiddenWidgets(this);
 
             // 静的に定義された 32 個の出力スロットをいったん全削除し、
             // Relation 配列に応じて動的に再構築する
@@ -1247,8 +1466,8 @@ app.registerExtension({
         nodeType.prototype.onConfigure = function (data) {
             onConfigure?.apply(this, arguments);
 
+            hideHiddenWidgets(this);
             const hw = this.widgets?.find(w => w.name === "items_json");
-            if (hw) hideWidget(hw);
 
             const raw = hw?.value ?? "{}";
             const state = parseState(raw);

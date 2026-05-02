@@ -239,6 +239,42 @@
 - [ ] Item Text 編集 textarea で何を入力しても候補は出ない（ノードはエラーなく動作する）
 - [ ] ブラウザコンソールに目立ったエラーが出ない
 
+### I-10. Relation トグル（ON/OFF）
+
+- [ ] 各 Relation 行の左端にトグル pill が表示される
+- [ ] pill クリックで ON/OFF が切り替わり、OFF 時は行のテキスト（Item 名）が半透明表示になる
+- [ ] OFF 状態の Relation は出力ピンが空文字 (`""`) を返す（後段の `SAX Prompt Concat` 等で確認）
+- [ ] OFF 状態でも Item 割当は維持され、ON に戻すと元のテキストが復活する
+- [ ] OFF + `<orphan>` の組み合わせで、警告色の背景は維持されつつテキストのみ半透明になる
+- [ ] OFF 状態の Relation でもスロット接続は維持される
+- [ ] ワークフロー保存 → 再読込で ON/OFF 状態が復元される
+- [ ] 旧ワークフロー（`on` フィールド欠損の `items_json`）読込で全 Relation が ON 状態になる（後方互換）
+
+### I-11. LoRA / Wildcard ピッカー（Manager Editor 内）
+
+#### LoRA ピッカー
+- [ ] Item Text 編集エリア下に `[+ LoRA]` ボタンが表示される
+- [ ] LoRA フォルダが空の場合、`[+ LoRA]` が無効化（半透明）になり tooltip に理由が表示される
+- [ ] `[+ LoRA]` クリックで LoRA 一覧モーダルが開く（検索ボックスあり）
+- [ ] 表示名は拡張子（`.safetensors`）とサブディレクトリ部が除去された短縮名
+- [ ] LoRA 選択でカーソル位置に `<lora:NAME>` が挿入される（NAME も短縮名）
+- [ ] textarea のカーソル位置（先頭・中間・末尾）すべてで挿入位置が正しい
+- [ ] 挿入後、`dirty` フラグが立ち Save しないと反映されない
+
+#### Wildcard ピッカー
+- [ ] Item Text 編集エリア下に `[+ Wildcard]` ボタンが表示される
+- [ ] Impact-Pack 未導入時は `[+ Wildcard]` が無効化され tooltip に理由が表示される
+- [ ] Impact-Pack 導入時、Manager Dialog 起動後しばらくして API 取得が完了するとボタンが有効化される
+- [ ] `[+ Wildcard]` クリックで Wildcard 一覧モーダルが開く
+- [ ] Wildcard 選択でカーソル位置に Wildcard 名が挿入される
+- [ ] カーソル前のテキストが空でなく `, ` で終わっていない場合、`, ` が前置される
+- [ ] カーソル前のテキストが空、または `, ` で終わっている場合、区切りなしで挿入される
+- [ ] 挿入後、`dirty` フラグが立ち Save しないと反映されない
+
+#### ピッカーの z-index
+- [ ] Manager Dialog 表示中に LoRA / Wildcard ピッカーを開く → ピッカーが Manager Dialog の前面に表示される
+- [ ] ピッカーで選択 / Cancel すると Manager Dialog に戻る
+
 ---
 
 ## J. Mask Adjust

@@ -813,7 +813,9 @@ applied_loras: {'lora_a'} (1 entries)
 **ノード本体ウィジェット**
 - `📖 Manage Texts...` ボタン / 右クリックメニューで Manager Dialog を起動
 - `[+ Add Relation]` で Relation を追加すると同時に出力 Slot も増える
-- 各 Relation 行に `[✎]`（Item 選択）/ `[↑↓]`（並び替え）/ `[×]`（削除）
+- 各 Relation 行に行頭トグル（pill）/ `[✎]`（Item 選択）/ `[↑↓]`（並び替え）/ `[×]`（削除）
+- 行頭トグルを OFF にすると、Item 割当を残したまま Slot 出力を空文字にできる（一時的に出力を止める用途）
+- OFF 状態の Relation はテキストが半透明表示になる
 - 未割当 Relation は `(unset)` を灰色で表示
 - 削除済み Item を参照する Relation は `<orphan>` を警告色で表示
 
@@ -842,6 +844,12 @@ applied_loras: {'lora_a'} (1 entries)
 - カンマ区切り（`globalSeparator = ", "`）を自動付与
 - 未導入時は何もしない（手動入力にフォールバック）
 
+**LoRA / Wildcard ピッカー**
+- Item Text 編集エリアの直下に `[+ LoRA]` `[+ Wildcard]` ボタンを配置
+- `[+ LoRA]`：ComfyUI の LoRA 一覧からピッカーモーダルで選択 → カーソル位置に `<lora:NAME>` を挿入（拡張子・ディレクトリ部除去済み）
+- `[+ Wildcard]`：Impact-Pack の Wildcard 一覧から選択 → カーソル位置に Wildcard 名を挿入（既存テキストとの間に `, ` を自動付与）
+- LoRA が 0 件 or Impact-Pack 未導入時は対応するボタンを無効化（ツールチップで理由表示）
+
 **並び順仕様**
 - タグ：お気に入り（コンテキスト連動）→ アイテム数降順 → アルファベット順
 - アイテム：タグ順序に基づくタプル辞書順（タグなしは末尾）
@@ -860,11 +868,14 @@ applied_loras: {'lora_a'} (1 entries)
 
 | ケース | 出力値 |
 |--------|--------|
-| Relation が Item を正しく参照 | `Item.text` |
+| Relation が ON かつ Item を正しく参照 | `Item.text` |
+| Relation が OFF（行頭トグル OFF） | `""` |
 | Relation が未割当（`item_id: null`） | `""` |
 | Relation が削除済み Item を参照 | `""` |
 
 下流ノード（`SAX Prompt Concat` 等）の空文字スキップ実装と整合します。
+
+> **互換性**: 旧ワークフロー（`on` フィールドが存在しない `items_json`）は ON 扱いで読み込まれます（後方互換）。
 
 > **データ保管範囲**: ノード単位（items_json でワークフローに含まれる）。グローバル共有はしません。
 > **接続したいプロンプトが複数ある場合**: 1 つの Item を複数 Relation から参照することもできます。

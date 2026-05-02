@@ -813,7 +813,9 @@ applied_loras: {'lora_a'} (1 entries)
 **Node Body Widget**
 - `📖 Manage Texts...` button / right-click menu opens the Manager Dialog
 - `[+ Add Relation]` adds a Relation and a corresponding output Slot
-- Each Relation row has `[✎]` (item picker) / `[↑↓]` (reorder) / `[×]` (delete)
+- Each Relation row has a leading toggle (pill) / `[✎]` (item picker) / `[↑↓]` (reorder) / `[×]` (delete)
+- Toggling OFF keeps the Item assignment but emits `""` from the Slot (use to silence outputs temporarily)
+- OFF rows render their text with reduced opacity
 - Unset Relations show `(unset)` in gray
 - Relations referencing deleted Items show `<orphan>` with warning color
 
@@ -842,6 +844,12 @@ applied_loras: {'lora_a'} (1 entries)
 - Auto-appends comma separator (`globalSeparator = ", "`)
 - Falls back silently to manual input if pyssss is not installed
 
+**LoRA / Wildcard Pickers**
+- Below the Item Text editor area, `[+ LoRA]` and `[+ Wildcard]` buttons are placed
+- `[+ LoRA]`: opens a picker modal listing ComfyUI's LoRA inventory; inserts `<lora:NAME>` (extension and directory part stripped) at the cursor position
+- `[+ Wildcard]`: opens a picker modal listing Impact-Pack wildcards; inserts the wildcard name at the cursor position (auto-prepends `, ` when the preceding text doesn't end with one)
+- Buttons are disabled when no LoRA is found / Impact-Pack is not installed (tooltip explains the reason)
+
 **Sort Order**
 - Tags: favorites (context-aware) → item count desc → alphabetical
 - Items: tuple-lexicographic order based on tag positions (untagged items go last)
@@ -860,11 +868,14 @@ applied_loras: {'lora_a'} (1 entries)
 
 | Case | Output |
 |------|--------|
-| Relation correctly references an Item | `Item.text` |
+| Relation is ON and correctly references an Item | `Item.text` |
+| Relation is OFF (leading toggle off) | `""` |
 | Relation is unset (`item_id: null`) | `""` |
 | Relation references a deleted Item | `""` |
 
 This aligns with the empty-string skip behavior of downstream nodes such as `SAX Prompt Concat`.
+
+> **Compatibility**: Older workflows whose `items_json` lacks the `on` field are loaded as ON (backward compatible).
 
 > **Data Scope**: Per-node (saved in `items_json`, included in the workflow). No global sharing.
 > **Sharing one Item across multiple Relations**: A single Item can be referenced by multiple Relations to fan out the same text.

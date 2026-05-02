@@ -7,7 +7,7 @@ Relation 経由での出力スロットへの割り当てを行う。
 データモデル（4要素）:
   - Catalog: Item の保管庫
   - Item: 名前付きテキスト1件 {id, name, text, tags}
-  - Relation: Catalog.Item と Slot の紐づけ {item_id}
+  - Relation: Catalog.Item と Slot の紐づけ {item_id, on}
   - Slot: ComfyUI 出力ピン（Relation 配列から自動生成される派生物）
 
 シリアライズ形式（items_json）:
@@ -17,8 +17,11 @@ Relation 経由での出力スロットへの割り当てを行う。
       "items": [{"id", "name", "text", "tags": [...]}],
       "tag_definitions": [...]
     },
-    "relations": [{"item_id": "..." | null}]
+    "relations": [{"item_id": "..." | null, "on": true}]
   }
+
+Relation の `on` フィールドが false の場合、参照する Item の状態に依らず空文字を出力する。
+旧ワークフロー（`on` 欠損）は ON 扱いで読み込む（後方互換）。
 """
 
 import json
@@ -26,6 +29,8 @@ import logging
 from typing import Any
 
 from comfy_api.latest import io
+
+from .picker_options import get_lora_options, get_wildcard_options
 
 
 logger = logging.getLogger(__name__)
@@ -96,16 +101,23 @@ def _resolve_relations(items_json: str) -> list[str]:
     for i, rel in enumerate(relations[:MAX_RELATIONS]):
         if not isinstance(rel, dict):
             continue
+        # `on` 欠損時は True 扱い（旧ワークフローとの後方互換）。
+        # 非 boolean 値は bool() で正規化して許容する。
+        on_raw = rel.get("on", True)
+        on = on_raw if isinstance(on_raw, bool) else bool(on_raw)
         item_id = rel.get("item_id")
-        if item_id is None:
-            continue
+        # 参照切れの警告は OFF 状態でも維持する（ON 復帰時の予期しない空文字を防ぐため）。
+        # 非文字列の item_id（dict/int 等）は形式不正であり「削除済み」ではないため警告対象外。
         item = items_by_id.get(item_id) if isinstance(item_id, str) else None
-        if item is None:
+        if isinstance(item_id, str) and item is None:
             logger.warning(
                 "[SAX_Text_Catalog] relation %d references missing item: %s",
                 i,
                 _safe_id_for_log(item_id),
             )
+        if not on:
+            continue
+        if item_id is None or item is None:
             continue
         text = item.get("text", "")
         result[i] = text if isinstance(text, str) else ""
@@ -131,6 +143,19 @@ class SAX_Bridge_Text_Catalog(io.ComfyNode):
             ),
             inputs=[
                 io.String.Input("items_json", default="{}", optional=True),
+                # JS 側の Manager Editor で LoRA / Wildcard ピッカーが
+                # `combo.options.values` を引いてアイテム一覧を取得するための hidden combo。
+                # execute では参照しないが、UI 用の選択肢ソースとして必要。
+                io.Combo.Input(
+                    "select_to_add_lora",
+                    options=get_lora_options(),
+                    optional=True,
+                ),
+                io.Combo.Input(
+                    "select_to_add_wildcard",
+                    options=get_wildcard_options(),
+                    optional=True,
+                ),
             ],
             outputs=[
                 io.String.Output(display_name=f"out_{i}")

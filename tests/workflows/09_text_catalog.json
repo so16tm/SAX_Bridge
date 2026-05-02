@@ -17,14 +17,14 @@
       "properties": { "Node name for S&R": "SAX_Bridge_Text_Catalog" },
       "title": "Text Catalog (smoke)",
       "widgets_values": [
-        "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"a1\",\"name\":\"scene_day\",\"text\":\"a beautiful sunny landscape\",\"tags\":[\"positive\",\"scene\"]},{\"id\":\"a2\",\"name\":\"scene_night\",\"text\":\"a moonlit cyberpunk street\",\"tags\":[\"positive\",\"scene\"]},{\"id\":\"a3\",\"name\":\"neg_default\",\"text\":\"low quality, blurry\",\"tags\":[\"negative\"]}],\"tag_definitions\":[\"positive\",\"negative\",\"scene\"]},\"relations\":[{\"item_id\":\"a1\"},{\"item_id\":\"a3\"},{\"item_id\":null},{\"item_id\":\"ghost\"}]}"
+        "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"a1\",\"name\":\"scene_day\",\"text\":\"a beautiful sunny landscape\",\"tags\":[\"positive\",\"scene\"]},{\"id\":\"a2\",\"name\":\"scene_night\",\"text\":\"a moonlit cyberpunk street\",\"tags\":[\"positive\",\"scene\"]},{\"id\":\"a3\",\"name\":\"neg_default\",\"text\":\"low quality, blurry\",\"tags\":[\"negative\"]}],\"tag_definitions\":[\"positive\",\"negative\",\"scene\"]},\"relations\":[{\"item_id\":\"a1\",\"on\":true},{\"item_id\":\"a3\",\"on\":true},{\"item_id\":null,\"on\":true},{\"item_id\":\"ghost\",\"on\":true},{\"item_id\":\"a2\",\"on\":false}]}"
       ]
     },
     {
       "id": 2,
       "type": "Note",
       "pos": [580, 200],
-      "size": [320, 200],
+      "size": [320, 240],
       "flags": {},
       "order": 1,
       "mode": 0,
@@ -33,7 +33,7 @@
       "properties": {},
       "title": "How to test",
       "widgets_values": [
-        "Manual test for SAX Text Catalog:\n\n1. Click [📖 Manage Texts...] button — Manager Dialog should open with 3 items.\n2. Verify Relation 1 = scene_day, Relation 2 = neg_default.\n3. Verify Relation 3 shows '(unset)' (gray).\n4. Verify Relation 4 shows '<orphan>' with warning color (refers to deleted 'ghost').\n5. Edit a Relation by clicking ✎ and pick a different item.\n6. Try Manage Texts → add/edit/delete items, Apply, Cancel.\n7. Save workflow, reload — state should restore.\n8. Right-click the node — '📖 Manage Texts...' should appear in menu."
+        "Manual test for SAX Text Catalog:\n\n1. Click [📖 Manage Texts...] button — Manager Dialog should open with 3 items.\n2. Verify Relation 1 = scene_day, Relation 2 = neg_default.\n3. Verify Relation 3 shows '(unset)' (gray).\n4. Verify Relation 4 shows '<orphan>' with warning color (refers to deleted 'ghost').\n5. Verify Relation 5 = scene_night with toggle OFF (text rendered semi-transparent, output is empty string).\n6. Click the leading toggle pill on any row to flip ON/OFF — the text fades / restores accordingly.\n7. Edit a Relation by clicking ✎ and pick a different item.\n8. In the Editor, try [+ LoRA] / [+ Wildcard] buttons to insert syntax at the cursor.\n9. Save workflow, reload — toggle states should restore.\n10. Right-click the node — '📖 Manage Texts...' should appear in menu."
       ]
     }
   ],
