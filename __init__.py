@@ -9,6 +9,7 @@ from .nodes import primitive_store as primitive_store_node
 from .nodes import text_catalog as text_catalog_node
 from .nodes import guidance as guidance_node
 from .nodes import sam3 as sam3_node
+from .nodes import mask_adjust as mask_adjust_node
 from .nodes import debug_log as debug_log_module
 from .nodes.schedulers import register_schedulers
 
@@ -46,6 +47,8 @@ for v3_node in [
     # Loader
     loader_node.SAX_Bridge_Loader,
     loader_node.SAX_Bridge_Loader_Lora,
+    # Mask
+    mask_adjust_node.SAX_Bridge_Mask_Adjust,
     # Option
     noise_node.SAX_Bridge_Noise_Image,
     noise_node.SAX_Bridge_Noise_Latent,

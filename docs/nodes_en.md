@@ -17,6 +17,7 @@
 | [Enhance](#enhance) | Detailer / Upscaler / Finisher | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
 | [Option](#option) | Standalone utilities (noise injection etc.) | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | Segmentation via SAM3 | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
+| [Mask](#mask) | Mask post-processing | [SAX Mask Adjust](#sax-mask-adjust) |
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
 | [Debug](#debug) | Debugging & testing | [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
@@ -474,6 +475,60 @@ Each entry row consists of the following elements:
 | `threshold` | `0.2` | Detection confidence threshold (lower = broader detection) |
 | `presence_weight` | `0.5` | Influence of presence_score. `0.0` = range-priority / `1.0` = precision-priority |
 | `mask_grow` | `0` | Mask expansion (positive) or shrink (negative) in pixels |
+
+[↑ Back to top](#top)
+
+---
+
+## Mask
+
+### SAX Mask Adjust
+
+`SAX_Bridge_Mask_Adjust` — Single-purpose node that applies **grow/shrink → blur → threshold** to an input MASK. Useful for re-adapting SAM3 outputs or hand-painted masks to multiple downstream nodes.
+
+**Inputs**
+
+| Parameter | Type | Default | Range | Description |
+|-----------|-----|------|------|------|
+| `mask` | MASK | - | - | Mask to process |
+| `invert` | Boolean | `False` | - | When True, invert the mask (`1 - mask`) before subsequent operations |
+| `grow` | Int | `0` | `-256`〜`256` | Positive: dilate. Negative: erode. Unit: px |
+| `blur` | Float | `0.0` | `0.0`〜`64.0` | Gaussian blur sigma (px). `0` disables |
+| `threshold` | Float | `0.0` | `0.0`〜`1.0` | Binarize after blur. `0` keeps soft mask |
+
+**Outputs**: `MASK`
+
+**Application order**: `invert → grow → blur → threshold`
+
+#### When to use invert
+
+Switches the semantics from "white = target area" to "white = **protected area**". Useful for scenarios like "detect face with SAM3, then send everything-but-face to Detailer".
+
+| Scenario | Settings |
+|---|---|
+| Protect face, refine background | SAM3(face) → MaskAdjust(invert=on) → Detailer |
+| SAM3 returned background instead of subject | MaskAdjust(invert=on) for instant flip |
+| Protect area, expand slightly outward | MaskAdjust(invert=on, grow=+8) |
+
+`invert` is applied **first** in the pipeline, so subsequent grow/blur/threshold operate on the inverted mask as the "target region".
+
+#### Usage tips
+
+| Settings | Effect |
+|---|---|
+| `grow=+8` | Hard-edged dilation (fastest) |
+| `grow=0, blur=3.0, threshold=0.1` | Smoothly dilated binary mask (no jaggies) |
+| `grow=0, blur=3.0, threshold=0.9` | Smoothly eroded binary mask |
+| `grow=0, blur=3.0, threshold=0.0` | Soft mask (edge feathering only) |
+
+#### Relationship to `SAX SAM3 Multi Segmenter`'s `mask_grow`
+
+The two are **additive**. When fanning out to multiple downstream nodes, set the SAM3 `mask_grow=0` and tune per-branch with this node:
+
+```
+SAM3(mask_grow=0) ──┬─→ MaskAdjust(grow=+8) → Detailer (larger)
+                    └─→ MaskAdjust(grow=-2) → NoiseInjector (smaller)
+```
 
 [↑ Back to top](#top)
 

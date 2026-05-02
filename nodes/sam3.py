@@ -23,6 +23,8 @@ import comfy.model_management
 from comfy.model_patcher import ModelPatcher
 from comfy_api.latest import io
 
+from .mask_ops import apply_mask_grow as _apply_mask_grow
+
 logger = logging.getLogger("SAX_Bridge")
 
 try:
@@ -242,43 +244,6 @@ class CustomSam3Processor(Sam3Processor):
         state["boxes"]  = boxes
         state["scores"] = out_probs
         return state
-
-
-_MAX_POOL_STEP = 127  # CUDA max_pool2d のカーネルサイズ上限 (2*127+1=255)
-
-
-def _apply_mask_grow(mask: torch.Tensor, grow: int) -> torch.Tensor:
-    """
-    マスクを grow ピクセル分拡張（正値）または縮小（負値）する。
-    セパラブル MaxPool で O(r) に削減し、CUDA カーネルサイズ上限を回避。
-
-    mask: [H, W] float32, 値域 [0, 1]
-    """
-    if grow == 0:
-        return mask
-
-    pad  = abs(grow)
-    expand = grow > 0
-
-    def apply_steps(x: torch.Tensor, total: int, horizontal: bool) -> torch.Tensor:
-        remaining = total
-        while remaining > 0:
-            step = min(remaining, _MAX_POOL_STEP)
-            if horizontal:
-                x = F.max_pool2d(x, (1, 2 * step + 1), stride=1, padding=(0, step))
-            else:
-                x = F.max_pool2d(x, (2 * step + 1, 1), stride=1, padding=(step, 0))
-            remaining -= step
-        return x
-
-    x = mask.unsqueeze(0).unsqueeze(0)   # [1, 1, H, W]
-    if not expand:
-        x = -x
-    x = apply_steps(x, pad, horizontal=True)
-    x = apply_steps(x, pad, horizontal=False)
-    if not expand:
-        x = -x
-    return x.squeeze(0).squeeze(0).clamp(0.0, 1.0)
 
 
 def _segment_single(processor, pil_image: Image.Image, prompt: str,

@@ -241,6 +241,29 @@
 
 ---
 
+## J. Mask Adjust
+
+> ワークフロー: `tests/workflows/10_mask_adjust.json`
+> 入力画像はアルファマスクを持つ PNG、または `LoadImage` で alpha → MASK が出るものを使用
+
+### J-1. 基本動作
+- [ ] `M-1: identity (all defaults)` のプレビューが入力マスクと完全一致
+- [ ] `M-2: dilate +8` で領域が外側に拡張されている
+- [ ] `M-3: erode -4 + blur 2.0` で領域が収縮し、エッジがソフトになっている
+- [ ] `M-4: blur 3.0 + threshold 0.5` でエッジは滑らかだが二値（0/1 のみ）になっている
+- [ ] `M-5: invert` で白黒が完全に反転している
+- [ ] `M-6: invert + dilate +8` で反転後マスクが拡張されている（元の白領域が 8px 縮んだ形）
+
+### J-2. SAM3 連携
+- [ ] SAM3 Multi Segmenter の MASK 出力を Mask Adjust に接続 → エラーなく実行
+- [ ] SAM3 側 `mask_grow=0`、Mask Adjust 側 `grow=+8` の組み合わせで意図通りの拡張
+
+### J-3. 既存ノード非破壊
+- [ ] SAM3 Multi Segmenter 単体（`mask_grow` 設定あり）の挙動が従来と一致
+- [ ] NoiseInjector 単体（`mask_shrink` / `mask_blur` 設定あり）の挙動が従来と一致
+
+---
+
 ## R. ワークフロー互換性
 
 > V3 移行前に保存した既存ワークフローを使用

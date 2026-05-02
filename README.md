@@ -100,6 +100,23 @@ Pass the generated mask to **SAX Detailer** for refinement, then compare the ori
 
 ---
 
+<a id="mask-adjust"></a>
+
+### Per-branch mask tuning — Mask Adjust
+
+**SAX Mask Adjust** applies **grow/shrink → blur → threshold** to an input MASK in one shot. When you want to fan out the same SAM3 output to multiple downstream nodes ("larger for Detailer / smaller for NoiseInjector"), this lets you avoid running SAM3 multiple times.
+
+- `invert`: flip "white = target" to "white = protected" (e.g. protect SAM3-detected face, refine the rest)
+- `grow`: hard-edged dilation/erosion (same separable MaxPool used by SAM3)
+- `blur` + `threshold`: smooth, jaggy-free expansion/contraction (`blur=3.0, threshold=0.1` for smooth dilate, `0.9` for smooth erode)
+- `blur` alone: soft mask for KSampler's noise_mask
+
+The SAM3 `mask_grow` and this node's `grow` are additive. When fanning out, set SAM3 `mask_grow=0` and tune per-branch with this node for clearer intent.
+
+[↑ Back to top](#sax_bridge)
+
+---
+
 <a id="text-catalog"></a>
 
 ### Manage prompt variations as a binder — Text Catalog
