@@ -1,7 +1,7 @@
 [project]
 name = "sax-bridge"
 description = "ComfyUI custom nodes for Pipe-based workflow management, KSampler, Detailer, Upscaler, SAM3 segmentation, Toggle Manager, and Collector nodes."
-version = "2.1.0"
+version = "2.2.0"
 license = { file = "LICENSE" }
 requires = []
 dependencies = []
