@@ -27,7 +27,7 @@ def filter_new_loras(pipe: dict, loras: list) -> list:
     loras: [(lora_name, ...), ...] — 第1要素がLoRAファイル名
     """
     applied = pipe.get(_APPLIED_LORAS_KEY, set())
-    return [l for l in loras if _normalize_lora_name(l[0]) not in applied]
+    return [lora for lora in loras if _normalize_lora_name(lora[0]) not in applied]
 
 
 def record_applied_loras(pipe: dict, lora_names) -> None:

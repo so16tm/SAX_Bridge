@@ -20,8 +20,10 @@ class SAXNoiseEngine:
 
         device = tensor.device
         kernel_size = int(sigma * 6) + 1
-        if kernel_size % 2 == 0: kernel_size += 1
-        if kernel_size < 3: kernel_size = 3
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        if kernel_size < 3:
+            kernel_size = 3
 
         x = torch.arange(kernel_size, dtype=torch.float32, device=device) - kernel_size // 2
         kernel_1d = torch.exp(-(x**2) / (2 * sigma**2))

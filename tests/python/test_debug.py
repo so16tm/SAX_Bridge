@@ -274,28 +274,32 @@ class TestToDisplayString:
 
 class TestGetInnerTypeName:
     def test_model_attr(self):
-        class Inner: pass
+        class Inner:
+            pass
         class Outer:
             def __init__(self):
                 self.model = Inner()
         assert _get_inner_type_name(Outer()) == "Inner"
 
     def test_cond_stage_model(self):
-        class Inner: pass
+        class Inner:
+            pass
         class Outer:
             def __init__(self):
                 self.cond_stage_model = Inner()
         assert _get_inner_type_name(Outer()) == "Inner"
 
     def test_first_stage_model(self):
-        class Inner: pass
+        class Inner:
+            pass
         class Outer:
             def __init__(self):
                 self.first_stage_model = Inner()
         assert _get_inner_type_name(Outer()) == "Inner"
 
     def test_none(self):
-        class Plain: pass
+        class Plain:
+            pass
         assert _get_inner_type_name(Plain()) is None
 
 
@@ -316,7 +320,8 @@ class TestGetDtypeDeviceInfo:
         assert info.get("device") == "cuda:0"
 
     def test_empty(self):
-        class Plain: pass
+        class Plain:
+            pass
         assert _get_dtype_device_info(Plain()) == {}
 
     def test_manual_cast_dtype_fallback(self):
@@ -393,7 +398,8 @@ class TestFormatPipeSummary:
         assert "device=cuda:0" in s
 
     def test_clip_with_inner(self):
-        class Inner: pass
+        class Inner:
+            pass
         class Clip:
             def __init__(self):
                 self.cond_stage_model = Inner()
@@ -403,7 +409,8 @@ class TestFormatPipeSummary:
         assert "inner: Inner" in s
 
     def test_vae_with_inner(self):
-        class Inner: pass
+        class Inner:
+            pass
         class Vae:
             def __init__(self):
                 self.first_stage_model = Inner()
