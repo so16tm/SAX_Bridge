@@ -4,7 +4,7 @@
  * L1: データ構造の検証、スロット調整、v1→v2 マイグレーション
  * L2: LiteGraph モックを使った接続復元
  *
- * 実行: node --test tests/collector_serialize.test.mjs
+ * 実行: node --test tests/js/collector_serialize.test.mjs
  */
 import { describe, it, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";

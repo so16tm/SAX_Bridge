@@ -4,7 +4,7 @@
  * ファクトリ関数のバリデーション、onSerialize/onConfigure、下流リンク復元ロジックのテスト。
  * app.graph 依存部分はモックで対応する。
  *
- * 実行: node --test tests/make_source_list_widget.test.mjs
+ * 実行: node --test tests/js/make_source_list_widget.test.mjs
  */
 import { describe, it, mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";

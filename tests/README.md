@@ -25,7 +25,7 @@ cd projects/SAX_Bridge
 ### JS テスト
 ```bash
 cd projects/SAX_Bridge
-node --experimental-vm-modules tests/js/collector_serialize.test.mjs
+node --test "tests/js/*.test.mjs"
 ```
 
 ### 手動テスト
