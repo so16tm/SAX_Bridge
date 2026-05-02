@@ -846,7 +846,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 **LoRA / Wildcard ピッカー**
 - Item Text 編集エリアの直下に `[+ LoRA]` `[+ Wildcard]` ボタンを配置
-- `[+ LoRA]`：ComfyUI の LoRA 一覧からピッカーモーダルで選択 → カーソル位置に `<lora:NAME>` を挿入（拡張子・ディレクトリ部除去済み）
+- `[+ LoRA]`：ComfyUI の LoRA 一覧からピッカーモーダルで選択 → カーソル位置に `<lora:NAME>` を挿入（拡張子のみ除去、サブディレクトリは保持して同名衝突を防ぐ。例: `<lora:style/foo>`）
 - `[+ Wildcard]`：Impact-Pack の Wildcard 一覧から選択 → カーソル位置に Wildcard 名を挿入（既存テキストとの間に `, ` を自動付与）
 - LoRA が 0 件 or Impact-Pack 未導入時は対応するボタンを無効化（ツールチップで理由表示）
 

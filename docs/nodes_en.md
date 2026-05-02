@@ -846,7 +846,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 **LoRA / Wildcard Pickers**
 - Below the Item Text editor area, `[+ LoRA]` and `[+ Wildcard]` buttons are placed
-- `[+ LoRA]`: opens a picker modal listing ComfyUI's LoRA inventory; inserts `<lora:NAME>` (extension and directory part stripped) at the cursor position
+- `[+ LoRA]`: opens a picker modal listing ComfyUI's LoRA inventory; inserts `<lora:NAME>` at the cursor position (extension stripped, subdirectory kept to avoid same-name collisions, e.g. `<lora:style/foo>`)
 - `[+ Wildcard]`: opens a picker modal listing Impact-Pack wildcards; inserts the wildcard name at the cursor position (auto-prepends `, ` when the preceding text doesn't end with one)
 - Buttons are disabled when no LoRA is found / Impact-Pack is not installed (tooltip explains the reason)
 

@@ -239,10 +239,12 @@ function showLoraPicker(node, textarea) {
         className: "__sax_text_catalog_lora_picker",
         displayName: loraDisplayName,
         onSelect(name) {
-            // 表示名と挿入名を統一する（拡張子＋ディレクトリ部を両方除去）。
-            // ComfyUI LoraLoader はパス付き名でも解決できるが、可読性と
-            // 表示一貫性のため短縮名を採用する。
-            const cleanName = loraDisplayName(String(name));
+            // 拡張子のみ除去しサブディレクトリパスを保持する。
+            // prompt.py の _resolve_lora_name は末尾一致で LoRA を解決するため、
+            // 同名 LoRA が複数フォルダに存在すると意図しないファイルが解決される。
+            // パスを残すことでこの衝突を防ぐ。表示名は loraDisplayName で短縮するが
+            // 挿入名はパス付きのまま使う（ComfyUI コンボボックス一般のパターン）。
+            const cleanName = String(name).replace(/\.safetensors$/i, "");
             insertAtCursor(textarea, `<lora:${cleanName}>`);
         },
     });
