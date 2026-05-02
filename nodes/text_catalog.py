@@ -33,7 +33,7 @@ from comfy_api.latest import io
 from .picker_options import get_lora_options, get_wildcard_options
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("SAX_Bridge")
 
 
 MAX_RELATIONS = 32

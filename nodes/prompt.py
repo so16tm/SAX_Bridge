@@ -10,7 +10,7 @@ from .picker_options import get_lora_options, get_wildcard_options
 from .io_types import PipeLine, filter_new_loras, record_applied_loras
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("SAX_Bridge")
 
 
 def _get_impact_wildcards():

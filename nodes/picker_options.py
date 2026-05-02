@@ -13,7 +13,7 @@ import logging
 import folder_paths
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("SAX_Bridge")
 
 
 LORA_PLACEHOLDER = "Select the LoRA to add to the text"

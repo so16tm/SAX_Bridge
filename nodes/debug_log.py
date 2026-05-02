@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from .debug import _to_display_string
 
-logger = logging.getLogger("SAX_Bridge.debug")
+logger = logging.getLogger("SAX_Bridge")
 
 # ---------------------------------------------------------------------------
 # モジュールグローバル状態
