@@ -11,9 +11,9 @@ tests/
 │   └── *.test.mjs   #   JS serialize/deserialize テスト
 ├── workflows/       # Level 2: 手動テスト用ワークフロー
 │   ├── *.json       #   MANUAL_TEST.md と対応
-│   └── legacy-fixture/  # Level 3: リファクタ前 fixture (凍結、編集禁止)
+│   └── legacy-fixture/  # Level 3a: リファクタ前 fixture (凍結、編集禁止、Phase 2 migration テスト入力データ)
 ├── MANUAL_TEST.md       # Level 2: 手動チェックリスト
-└── REGRESSION_MATRIX.md # Level 3: UI リファクタリグレッション検証マトリクス
+└── REGRESSION_MATRIX.md # Level 3b: UI リファクタ観点チェックリスト (実行記録は残さない)
 ```
 
 ## 実行方法
@@ -36,12 +36,12 @@ node --test "tests/js/*.test.mjs"
 3. 結果を MANUAL_TEST.md に ✅ / ❌ で記録
 
 ### リグレッション検証 (Level 3)
-UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md)) の各 Phase 完了判定に使用。
+UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md)) の各 Phase 着手時に検証観点を参照する**チェックリスト**として使用。
 
-1. `REGRESSION_MATRIX.md` を開き、対応 Phase のセル一覧を参照
-2. `tests/workflows/11_*.json` 〜 `18_*.json` を ComfyUI で読込
-3. 重要セル (★) を順次実行し、結果を MATRIX の「Phase N 後」列に記録
-4. ベースライン (Phase 1.0 着手前) との差分を確認
+1. `REGRESSION_MATRIX.md` を開き、対応 Phase の観点セル一覧を参照
+2. 子プラン (`docs/plans/{YYYYMMDD}-ui-phase{N}-*.md`) で実行方法を定義
+3. 必要なシナリオを `tests/workflows/11_*.json` 〜 `18_*.json` + `MANUAL_TEST.md` K/L 節から選んで実行
+4. リグレッション検出は通常の pytest / JS test / 実害発見時の都度修正で行う
 
 `legacy-fixture/` は Phase 2 (シリアライズ統合) の migration テスト入力データとして凍結。改変禁止。詳細は [legacy-fixture/README.md](workflows/legacy-fixture/README.md)。
 

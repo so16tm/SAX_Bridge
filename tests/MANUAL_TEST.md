@@ -311,9 +311,9 @@
 
 ---
 
-## K. 動的スロット mutation 経路 (UI Phase 0 / Phase 1 検証用)
+## K. 動的スロット mutation 経路 (UI Phase 1 検証用)
 
-> UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md)) のリグレッション検証。観点マトリクスは [REGRESSION_MATRIX.md](REGRESSION_MATRIX.md) Phase 1 専用部参照。
+> UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md)) Phase 1 の手動検証シナリオ。観点リストは [REGRESSION_MATRIX.md](REGRESSION_MATRIX.md) Phase 1 観点参照。各 Phase 着手時に必要なシナリオのみ部分実行する。
 >
 > **既存節との切り分け**:
 > - K-1 (11_primitive_store) — 既存対応節なし (Phase 0 新設)
@@ -327,10 +327,10 @@
 
 - [ ] **add**: 新規 item 追加 → 既存接続維持 (P1-01〜P1-03)
 - [ ] **del-mid**: 中央 item 削除 → 残スロット接続が新位置に追従 (P1-04〜P1-05)
-- [ ] **move**: item を上下移動 → 接続が新位置に追従 (P1-06〜P1-07、Phase 1.0 前は FAIL 見込み)
+- [ ] **move**: item を上下移動 → 接続が新位置に追従 (P1-06〜P1-07、Phase 1.2 で解消予定の既知バグ経路)
 - [ ] **edit**: item 名変更 → 接続維持 (P1-08〜P1-09)
-- [ ] **drag**: param drag (数値ドラッグ) → 接続維持 (P1-10〜P1-11、Phase 1.0 前は FAIL 見込み)
-- [ ] **popup**: param popup (ピッカー) → 接続維持 (P1-12〜P1-13、Phase 1.0 前は FAIL 見込み)
+- [ ] **drag**: param drag (数値ドラッグ) → 接続維持 (P1-10〜P1-11、Phase 1.2 で解消予定の既知バグ経路)
+- [ ] **popup**: param popup (ピッカー) → 接続維持 (P1-12〜P1-13、Phase 1.2 で解消予定の既知バグ経路)
 
 ### K-2. Text Catalog mutation (workflows/12_text_catalog.json)
 
@@ -338,11 +338,11 @@
 
 - [ ] **add**: Relation 追加 (addButton 二重 capture 経路) → 既存接続維持 (P1-14〜P1-15)
 - [ ] **del-mid**: 中央 Relation 削除 → 残スロット接続が新位置に追従 (P1-16)
-- [ ] **move**: Relation を上下移動 → 接続が新位置に追従 (P1-17〜P1-18、FAIL 見込み)
-- [ ] **toggle**: Relation トグル ON/OFF → 接続維持 (P1-19〜P1-20、FAIL 見込み)
+- [ ] **move**: Relation を上下移動 → 接続が新位置に追従 (P1-17〜P1-18、Phase 1.2 で解消予定の既知バグ経路)
+- [ ] **toggle**: Relation トグル ON/OFF → 接続維持 (P1-19〜P1-20、Phase 1.2 で解消予定の既知バグ経路)
 - [ ] **edit**: Item 編集 → 接続維持 (P1-21)
-- [ ] **drag**: param drag → 接続維持 (P1-22、FAIL 見込み)
-- [ ] **popup**: pickItemForRelation 経由 → 接続維持 (P1-23、FAIL 見込み)
+- [ ] **drag**: param drag → 接続維持 (P1-22、Phase 1.2 で解消予定の既知バグ経路)
+- [ ] **popup**: pickItemForRelation 経由 → 接続維持 (P1-23、Phase 1.2 で解消予定の既知バグ経路)
 
 ### K-3. Node Collector 単一インスタンス (workflows/13_node_collector.json)
 
@@ -350,7 +350,7 @@
 
 - [ ] **add**: source 追加 → 既存 source 接続維持 (P1-24〜P1-25)
 - [ ] **del-mid**: 中央 source 削除 → 残 source 接続が新位置に追従 (P1-26)
-- [ ] **move**: source 並べ替え → 全 source 接続が新位置に追従 (P1-27、modifySource 経由なら PASS 見込み)
+- [ ] **move**: source 並べ替え → 全 source 接続が新位置に追従 (P1-27、`modifySource` 経由のため `beforeModify` 呼び忘れは発生しない構造)
 - [ ] **edit**: source 入替 → 接続維持 (P1-28)
 
 ### K-4. Image Collector 単一インスタンス (workflows/14_image_collector.json)
@@ -367,9 +367,9 @@
 
 ---
 
-## L. シリアライズ系 mutation (UI Phase 0 / Phase 2 検証用)
+## L. シリアライズ系 mutation (UI Phase 2 検証用)
 
-> シリアライズ統合 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md) Phase 2) の検証。出力スロット動的増減を伴わないため Phase 1 のスロット維持観点とは独立。観点マトリクスは [REGRESSION_MATRIX.md](REGRESSION_MATRIX.md) Phase 2 専用部参照。
+> シリアライズ統合 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md) Phase 2) の手動検証シナリオ。出力スロット動的増減を伴わないため Phase 1 のスロット維持観点とは独立。観点リストは [REGRESSION_MATRIX.md](REGRESSION_MATRIX.md) Phase 2 観点参照。各 Phase 着手時に必要なシナリオのみ部分実行する。
 
 ### L-1. Lora Loader (workflows/16_lora_loader.json)
 

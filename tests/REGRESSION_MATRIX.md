@@ -1,20 +1,27 @@
 # Regression Matrix
 
-UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md)) の各 Phase で「変更前後の動作同一性」を検証するマトリクス。MANUAL_TEST.md (シナリオ集) とは独立し、Phase 1〜10 共通で繰り返し参照する。
+UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md)) の各 Phase で「変更前後の動作同一性」を検証する**観点チェックリスト**。各 Phase 着手時にどの観点を検証すべきかの参照リストとして機能する。
+
+## 位置付け
+
+- **観点リスト**: 何を検証すべきかの網羅的列挙 (本ファイル)
+- **手動シナリオ集**: ワークフロー単位の手動検証手順 ([MANUAL_TEST.md](MANUAL_TEST.md) K/L 節)
+- **入力データ凍結**: Phase 2 migration テスト用の不変 fixture ([workflows/legacy-fixture/](workflows/legacy-fixture/))
+
+過去案として「ベースライン記録 (Phase 完了ごとに全セル手動実行で PASS/FAIL を記録)」が検討されたが、累積コスト (Phase 1〜10 で 16-22 時間の手動実行) と AI 自律開発との不整合により**廃案**。本マトリクスはチェックリストとしてのみ運用し、実行記録は残さない。
 
 ## 運用ルール
 
 - マトリクスのセルを増減する際は、対応する MANUAL_TEST.md K/L 節の行も同時更新する (末尾の紐付け表参照)
-- ベースライン記録は **Phase 1.0 着手前** にユーザーが手動実行し、「現状ベースライン」節を埋める
 - CHECKSUMS.txt 更新は `legacy-fixture/CHANGELOG.md` への記録 + 設計レビュー (`A`) または `CR` 承認が必須 (スキーマ変更を伴う場合は `A`、typo 修正等の軽微な変更は `CR` で可)
+- 各 Phase 着手時、当該 Phase の観点リストを読み、子プラン (`docs/plans/{YYYYMMDD}-ui-phase{N}-*.md`) で実行方法を定義する
+- リグレッション検出は通常の pytest / JS test / 実害発見時の都度修正で行う
 
-## Phase 1 専用部 (動的スロット系)
+## Phase 1 観点 (動的スロット系)
 
-5 ノード × 7 経路 × 3 リンク状態のセルを定義。優先度 (priority) は重要セル (★) とサンプリングセル (○) の 2 段階。
+5 ノード × 7 経路 × 3 リンク状態。`canvas-ui/dynamic-slots.md` 必須フック表との整合を保つ。
 
 ### 経路定義
-
-`canvas-ui/dynamic-slots.md` 必須フック表より:
 
 | 経路 | 略称 | beforeModify 現状 |
 |---|---|---|
@@ -44,51 +51,50 @@ UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../d
 | `partial` | 中央スロットのみ接続 |
 | `all` | 全スロット接続 |
 
-### マトリクス
+### 観点セル
 
-| ID | ノード | 経路 | リンク状態 | 優先度 | 期待動作 | ベースライン (Phase 1.0 前) | Phase 1.2 後 |
-|---|---|---|---|---|---|---|---|
-| P1-01 | Primitive Store | add | none | ○ | エラーなく追加 | (未記録) | |
-| P1-02 | Primitive Store | add | partial | ★ | 既存接続維持 | (未記録) | |
-| P1-03 | Primitive Store | add | all | ★ | 全接続維持 | (未記録) | |
-| P1-04 | Primitive Store | del | partial | ○ | 残スロット接続維持 | (未記録) | |
-| P1-05 | Primitive Store | del | all | ★ | 残スロット接続が新位置に追従 | (未記録) | |
-| P1-06 | Primitive Store | move | partial | ★ | 接続が新位置に追従 | (未記録、FAIL 見込み) | |
-| P1-07 | Primitive Store | move | all | ★ | 全接続が新位置に追従 | (未記録、FAIL 見込み) | |
-| P1-08 | Primitive Store | edit | partial | ○ | 接続維持 | (未記録) | |
-| P1-09 | Primitive Store | edit | all | ★ | 全接続維持 | (未記録) | |
-| P1-10 | Primitive Store | drag | partial | ★ | 接続維持 | (未記録、FAIL 見込み) | |
-| P1-11 | Primitive Store | drag | all | ★ | 全接続維持 | (未記録、FAIL 見込み) | |
-| P1-12 | Primitive Store | popup | partial | ★ | 接続維持 | (未記録、FAIL 見込み) | |
-| P1-13 | Primitive Store | popup | all | ★ | 全接続維持 | (未記録、FAIL 見込み) | |
-| P1-14 | Text Catalog | add | partial | ★ | 既存接続維持 (addButton 二重 capture 経路) | (未記録) | |
-| P1-15 | Text Catalog | add | all | ★ | 全接続維持 | (未記録) | |
-| P1-16 | Text Catalog | del | all | ★ | 残スロット接続が新位置に追従 | (未記録) | |
-| P1-17 | Text Catalog | move | partial | ★ | 接続が新位置に追従 | (未記録、FAIL 見込み) | |
-| P1-18 | Text Catalog | move | all | ★ | 全接続が新位置に追従 | (未記録、FAIL 見込み) | |
-| P1-19 | Text Catalog | toggle | partial | ★ | 接続維持 (Relation OFF でも) | (未記録、FAIL 見込み) | |
-| P1-20 | Text Catalog | toggle | all | ★ | 全接続維持 | (未記録、FAIL 見込み) | |
-| P1-21 | Text Catalog | edit | all | ★ | 全接続維持 | (未記録) | |
-| P1-22 | Text Catalog | drag | all | ★ | 全接続維持 | (未記録、FAIL 見込み) | |
-| P1-23 | Text Catalog | popup | all | ★ | 全接続維持 (pickItemForRelation 経由) | (未記録、FAIL 見込み) | |
-| P1-24 | Node Collector | add | partial | ★ | 既存 source 接続維持 | (未記録) | |
-| P1-25 | Node Collector | add | all | ★ | 全 source 接続維持 | (未記録) | |
-| P1-26 | Node Collector | del | all | ★ | 残 source 接続が新位置に追従 | (未記録) | |
-| P1-27 | Node Collector | move | all | ★ | 全 source 接続が新位置に追従 | (未記録、modifySource 経由なら PASS 見込み) | |
-| P1-28 | Node Collector | edit | all | ○ | 接続維持 | (未記録) | |
-| P1-29 | Image Collector | add | partial | ★ | 既存接続維持 | (未記録) | |
-| P1-30 | Image Collector | del | all | ★ | 残接続が新位置に追従 | (未記録) | |
-| P1-31 | Image Collector | move | all | ★ | 全接続が新位置に追従 | (未記録) | |
-| P1-32 | Pipe Collector | add | partial | ★ | 既存接続維持 | (未記録) | |
-| P1-33 | Pipe Collector | del | all | ★ | 残接続が新位置に追従 | (未記録) | |
-| P1-34 | Pipe Collector | move | all | ★ | 全接続が新位置に追従 | (未記録) | |
-**重要セル数**: 約 30 (★) / サンプリングセル: 5 (○) — 計 35 セル。Phase 1.0 着手前のベースライン記録対象は重要セルのみ (約 30 セル × 1-2 分 = 30-60 分)。
+| ID | ノード | 経路 | リンク状態 | 期待動作 |
+|---|---|---|---|---|
+| P1-01 | Primitive Store | add | none | エラーなく追加 |
+| P1-02 | Primitive Store | add | partial | 既存接続維持 |
+| P1-03 | Primitive Store | add | all | 全接続維持 |
+| P1-04 | Primitive Store | del | partial | 残スロット接続維持 |
+| P1-05 | Primitive Store | del | all | 残スロット接続が新位置に追従 |
+| P1-06 | Primitive Store | move | partial | 接続が新位置に追従 (Phase 1.2 で解消予定の既知バグ経路) |
+| P1-07 | Primitive Store | move | all | 全接続が新位置に追従 (同上) |
+| P1-08 | Primitive Store | edit | partial | 接続維持 |
+| P1-09 | Primitive Store | edit | all | 全接続維持 |
+| P1-10 | Primitive Store | drag | partial | 接続維持 (Phase 1.2 で解消予定の既知バグ経路) |
+| P1-11 | Primitive Store | drag | all | 全接続維持 (同上) |
+| P1-12 | Primitive Store | popup | partial | 接続維持 (Phase 1.2 で解消予定の既知バグ経路) |
+| P1-13 | Primitive Store | popup | all | 全接続維持 (同上) |
+| P1-14 | Text Catalog | add | partial | 既存接続維持 (addButton 二重 capture 経路) |
+| P1-15 | Text Catalog | add | all | 全接続維持 |
+| P1-16 | Text Catalog | del | all | 残スロット接続が新位置に追従 |
+| P1-17 | Text Catalog | move | partial | 接続が新位置に追従 (Phase 1.2 で解消予定の既知バグ経路) |
+| P1-18 | Text Catalog | move | all | 全接続が新位置に追従 (同上) |
+| P1-19 | Text Catalog | toggle | partial | 接続維持 (Relation OFF でも、Phase 1.2 で解消予定の既知バグ経路) |
+| P1-20 | Text Catalog | toggle | all | 全接続維持 (同上) |
+| P1-21 | Text Catalog | edit | all | 全接続維持 |
+| P1-22 | Text Catalog | drag | all | 全接続維持 (Phase 1.2 で解消予定の既知バグ経路) |
+| P1-23 | Text Catalog | popup | all | 全接続維持 (pickItemForRelation 経由、同上) |
+| P1-24 | Node Collector | add | partial | 既存 source 接続維持 |
+| P1-25 | Node Collector | add | all | 全 source 接続維持 |
+| P1-26 | Node Collector | del | all | 残 source 接続が新位置に追従 |
+| P1-27 | Node Collector | move | all | 全 source 接続が新位置に追従 (`modifySource` 経由のため `beforeModify` 呼び忘れは発生しない構造) |
+| P1-28 | Node Collector | edit | all | 接続維持 |
+| P1-29 | Image Collector | add | partial | 既存接続維持 |
+| P1-30 | Image Collector | del | all | 残接続が新位置に追従 |
+| P1-31 | Image Collector | move | all | 全接続が新位置に追従 |
+| P1-32 | Pipe Collector | add | partial | 既存接続維持 |
+| P1-33 | Pipe Collector | del | all | 残接続が新位置に追従 |
+| P1-34 | Pipe Collector | move | all | 全接続が新位置に追従 |
 
 > N/A セルの省略方針: toggle は Text Catalog (Relation) と Toggle Manager (Group bypass) のみ適用、drag/popup は items 系 (Primitive Store / Text Catalog) のみ適用。Collector 系 / Primitive Store の toggle、Collector 系の drag/popup はセル定義なし。
 
-## Phase 2 専用部 (シリアライズ系)
+## Phase 2 観点 (シリアライズ系)
 
-8 ノード × 4 操作 × schemaVersion 観点。Phase 0 時点では現状の schemaVersion 状態のみベースライン化、Phase 2 で全ノードに v1 付与時の migration 観点はマトリクス枠だけ用意。
+8 ノード × 4 操作 × schemaVersion 観点。
 
 ### 操作軸
 
@@ -99,7 +105,7 @@ UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../d
 | migration | migrate | 旧形式 JSON 読み込み → 内部表現変換 |
 | 旧形式互換 | legacy | `legacy-fixture/` の旧 JSON で全機能動作 |
 
-### 現状 schemaVersion 状態 (Phase 0 ベースライン対象)
+### 現状 schemaVersion 状態
 
 | ノード | バージョニング | 凍結対象シナリオ |
 |---|---|---|
@@ -112,28 +118,28 @@ UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../d
 | SAM3 Multi | なし | save/load/legacy |
 | Toggle Manager | なし | save/load/legacy |
 
-### マトリクス (Phase 2 着手時にベースライン記録)
+### 観点セル
 
-| ID | ノード | 操作 | 期待動作 | ベースライン (Phase 2 着手前) | Phase 2 後 |
-|---|---|---|---|---|---|
-| P2-01 | Primitive Store | save | items_json が `widgets_values[0]` に格納 (PrimitiveStore 固有スキーマ。TextCatalog の items_json とは別スキーマ — `serialization.md` 参照) | (Phase 2 で記録) | |
-| P2-02 | Primitive Store | load | reload で items + 出力スロットが完全復元 | (Phase 2 で記録) | |
-| P2-03 | Primitive Store | legacy | `legacy-fixture/11_primitive_store.json` 読み込み成功 | (Phase 2 で記録) | |
-| P2-04 | Text Catalog | save | items_json (version=1, catalog, relations) 格納 | (Phase 2 で記録) | |
-| P2-05 | Text Catalog | load | items + relations + tags + favorites 完全復元 | (Phase 2 で記録) | |
-| P2-06 | Text Catalog | migrate | (Phase 2 で v2 導入時) v1→v2 変換 PASS | (Phase 2 で記録) | |
-| P2-07 | Text Catalog | legacy | `legacy-fixture/12_text_catalog.json` + `09_text_catalog.json` 読み込み成功 | (Phase 2 で記録) | |
-| P2-08 | Node Collector | migrate | v1 sourceId 直接形式 → v2 sources[] 配列形式の変換 PASS | (Phase 2 で記録、現状 `migrateData` 実装済) | |
-| P2-09 | Node Collector | legacy | `legacy-fixture/13_node_collector.json` + `06_multi_collector.json` 読み込み成功 | (Phase 2 で記録) | |
-| P2-10 | Image Collector | save/load/legacy | sources 配列の保存・復元 | (Phase 2 で記録) | |
-| P2-11 | Pipe Collector | save/load/legacy | sources 配列の保存・復元 | (Phase 2 で記録) | |
-| P2-12 | Lora Loader | save/load/legacy | loras_json の保存・復元 (on/lora/strength) | (Phase 2 で記録) | |
-| P2-13 | SAM3 Multi | save/load/legacy | segments_json の保存・復元 | (Phase 2 で記録) | |
-| P2-14 | Toggle Manager | save/load/legacy | managed/scenes/currentScene の保存・復元 | (Phase 2 で記録) | |
+| ID | ノード | 操作 | 期待動作 |
+|---|---|---|---|
+| P2-01 | Primitive Store | save | items_json が `widgets_values[0]` に格納 (PrimitiveStore 固有スキーマ。TextCatalog の items_json とは別スキーマ — `serialization.md` 参照) |
+| P2-02 | Primitive Store | load | reload で items + 出力スロットが完全復元 |
+| P2-03 | Primitive Store | legacy | `legacy-fixture/11_primitive_store.json` 読み込み成功 |
+| P2-04 | Text Catalog | save | items_json (version=1, catalog, relations) 格納 |
+| P2-05 | Text Catalog | load | items + relations + tags + favorites 完全復元 |
+| P2-06 | Text Catalog | migrate | (Phase 2 で v2 導入時) v1→v2 変換 PASS |
+| P2-07 | Text Catalog | legacy | `legacy-fixture/12_text_catalog.json` + `09_text_catalog.json` 読み込み成功 |
+| P2-08 | Node Collector | migrate | v1 sourceId 直接形式 → v2 sources[] 配列形式の変換 PASS (現状 `migrateData` 実装済) |
+| P2-09 | Node Collector | legacy | `legacy-fixture/13_node_collector.json` + `06_multi_collector.json` 読み込み成功 |
+| P2-10 | Image Collector | save/load/legacy | sources 配列の保存・復元 |
+| P2-11 | Pipe Collector | save/load/legacy | sources 配列の保存・復元 |
+| P2-12 | Lora Loader | save/load/legacy | loras_json の保存・復元 (on/lora/strength) |
+| P2-13 | SAM3 Multi | save/load/legacy | segments_json の保存・復元 |
+| P2-14 | Toggle Manager | save/load/legacy | managed/scenes/currentScene の保存・復元 |
 
-## Phase 3-10 共通部
+## Phase 3-10 観点
 
-各 Phase 着手時に子プラン (`docs/plans/{YYYYMMDD}-ui-phase{N}-*.md`) で詳細マトリクスを定義。本節は責務単位の枠のみ。
+各 Phase 着手時に子プラン (`docs/plans/{YYYYMMDD}-ui-phase{N}-*.md`) で詳細を定義。本節は責務単位の枠のみ。
 
 ### Phase 3: onConfigure / ライフサイクル統合
 
@@ -191,27 +197,6 @@ UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../d
 |---|---|
 | 右クリックメニュー位置 | Canvas 座標とビューポート座標の変換が全ノード一貫 |
 | IME 中の Enter 暴発防止 | `isComposing` チェックが Manager Editor / Item Edit Dialog / Picker で統一 |
-
-## 現状ベースライン
-
-**(Phase 1.0 着手前にユーザーが手動実行し、本節を埋める)**
-
-実施手順:
-
-1. ComfyUI を起動し、`tests/workflows/11_primitive_store.json` 〜 `15_pipe_collector.json` を順次読込
-2. 上記 Phase 1 専用部マトリクスの重要セル (★) を順次実行
-3. 各セルの結果 (PASS / FAIL) を本節と Phase 1 専用部マトリクスの「ベースライン」列に記録
-4. FAIL セルは原因 (経路名 / `beforeModify` 呼び忘れ箇所等) も併記
-
-想定 FAIL セル (`canvas-ui/dynamic-slots.md` 既知バグ 4 経路に対応):
-
-- P1-06, P1-07 (Primitive Store / move)
-- P1-10 〜 P1-13 (Primitive Store / drag, popup)
-- P1-17, P1-18 (Text Catalog / move)
-- P1-19, P1-20 (Text Catalog / toggle)
-- P1-22, P1-23 (Text Catalog / drag, popup)
-
-これらは Phase 1.2 で `DynamicSlotCoordinator` 導入により PASS に転換する想定。
 
 ## MANUAL_TEST.md K/L 節との紐付け
 
