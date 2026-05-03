@@ -1,0 +1,89 @@
+{
+  "id": "test-17-sam3-multi",
+  "revision": 0,
+  "last_node_id": 4,
+  "last_link_id": 2,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Loader_SAM3",
+      "pos": [200, 200],
+      "size": [260, 100],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        { "name": "SAM3_MODEL", "type": "CSAM3_MODEL", "links": [1] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Loader_SAM3" },
+      "title": "SAM3 Loader",
+      "widgets_values": ["CHANGE_ME.safetensors", "fp32"]
+    },
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [200, 380],
+      "size": [260, 320],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        { "name": "IMAGE", "type": "IMAGE", "links": [2] },
+        { "name": "MASK", "type": "MASK", "links": null }
+      ],
+      "properties": { "Node name for S&R": "LoadImage" },
+      "title": "Load Image",
+      "widgets_values": ["example.png", "image"]
+    },
+    {
+      "id": 3,
+      "type": "SAX_Bridge_Segmenter_Multi",
+      "pos": [520, 200],
+      "size": [320, 200],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        { "name": "sam3_model", "type": "CSAM3_MODEL", "link": 1 },
+        { "name": "image", "type": "IMAGE", "link": 2 },
+        { "name": "segments_json", "type": "STRING", "link": null },
+        { "name": "mask", "type": "MASK", "link": null }
+      ],
+      "outputs": [
+        { "name": "MASK", "type": "MASK", "links": null },
+        { "name": "PREVIEW_IMAGE", "type": "IMAGE", "links": null }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Segmenter_Multi" },
+      "title": "SAM3 Multi Segmenter (mutation test)",
+      "widgets_values": [
+        "[{\"on\":true,\"mode\":\"positive\",\"prompt\":\"cat\",\"threshold\":0.2,\"presence_weight\":0.5,\"mask_grow\":0},{\"on\":true,\"mode\":\"positive\",\"prompt\":\"dog\",\"threshold\":0.25,\"presence_weight\":0.5,\"mask_grow\":4},{\"on\":false,\"mode\":\"negative\",\"prompt\":\"background\",\"threshold\":0.3,\"presence_weight\":0.5,\"mask_grow\":0}]"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "Note",
+      "pos": [900, 200],
+      "size": [380, 200],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "How to test",
+      "widgets_values": [
+        "SAM3 Multi Segmenter items mutation シリアライズ検証。MANUAL_TEST.md L-2 参照"
+      ]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 3, 0, "CSAM3_MODEL"],
+    [2, 2, 0, 3, 1, "IMAGE"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": { "ds": { "scale": 0.9, "offset": [0, 0] } },
+  "version": 0.4
+}

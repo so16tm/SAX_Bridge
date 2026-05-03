@@ -1,0 +1,88 @@
+{
+  "id": "test-07-toggle-manager",
+  "revision": 0,
+  "last_node_id": 4,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Toggle_Manager",
+      "pos": [200, 200],
+      "size": [320, 150],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Toggle_Manager" },
+      "title": "Toggle Manager 1",
+      "widgets_values": [
+        "{\"managed\":[],\"scenes\":{\"Default\":{}},\"currentScene\":\"Default\"}"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "SAX_Bridge_Toggle_Manager",
+      "pos": [200, 430],
+      "size": [320, 150],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Toggle_Manager" },
+      "title": "Toggle Manager 2",
+      "widgets_values": [
+        "{\"managed\":[],\"scenes\":{\"Default\":{}},\"currentScene\":\"Default\"}"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "Note",
+      "pos": [650, 230],
+      "size": [220, 80],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "Node in Group A",
+      "widgets_values": ["This node is inside Group A"]
+    },
+    {
+      "id": 4,
+      "type": "Note",
+      "pos": [650, 470],
+      "size": [220, 80],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "Node in Group B",
+      "widgets_values": ["This node is inside Group B"]
+    }
+  ],
+  "links": [],
+  "groups": [
+    {
+      "title": "Group A",
+      "bounding": [620, 190, 280, 150],
+      "color": "#3f789e",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "title": "Group B",
+      "bounding": [620, 430, 280, 150],
+      "color": "#88A",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": { "ds": { "scale": 1, "offset": [0, 0] } },
+  "version": 0.4
+}

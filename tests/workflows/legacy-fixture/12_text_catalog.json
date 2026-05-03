@@ -1,0 +1,45 @@
+{
+  "id": "test-12-text-catalog",
+  "revision": 0,
+  "last_node_id": 2,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Text_Catalog",
+      "pos": [200, 200],
+      "size": [320, 240],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Text_Catalog" },
+      "title": "Text Catalog (mutation test)",
+      "widgets_values": [
+        "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"c1\",\"name\":\"positive_base\",\"text\":\"masterpiece, best quality, ultra detailed\",\"tags\":[\"positive\"]},{\"id\":\"c2\",\"name\":\"negative_base\",\"text\":\"low quality, blurry, watermark\",\"tags\":[\"negative\"]},{\"id\":\"c3\",\"name\":\"style_anime\",\"text\":\"anime style, cel shading\",\"tags\":[\"positive\",\"style\"]}],\"tag_definitions\":[\"positive\",\"negative\",\"style\"]},\"relations\":[{\"item_id\":\"c1\",\"on\":true},{\"item_id\":\"c2\",\"on\":true},{\"item_id\":\"c3\",\"on\":false}]}"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "Note",
+      "pos": [580, 200],
+      "size": [380, 240],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "How to test",
+      "widgets_values": [
+        "mutation 経路網羅検証 (09_text_catalog.json は全機能シナリオ)。MANUAL_TEST.md K-2 参照"
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": { "ds": { "scale": 1, "offset": [0, 0] } },
+  "version": 0.4
+}

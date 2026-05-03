@@ -1,0 +1,45 @@
+{
+  "id": "test-18-toggle-manager",
+  "revision": 0,
+  "last_node_id": 2,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Toggle_Manager",
+      "pos": [200, 200],
+      "size": [320, 200],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Toggle_Manager" },
+      "title": "Toggle Manager (mutation test)",
+      "widgets_values": [
+        "{\"managed\":[{\"nodeId\":10,\"key\":\"mode\"},{\"nodeId\":11,\"key\":\"enabled\"}],\"scenes\":{\"Default\":{\"10\":{\"mode\":\"normal\"},\"11\":{\"enabled\":true}},\"scene_a\":{\"10\":{\"mode\":\"fast\"},\"11\":{\"enabled\":false}}},\"currentScene\":\"Default\"}"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "Note",
+      "pos": [580, 200],
+      "size": [380, 200],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "How to test",
+      "widgets_values": [
+        "Toggle Manager 単一インスタンスの managed/scenes シリアライズ検証。MANUAL_TEST.md L-3 参照"
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": { "ds": { "scale": 1, "offset": [0, 0] } },
+  "version": 0.4
+}

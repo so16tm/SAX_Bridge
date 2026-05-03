@@ -308,3 +308,89 @@
 - [ ] 旧ワークフロー読込 → 全ノード正常復元
 - [ ] パラメータ値が保持されている
 - [ ] 生成実行 → エラーなし
+
+---
+
+## K. 動的スロット mutation 経路 (UI Phase 0 / Phase 1 検証用)
+
+> UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md)) のリグレッション検証。観点マトリクスは [REGRESSION_MATRIX.md](REGRESSION_MATRIX.md) Phase 1 専用部参照。
+>
+> **既存節との切り分け**:
+> - K-1 (11_primitive_store) — 既存対応節なし (Phase 0 新設)
+> - K-2 (12_text_catalog) — I 節 (09_text_catalog) は全機能シナリオ / K-2 は mutation 経路網羅 (重複しない範囲)
+> - K-3 (13_node_collector) — F 節 (06_multi_collector) は 2 インスタンス独立性 / K-3 は単一インスタンス mutation 経路網羅
+> - K-4 (14_image_collector) / K-5 (15_pipe_collector) — 既存対応節なし (Phase 0 新設)
+
+### K-1. Primitive Store (workflows/11_primitive_store.json)
+
+事前登録済み: items 3 件 (p1/p2/p3)。各経路で「リンク状態 = partial (中央スロットのみ接続) または all (全スロット接続)」を試行する。
+
+- [ ] **add**: 新規 item 追加 → 既存接続維持 (P1-01〜P1-03)
+- [ ] **del-mid**: 中央 item 削除 → 残スロット接続が新位置に追従 (P1-04〜P1-05)
+- [ ] **move**: item を上下移動 → 接続が新位置に追従 (P1-06〜P1-07、Phase 1.0 前は FAIL 見込み)
+- [ ] **edit**: item 名変更 → 接続維持 (P1-08〜P1-09)
+- [ ] **drag**: param drag (数値ドラッグ) → 接続維持 (P1-10〜P1-11、Phase 1.0 前は FAIL 見込み)
+- [ ] **popup**: param popup (ピッカー) → 接続維持 (P1-12〜P1-13、Phase 1.0 前は FAIL 見込み)
+
+### K-2. Text Catalog mutation (workflows/12_text_catalog.json)
+
+事前登録済み: items 3 件 + relations 3 件 (うち 1 OFF)。
+
+- [ ] **add**: Relation 追加 (addButton 二重 capture 経路) → 既存接続維持 (P1-14〜P1-15)
+- [ ] **del-mid**: 中央 Relation 削除 → 残スロット接続が新位置に追従 (P1-16)
+- [ ] **move**: Relation を上下移動 → 接続が新位置に追従 (P1-17〜P1-18、FAIL 見込み)
+- [ ] **toggle**: Relation トグル ON/OFF → 接続維持 (P1-19〜P1-20、FAIL 見込み)
+- [ ] **edit**: Item 編集 → 接続維持 (P1-21)
+- [ ] **drag**: param drag → 接続維持 (P1-22、FAIL 見込み)
+- [ ] **popup**: pickItemForRelation 経由 → 接続維持 (P1-23、FAIL 見込み)
+
+### K-3. Node Collector 単一インスタンス (workflows/13_node_collector.json)
+
+ソース候補: Loader / KSampler / Guidance。手動で sources を追加して検証。
+
+- [ ] **add**: source 追加 → 既存 source 接続維持 (P1-24〜P1-25)
+- [ ] **del-mid**: 中央 source 削除 → 残 source 接続が新位置に追従 (P1-26)
+- [ ] **move**: source 並べ替え → 全 source 接続が新位置に追従 (P1-27、modifySource 経由なら PASS 見込み)
+- [ ] **edit**: source 入替 → 接続維持 (P1-28)
+
+### K-4. Image Collector 単一インスタンス (workflows/14_image_collector.json)
+
+- [ ] **add**: source 追加 → 既存接続維持 (P1-29)
+- [ ] **del-mid**: 中央 source 削除 → 残接続が新位置に追従 (P1-30)
+- [ ] **move**: source 並べ替え → 全接続が新位置に追従 (P1-31)
+
+### K-5. Pipe Collector 単一インスタンス (workflows/15_pipe_collector.json)
+
+- [ ] **add**: source 追加 → 既存接続維持 (P1-32)
+- [ ] **del-mid**: 中央 source 削除 → 残接続が新位置に追従 (P1-33)
+- [ ] **move**: source 並べ替え → 全接続が新位置に追従 (P1-34)
+
+---
+
+## L. シリアライズ系 mutation (UI Phase 0 / Phase 2 検証用)
+
+> シリアライズ統合 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../docs/plans/20260503-ui-architecture-overhaul.md) Phase 2) の検証。出力スロット動的増減を伴わないため Phase 1 のスロット維持観点とは独立。観点マトリクスは [REGRESSION_MATRIX.md](REGRESSION_MATRIX.md) Phase 2 専用部参照。
+
+### L-1. Lora Loader (workflows/16_lora_loader.json)
+
+事前登録済み: 2 LoRA (`example_a.safetensors` ON、`example_b.safetensors` OFF)。
+
+- [ ] **save**: LoRA 追加・削除・順序変更後にワークフロー保存 → `loras_json` に状態反映 (P2-12)
+- [ ] **load**: 再読込で LoRA リスト + on/lora/strength 完全復元 (P2-12)
+- [ ] **legacy**: `legacy-fixture/16_lora_loader.json` 読込 → エラーなし (P2-12)
+
+### L-2. SAM3 Multi Segmenter (workflows/17_sam3_multi.json)
+
+事前登録済み: segments_json (positive 2 / negative 1)。
+
+- [ ] **save**: segment 追加・削除・編集後に保存 → `segments_json` に状態反映 (P2-13)
+- [ ] **load**: 再読込で segments 完全復元 (P2-13)
+- [ ] **legacy**: `legacy-fixture/17_sam3_multi.json` 読込 → エラーなし (P2-13)
+
+### L-3. Toggle Manager (workflows/18_toggle_manager.json)
+
+事前登録済み: managed 2 件 + scenes 2 個 (Default + scene_a)。
+
+- [ ] **save**: managed 追加・scene 追加・currentScene 切替後に保存 → hidden JSON に状態反映 (P2-14)
+- [ ] **load**: 再読込で managed/scenes/currentScene 完全復元 (P2-14)
+- [ ] **legacy**: `legacy-fixture/18_toggle_manager.json` 読込 → エラーなし (P2-14)

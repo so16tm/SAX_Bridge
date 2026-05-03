@@ -1,0 +1,128 @@
+{
+  "id": "test-14-image-collector",
+  "revision": 0,
+  "last_node_id": 6,
+  "last_link_id": 4,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Loader",
+      "pos": [200, 200],
+      "size": [220, 440],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        { "name": "PIPE", "type": "PIPE_LINE", "links": [1] },
+        { "name": "SEED", "type": "INT", "links": null }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Loader" },
+      "widgets_values": [
+        "CHANGE_ME.safetensors", -2, "baked_vae", "None", 1, false,
+        42, "fixed", 20, 7, "euler", "normal", 1, 512, 512, 1
+      ]
+    },
+    {
+      "id": 2,
+      "type": "SAX_Bridge_Prompt",
+      "pos": [470, 200],
+      "size": [240, 160],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        { "name": "pipe", "type": "PIPE_LINE", "link": 1 }
+      ],
+      "outputs": [
+        { "name": "PIPE", "type": "PIPE_LINE", "links": [2] },
+        { "name": "POPULATED_TEXT", "type": "STRING", "links": null }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Prompt" },
+      "widgets_values": [
+        "a beautiful landscape, masterpiece",
+        "Select the LoRA to add to the text",
+        "Select the Wildcard to add to the text"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "SAX_Bridge_KSampler",
+      "pos": [760, 200],
+      "size": [210, 80],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        { "name": "pipe", "type": "PIPE_LINE", "link": 2 }
+      ],
+      "outputs": [
+        { "name": "PIPE_LINE", "type": "PIPE_LINE", "links": null },
+        { "name": "IMAGE", "type": "IMAGE", "links": [3, 4] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_KSampler" },
+      "title": "KSampler (source A + B)",
+      "widgets_values": [true]
+    },
+    {
+      "id": 4,
+      "type": "SAX_Bridge_Image_Collector",
+      "pos": [1030, 200],
+      "size": [320, 120],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        { "name": "slot_0", "type": "*", "link": 3 }
+      ],
+      "outputs": [
+        { "name": "images", "type": "IMAGE", "links": null }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Image_Collector" },
+      "title": "Image Collector (single instance mutation test)",
+      "widgets_values": []
+    },
+    {
+      "id": 5,
+      "type": "SAX_Bridge_Image_Preview",
+      "pos": [1030, 400],
+      "size": [320, 200],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        { "name": "images", "type": "IMAGE", "link": 4 }
+      ],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Image_Preview" },
+      "title": "Image Preview (output)",
+      "widgets_values": [200, 1, "low"]
+    },
+    {
+      "id": 6,
+      "type": "Note",
+      "pos": [1400, 200],
+      "size": [320, 160],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "How to test",
+      "widgets_values": [
+        "Image Collector 単一インスタンスの sources 経路検証。MANUAL_TEST.md K-4 参照"
+      ]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "PIPE_LINE"],
+    [2, 2, 0, 3, 0, "PIPE_LINE"],
+    [3, 3, 1, 4, 0, "IMAGE"],
+    [4, 3, 1, 5, 0, "IMAGE"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": { "ds": { "scale": 0.8, "offset": [0, 0] } },
+  "version": 0.4
+}

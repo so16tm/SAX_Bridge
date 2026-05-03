@@ -1,0 +1,51 @@
+{
+  "id": "test-11-primitive-store",
+  "revision": 0,
+  "last_node_id": 2,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Primitive_Store",
+      "pos": [200, 200],
+      "size": [320, 240],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        { "name": "items_json", "type": "STRING", "link": null }
+      ],
+      "outputs": [
+        { "name": "out_0", "type": "*", "links": null },
+        { "name": "out_1", "type": "*", "links": null },
+        { "name": "out_2", "type": "*", "links": null }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Primitive_Store" },
+      "title": "Primitive Store (mutation test)",
+      "widgets_values": [
+        "[{\"id\":\"p1\",\"name\":\"seed_main\",\"type\":\"SEED\",\"value\":42,\"mode\":\"fixed\"},{\"id\":\"p2\",\"name\":\"cfg_scale\",\"type\":\"FLOAT\",\"value\":7.0},{\"id\":\"p3\",\"name\":\"label\",\"type\":\"STRING\",\"value\":\"baseline\"}]"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "Note",
+      "pos": [580, 200],
+      "size": [380, 240],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "How to test",
+      "widgets_values": [
+        "動的スロット 7 経路の手動検証 (add / del-mid / move / toggle なし / edit / param drag / param popup) を行うためのワークフロー。詳細は MANUAL_TEST.md K-1 と REGRESSION_MATRIX.md 参照"
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": { "ds": { "scale": 1, "offset": [0, 0] } },
+  "version": 0.4
+}
