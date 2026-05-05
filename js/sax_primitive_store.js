@@ -4,7 +4,6 @@ import {
     PAD, ROW_H, BOTTOM_PAD, ADD_H,
     txt, rrect,
     makeItemListWidget, showItemEditDialog, getComfyTheme,
-    captureOutputLinks, restoreOutputLinks,
     PRIMITIVE_TYPE_META, PRIMITIVE_BADGE_FALLBACK, PRIMITIVE_BADGE_TEXT_COLOR,
 } from "./sax_ui_base.js";
 import { DynamicSlotCoordinator } from "./sax_dynamic_slot_coordinator.js";
@@ -260,9 +259,7 @@ function drawTypeBadge(ctx, item, x, midY, w, h) {
 // ---------------------------------------------------------------------------
 
 /**
- * PrimitiveStore 用 Coordinator を生成する。Phase 1.0 wrapper モードのため、
- * captureLinksRaw / restoreLinksRaw に既存 captureOutputLinks / restoreOutputLinks を
- * 渡している (これらフィールドは Phase 1.1 で削除予定)。
+ * PrimitiveStore 用 Coordinator を生成する。
  */
 function ensureCoordinator(node) {
     if (node._saxCoordinator) return node._saxCoordinator;
@@ -275,9 +272,6 @@ function ensureCoordinator(node) {
         }],
         syncSlotStructure: () => syncOutputSlots(node, node._primitiveItems ?? []),
         setEntities:       (newEntities) => { node._primitiveItems = newEntities; },
-        // Phase 1.0 wrapper フィールド (Phase 1.1 で削除予定)
-        captureLinksRaw:   (entities) => captureOutputLinks(node, entities),
-        restoreLinksRaw:   (entities, syncFn) => restoreOutputLinks(node, entities, syncFn),
     });
     return node._saxCoordinator;
 }
@@ -287,22 +281,17 @@ function makeStoreWidget(node) {
     const getItems  = () => node._primitiveItems ?? [];
     const coordinator = ensureCoordinator(node);
 
-    // makeItemListWidget の動作モデルは [beforeModify → in-place mutation → saveItems]。
-    // この 2 フェーズを Coordinator のトランザクションにマップする:
-    //   - beforeModify : captureFromExisting() で現状接続を内部スナップショットに記録
-    //   - saveItems    : applyAfterCapture(newItems) で配列差し替え + sync + restore
-    //
-    // Phase 1.1 で makeItemListWidget 自体を Coordinator 認識に書き換え、
-    // 2 フェーズを mutate(action) 1 個に畳む予定。applyAfterCapture は移行期限定 API。
-    const saveItems = (newItems) => {
-        coordinator.applyAfterCapture(newItems);
-    };
+    // beforeModify 経由 (add/del/move): capture 済みスナップショットを使って restore まで行う
+    const saveItemsCapturing = (newItems) => coordinator.applyAfterCapture(newItems);
+    // beforeModify 非経由 (param drag/popup/leftElements): 値のみ保存、slot 構造不変
+    const saveItemsValueOnly = (newItems) => coordinator.applySaveOnly(newItems);
 
     return makeItemListWidget({
-        widgetName:   "__sax_pstore_widget",
-        maxItems:     MAX_ITEMS,
+        widgetName:         "__sax_pstore_widget",
+        maxItems:           MAX_ITEMS,
         getItems,
-        saveItems,
+        saveItemsCapturing,
+        saveItemsValueOnly,
         beforeModify: () => coordinator.captureFromExisting(),
 
         leftElements: [
@@ -355,18 +344,18 @@ function makeStoreWidget(node) {
                 onPopup: (item, _idx, _node) => {
                     if (item.type === "BOOLEAN") {
                         item.value = !item.value;
-                        saveItems(getItems());
+                        saveItemsValueOnly(getItems());
                         return;
                     }
                     if (item.type === "STRING") {
-                        showStringEditDialog(item, () => saveItems(getItems()));
+                        showStringEditDialog(item, () => saveItemsValueOnly(getItems()));
                         return;
                     }
                     if (item.type === "SEED") {
-                        showSeedEditPopup(item, () => saveItems(getItems()));
+                        showSeedEditPopup(item, () => saveItemsValueOnly(getItems()));
                         return;
                     }
-                    showNumericEditPopup(item, () => saveItems(getItems()));
+                    showNumericEditPopup(item, () => saveItemsValueOnly(getItems()));
                 },
             },
         ],
@@ -394,7 +383,7 @@ function makeStoreWidget(node) {
         hasDelete:     true,
 
         addButton: {
-            onAdd: (n, _items2, _save) => showAddDialog(node, saveItems),
+            onAdd: (n, _items2, _save) => showAddDialog(node, _save),
         },
     });
 }
@@ -504,14 +493,9 @@ app.registerExtension({
             syncOutputSlots(this, items);
 
             // LiteGraph のリンク復元完了後に Coordinator 経由で snapshot を記録
-            // (Phase 1.0 wrapper: 内部で captureOutputLinks を呼ぶ)
             const coordinator = this._saxCoordinator;
             setTimeout(() => {
-                if (coordinator) {
-                    coordinator.captureFromExisting();
-                } else {
-                    captureOutputLinks(this, items);
-                }
+                coordinator.captureFromExisting();
             }, 0);
         };
     },

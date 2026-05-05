@@ -98,3 +98,17 @@ describe("PrimitiveStore ワークフロー JSON: スキーマ互換性", () => 
             "widgets_values[0] は items_json 文字列");
     });
 });
+
+describe("PrimitiveStore Phase 1.1 互換性: legacy-fixture が内蔵モードで読み込み可能", () => {
+    it("legacy-fixture の items_json に _links が含まれない (シリアライズ汚染防止が Phase 1.1 でも保証)", () => {
+        const legacy = loadWorkflow("legacy-fixture/11_primitive_store.json");
+        const items  = parseItemsJson(getPrimitiveNode(legacy));
+
+        assert.ok(items.length > 0, "legacy-fixture に items が存在");
+
+        for (const item of items) {
+            assert.equal(item._links, undefined,
+                `legacy item.${item.name}: _links は items_json に含まれてはならない`);
+        }
+    });
+});

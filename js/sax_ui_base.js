@@ -720,6 +720,12 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
  *   widgetName?:    string,
  *   getItems:       () => object[],
  *   saveItems:      (items: object[]) => void,
+ *   saveItemsCapturing?: (items: object[]) => void,
+ *     // beforeModify 経由 (add/del/move) で使う saveItems。
+ *     // DynamicSlotCoordinator.applyAfterCapture に対応。未指定時は saveItems にフォールバック。
+ *   saveItemsValueOnly?: (items: object[]) => void,
+ *     // beforeModify を経由しない経路 (param drag/popup/leftElements onClick) で使う saveItems。
+ *     // DynamicSlotCoordinator.applySaveOnly に対応。未指定時は saveItems にフォールバック。
  *   beforeModify?:  (items: object[]) => void,  // 削除・並び替え直前に呼ばれる（出力スロット接続維持に使用）
  *   maxItems?:      number,
  *   hasToggle?:     boolean,
@@ -782,10 +788,12 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
  */
 export function makeItemListWidget(spec) {
     const {
-        widgetName    = "__sax_item_list",
+        widgetName         = "__sax_item_list",
         getItems,
         saveItems,
-        beforeModify  = null,   // 配列を変更する直前に呼ばれるコールバック (items: object[]) => void
+        saveItemsCapturing = null,  // beforeModify 経由経路 (add/del/move) 向け saveItems。未指定時は saveItems にフォールバック
+        saveItemsValueOnly = null,  // beforeModify 非経由経路 (param drag/popup/leftElements) 向け saveItems。未指定時は saveItems にフォールバック
+        beforeModify  = null,       // 配列を変更する直前に呼ばれるコールバック (items: object[]) => void
         maxItems      = 20,
         hasToggle     = false,
         hasMoveUpDown = false,
@@ -949,12 +957,12 @@ export function makeItemListWidget(spec) {
                 if (items.length >= maxItems) return true;
                 beforeModify?.(items);
                 if (addButton.onAdd) {
-                    addButton.onAdd(node, items, saveItems);
+                    addButton.onAdd(node, items, saveItemsCapturing ?? saveItems);
                 } else {
                     const newItem = addButton.onCreate(node);
                     if (newItem) {
                         items.push(newItem);
-                        saveItems(items);
+                        (saveItemsCapturing ?? saveItems)(items);
                         app.graph.setDirtyCanvas(true, false);
                     }
                 }
@@ -968,7 +976,7 @@ export function makeItemListWidget(spec) {
             if (layout.del && inX(pos, layout.del.x, layout.del.w)) {
                 beforeModify?.(items);
                 items.splice(rowIndex, 1);
-                saveItems(items);
+                (saveItemsCapturing ?? saveItems)(items);
                 app.graph.setDirtyCanvas(true, false);
                 return true;
             }
@@ -980,13 +988,13 @@ export function makeItemListWidget(spec) {
                     beforeModify?.(items);
                     [items[rowIndex - 1], items[rowIndex]] =
                     [items[rowIndex],     items[rowIndex - 1]];
-                    saveItems(items);
+                    (saveItemsCapturing ?? saveItems)(items);
                     app.graph.setDirtyCanvas(true, false);
                 } else if (!moveUp && rowIndex < items.length - 1) {
                     beforeModify?.(items);
                     [items[rowIndex],     items[rowIndex + 1]] =
                     [items[rowIndex + 1], items[rowIndex]];
-                    saveItems(items);
+                    (saveItemsCapturing ?? saveItems)(items);
                     app.graph.setDirtyCanvas(true, false);
                 }
                 return true;
@@ -1022,7 +1030,7 @@ export function makeItemListWidget(spec) {
                         Math.min(p.max ?? Infinity, startVal + dy * scale)
                     );
                     p.set(item, newVal);
-                    saveItems(items);
+                    (saveItemsValueOnly ?? saveItems)(items);
                     app.graph.setDirtyCanvas(true, false);
                 };
 
@@ -1048,7 +1056,7 @@ export function makeItemListWidget(spec) {
                                 { min: p.min, max: p.max, step: p.step, label: p.label },
                                 (v) => {
                                     p.set(item, v);
-                                    saveItems(items);
+                                    (saveItemsValueOnly ?? saveItems)(items);
                                     app.graph.setDirtyCanvas(true, false);
                                 }
                             );
@@ -1070,7 +1078,7 @@ export function makeItemListWidget(spec) {
                 if (!area || !inX(pos, area.x, area.w)) continue;
                 const changed = le.onClick?.(item, rowIndex, node);
                 if (changed) {
-                    saveItems(items);
+                    (saveItemsValueOnly ?? saveItems)(items);
                     app.graph.setDirtyCanvas(true, false);
                 }
                 return true;
