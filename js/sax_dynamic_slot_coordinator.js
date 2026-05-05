@@ -1,7 +1,11 @@
-// DynamicSlotCoordinator — Phase 1.1.C
+// DynamicSlotCoordinator — Phase 1.2.A.0
 //
 // 動的スロットの mutation トランザクション (capture → action → sync → restore) を
 // 集約する Coordinator API。
+//
+// Phase 1.2.A.0 での変更:
+// - applyAfterCapture の非同期パスで #hints 退避・復元実装 (CR-MEDIUM-1 / TR-MEDIUM-1 解消、mutate と完全対称化)
+// - #captureSnapshots に try/finally 防御コード追加 (NEW3-MEDIUM-1: ループ途中例外時の部分書込み cleanup)
 //
 // Phase 1.1.C での変更:
 // - wrapper API (captureLinksRaw / restoreLinksRaw / #captureCalled /
@@ -196,13 +200,20 @@ export class DynamicSlotCoordinator {
         if (typeof this.#spec.setEntities !== "function") {
             throw new Error("DynamicSlotCoordinator.applyAfterCapture requires spec.setEntities");
         }
+        const options = opts ?? {};
 
-        // opts.entityHints の反映 (applySaveOnly と統一)
-        if (opts?.entityHints != null) this.#hints = opts.entityHints;
+        // opts.entityHints の反映 (mutate / applySaveOnly と統一、null 明示クリア)
+        this.#hints = options.entityHints ?? null;
 
         const capturedEntityIds = this.#collectCapturedIds(this.#spec.getEntities());
         const slotCountBefore = this.#getSlotCount();
         let didScheduleAsync = false;
+
+        // 非同期 restore に切り替わるケースで、setTimeout コールバックが完了するまで
+        // #hints を生存させる必要があるため、同期スコープでローカル変数に退避する
+        // (mutate と同じパターン)。
+        const hintsForAsync = this.#hints;
+
         try {
             this.#spec.setEntities(newEntities);
             this.#spec.syncSlotStructure();
@@ -210,18 +221,22 @@ export class DynamicSlotCoordinator {
             if (slotCountAfter !== slotCountBefore) {
                 didScheduleAsync = true;
                 setTimeout(() => {
+                    this.#hints = hintsForAsync;
                     try {
                         this.#restoreFromSnapshots();
                     } finally {
                         for (const id of capturedEntityIds) this.#cleanupSnapshot(id);
+                        this.#hints = null;
                     }
                 }, 0);
             } else {
                 this.#restoreFromSnapshots();
             }
         } finally {
-            this.#hints = null;
+            // 同期 restore 経路ではこの finally で #hints をクリアし snapshot cleanup する。
+            // 非同期 restore 経路 (didScheduleAsync=true) では setTimeout コールバック側で行う。
             if (!didScheduleAsync) {
+                this.#hints = null;
                 for (const id of capturedEntityIds) this.#cleanupSnapshot(id);
             }
         }
@@ -385,17 +400,25 @@ export class DynamicSlotCoordinator {
         }
         const outputs = this.#node.outputs ?? [];
         const graphLinks = globalThis.app?.graph?.links ?? null;
-        for (let i = 0; i < entities.length; i++) {
-            const entity = entities[i];
-            const id = this.#getOrCreateId(entity);
-            const slot = outputs[i];
-            const linkIds = slot?.links ?? [];
-            const conns = [];
-            for (const linkId of linkIds) {
-                const link = graphLinks?.[linkId];
-                if (link) conns.push({ targetId: link.target_id, targetSlot: link.target_slot });
+        // 防御コード (NEW3-MEDIUM-1): ループ途中例外時に部分書込みスナップショットを cleanup する。
+        const writtenIds = [];
+        try {
+            for (let i = 0; i < entities.length; i++) {
+                const entity = entities[i];
+                const id = this.#getOrCreateId(entity);
+                const slot = outputs[i];
+                const linkIds = slot?.links ?? [];
+                const conns = [];
+                for (const linkId of linkIds) {
+                    const link = graphLinks?.[linkId];
+                    if (link) conns.push({ targetId: link.target_id, targetSlot: link.target_slot });
+                }
+                this.#linkSnapshots.set(id, conns);
+                writtenIds.push(id);
             }
-            this.#linkSnapshots.set(id, conns);
+        } catch (e) {
+            for (const id of writtenIds) this.#cleanupSnapshot(id);
+            throw e;
         }
     }
 

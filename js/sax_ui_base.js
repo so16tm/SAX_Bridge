@@ -1086,7 +1086,10 @@ export function makeItemListWidget(spec) {
 
             if (layout.pill && hasToggle && inX(pos, layout.pill.x, layout.pill.w + 6)) {
                 item.on = !(item.on ?? true);
-                saveItems(items);
+                // toggle は item.on のみ変更で slot 構造不変。saveItemsValueOnly があれば
+                // それ経由で applySaveOnly に振り分け、capture/restore コストと
+                // PrimitiveStore (hasToggle: false) への影響を避ける (TR-LOW-2 解消)。
+                (saveItemsValueOnly ?? saveItems)(items);
                 app.graph.setDirtyCanvas(true, false);
                 return true;
             }

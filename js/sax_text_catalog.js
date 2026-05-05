@@ -2,10 +2,10 @@ import { app } from "../../scripts/app.js";
 import {
     h, txt, getComfyTheme,
     makeItemListWidget,
-    captureOutputLinks, restoreOutputLinks,
     showDialog,
     showFilePicker,
 } from "./sax_ui_base.js";
+import { DynamicSlotCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME      = "SAX.TextCatalog";
 const NODE_TYPE     = "SAX_Bridge_Text_Catalog";
@@ -1310,42 +1310,82 @@ function drawRelationContent(ctx, state, relation, x, y, w, rowH, on = true) {
 // メインウィジェット
 // ---------------------------------------------------------------------------
 
+/**
+ * TextCatalog 用 DynamicSlotCoordinator を生成する。
+ * PrimitiveStore の ensureCoordinator と同パターン (Phase 1.2.B / Phase 9 で共通化検討)。
+ * relation 1 件 → output slot 1 件 (1:1) の output direction Coordinator。
+ * entityHints は TextCatalog では不使用。
+ */
+function ensureCoordinator(node) {
+    if (node._saxCoordinator) return node._saxCoordinator;
+    node._saxCoordinator = new DynamicSlotCoordinator(node, {
+        direction: "output",
+        getEntities: () => (node._textCatalogState ?? emptyState()).relations,
+        // syncOutputSlots 内の slot 名 / type 導出ロジックを 1:1 で再利用するため、
+        // ここでは name / type のプレースホルダを返すのみ (実際の name / type は
+        // syncSlotStructure 内の syncOutputSlots が relationStatus / resolveRelationLabel
+        // を使って書き込む)。Coordinator は slot 数のみを spec から読み取る。
+        entityToSlots: (_relation, _hints) => [{ name: "", type: "STRING" }],
+        syncSlotStructure: () => syncOutputSlots(node, node._textCatalogState ?? emptyState()),
+        setEntities: (newRelations) => {
+            const prev = node._textCatalogState ?? emptyState();
+            node._textCatalogState = { ...prev, relations: newRelations };
+        },
+    });
+    return node._saxCoordinator;
+}
+
 function makeCatalogWidget(node) {
     const getState = () => node._textCatalogState ?? emptyState();
-
-    const saveStateAndSync = (newState) => {
-        node._textCatalogState = newState;
-        restoreOutputLinks(node, newState.relations, () => syncOutputSlots(node, newState));
-    };
+    const coordinator = ensureCoordinator(node);
 
     const openManager = () => {
         showManagerDialog(node, getState, (draftCatalog) => {
             const state = getState();
-            // Save 直前に Canvas 上の最新リンク状態を state.relations[i]._links に取り込む。
-            // restoreOutputLinks は items[i]._links を再接続のソースとするため、
-            // ここで capture しないと「前回キャプチャ時点」の古い接続情報で上書き復元されてしまう
-            captureOutputLinks(node, state.relations);
-
-            // 削除された Item を参照する Relation の item_id を null に遷移させる
-            // （仕様: Item 削除時に該当 Relation は未割当状態に自動遷移）
             const validIds = new Set(draftCatalog.items.map(it => it.id));
+
+            // 変更対象 relation のみ新オブジェクト + 変更不要は元参照を引き継ぐ
+            // (entity identity 維持: WeakMap ベースの ID 採番が古い参照を保持しているため、
+            // 不必要に新オブジェクト化すると snapshot の id 解決が壊れる)。
+            // on 欠損補正 (NEW-LOW-2) は両分岐で対称に行う。
             const newRelations = state.relations.map(rel => {
-                // `on` は parseState で必ず補完されるが、外部経路から `on` 欠損の
-                // Relation が混入した場合のランタイム誤描画（OFF 扱い）を防ぐため、
-                // ここでも明示的に既定値を保証する。
-                const base = { ...rel, on: rel.on ?? true };
-                const updated = rel.item_id && !validIds.has(rel.item_id)
-                    ? { ...base, item_id: null }
-                    : base;
-                // _links は restoreOutputLinks のキーなので、新オブジェクトにも引き継ぐ
-                updated._links = rel._links;
-                return updated;
+                if (rel.item_id && !validIds.has(rel.item_id)) {
+                    return { ...rel, item_id: null, on: rel.on ?? true };
+                }
+                if (rel.on === undefined || rel.on === null) {
+                    return { ...rel, on: true };
+                }
+                return rel;
             });
-            const newState = {
-                catalog: draftCatalog,
-                relations: newRelations,
-            };
-            saveStateAndSync(newState);
+
+            // ロールバック対象を退避 (commitState 中の例外で catalog/relations が不整合になる可能性)
+            const oldCatalog = state.catalog;
+            const oldRelations = state.relations;
+
+            // catalog 先行更新: slot 名導出 (resolveRelationLabel) は catalog.items を参照するため、
+            // commitState の syncSlotStructure 呼出時点で新しい catalog が反映されている必要がある。
+            node._textCatalogState = { ...state, catalog: draftCatalog };
+
+            try {
+                // commitState で relations 差し替え + capture/restore + syncSlotStructure
+                coordinator.commitState(newRelations);
+            } catch (e) {
+                // atomic ロールバック: slot 数不変の場合は同期スコープで完結する
+                node._textCatalogState = {
+                    ...node._textCatalogState,
+                    catalog: oldCatalog,
+                    relations: oldRelations,
+                };
+                // ロールバック中の syncOutputSlots 例外を捕捉 (NEW3-MEDIUM-2)。
+                // 再例外時は abort せずログのみ。catalog/relations は既に復元済み、
+                // 次回 onConfigure の validIds fallback で救済される。
+                try {
+                    syncOutputSlots(node, node._textCatalogState);
+                } catch (rollbackError) {
+                    console.error("[TextCatalog] Rollback syncOutputSlots failed after commitState error:", rollbackError);
+                }
+                throw e;
+            }
         });
     };
     node._openTextCatalogManager = openManager;
@@ -1354,15 +1394,18 @@ function makeCatalogWidget(node) {
         widgetName: "__sax_text_catalog_widget",
         maxItems: MAX_RELATIONS,
         getItems: () => getState().relations,
-        saveItems: (newRelations) => {
-            const state = getState();
-            const newState = { ...state, relations: newRelations };
-            saveStateAndSync(newState);
-        },
-        beforeModify: (relations) => captureOutputLinks(node, relations),
+        // saveItems は makeItemListWidget が saveItemsCapturing / saveItemsValueOnly 未指定時に
+        // フォールバックとして呼ぶ可能性があるため残す。TextCatalog 自身の mutation 経路は
+        // beforeModify / saveItemsCapturing / saveItemsValueOnly のみ使用するため通常呼ばれない。
+        saveItems: (newRelations) => coordinator.applySaveOnly(newRelations),
+        // beforeModify 経由 (add/del/move): capture 済みスナップショットを使って restore まで行う。
+        saveItemsCapturing: (newRelations) => coordinator.applyAfterCapture(newRelations),
+        // beforeModify 非経由 (toggle/onPopup 内など): slot 構造不変、値のみ保存。
+        saveItemsValueOnly: (newRelations) => coordinator.applySaveOnly(newRelations),
+        beforeModify: () => coordinator.captureFromExisting(),
 
         // `hasToggle: true` により行頭 pill が描画され、クリックで `relation.on` がトグルされる。
-        // makeItemListWidget が saveItems を呼ぶため、syncOutputSlots / serializeState が連鎖実行される。
+        // pill toggle 経路 (sax_ui_base.js:1089) は saveItemsValueOnly 経由 (slot 構造不変)。
         hasToggle: true,
 
         params: [
@@ -1372,21 +1415,24 @@ function makeCatalogWidget(node) {
                 get: () => "",
                 format: () => "✎",
                 onPopup: (relation, _idx, _node) => {
-                    const state = getState();
-                    pickItemForRelation(state, relation.item_id, (selectedId) => {
-                        // 最新の Canvas 接続を _links に取り込む
-                        captureOutputLinks(node, state.relations);
-                        // 編集対象 relation を新しい配列で置換（イミュータブル）
-                        // 編集対象以外は元参照のため _links がそのまま引き継がれる。
-                        // 編集対象も _links を引き継ぐ（item_id だけ変更）
-                        const newRelations = state.relations.map(r => {
-                            if (r !== relation) return r;
-                            // `on` 欠損混入時の誤描画を防ぐため明示的に既定値を保証する。
-                            const updated = { ...r, item_id: selectedId, on: r.on ?? true };
-                            updated._links = r._links;
-                            return updated;
-                        });
-                        saveStateAndSync({ ...state, relations: newRelations });
+                    // picker 表示時の item_id を渡すが、確定時の relations は picker コールバック内で
+                    // 再取得する (picker 表示中に他経路で relations が変わった場合の stale closure 回避)。
+                    pickItemForRelation(getState(), relation.item_id, (selectedId) => {
+                        // 確定時点の最新 state を再取得 (stale closure 回避、CR/TR レビュー M-2 対応)。
+                        const currentState = getState();
+                        // picker 表示中に対象 relation が他経路で削除されていた場合は no-op で終わる。
+                        if (!currentState.relations.includes(relation)) return;
+                        // onPopup は makeItemListWidget の beforeModify 経路を通らないため、
+                        // capture/apply を利用側で明示的にペアにする (Phase 1.1 確定 API パターン)。
+                        coordinator.captureFromExisting();
+                        // 変更対象 relation のみ新オブジェクト、その他は元参照引き継ぎ
+                        // (entity identity 維持で WeakMap 上の snapshot id 解決を壊さない)。
+                        const newRelations = currentState.relations.map(r =>
+                            r === relation
+                                ? { ...r, item_id: selectedId, on: r.on ?? true }
+                                : r
+                        );
+                        coordinator.applyAfterCapture(newRelations);
                     });
                 },
             },
@@ -1402,17 +1448,14 @@ function makeCatalogWidget(node) {
         hasDelete:     true,
 
         addButton: {
-            // フレームワークから渡される items / saveItems は使用しない。
-            // captureOutputLinks → saveStateAndSync の順序保証と
-            // restoreOutputLinks 経由のリンク復元を、本ノード側で完結させるため。
+            // makeItemListWidget の add 経路に統一: フレームワーク側 beforeModify (capture)
+            // + saveItemsCapturing (applyAfterCapture) で動作。独自 capture / saveStateAndSync 直呼びは廃止。
             label: "+ Add Relation",
-            onAdd: (_n, _items, _save) => {
+            onAdd: (_n, _items, save) => {
                 const state = getState();
                 if (state.relations.length >= MAX_RELATIONS) return;
-                // 既存 relations の最新 Canvas 接続を保存（追加スロットには影響しない）
-                captureOutputLinks(node, state.relations);
                 const newRelations = [...state.relations, { item_id: null, on: true }];
-                saveStateAndSync({ ...state, relations: newRelations });
+                save(newRelations);
             },
         },
     });
@@ -1488,12 +1531,29 @@ app.registerExtension({
             this.addCustomWidget(makeCatalogWidget(this));
             this.size[0] = Math.max(this.size[0] ?? 0, 280);
 
+            // 削除済 Item を参照する relation の自動修復 (commitState 例外時 / 外部編集時の
+            // serialize 不整合 fallback、Plan 論点 4 v3 根拠 2)。
+            //
+            // in-place mutation は意図的: parseState の戻り値はこの onConfigure 内でのみ参照され、
+            // この時点では Coordinator の captureFromExisting (下の setTimeout(0)) が未実行のため
+            // WeakMap (#entityIds) には未登録。新オブジェクト置換で identity を切り替えるよりも
+            // 同一参照を維持するほうが、後続の captureFromExisting で採番される ID が
+            // 以降の mutate / applyAfterCapture 経路と一致して snapshot 解決が安定する。
+            const validItemIds = new Set(state.catalog.items.map(it => it.id));
+            for (const rel of state.relations) {
+                if (rel.item_id && !validItemIds.has(rel.item_id)) {
+                    rel.item_id = null;
+                }
+            }
+
             // 出力スロット同期は同期フェーズで実行（Node Collector 等の競合回避）
             syncOutputSlots(this, state);
 
-            // LiteGraph のリンク復元完了後に _links を記録
+            // LiteGraph のリンク復元完了後に Coordinator が現状接続を snapshot に取り込む。
+            // setTimeout(0) は LiteGraph link 復元完了待ち (PrimitiveStore L497-499 と同パターン)。
+            const coordinator = this._saxCoordinator;
             setTimeout(() => {
-                captureOutputLinks(this, state.relations);
+                coordinator.captureFromExisting();
             }, 0);
         };
 

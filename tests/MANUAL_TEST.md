@@ -394,3 +394,22 @@
 - [ ] **save**: managed 追加・scene 追加・currentScene 切替後に保存 → hidden JSON に状態反映 (P2-14)
 - [ ] **load**: 再読込で managed/scenes/currentScene 完全復元 (P2-14)
 - [ ] **legacy**: `legacy-fixture/18_toggle_manager.json` 読込 → エラーなし (P2-14)
+
+## M. UI Phase 1.2.A 検証 (TextCatalog Coordinator 移行)
+
+### M-1. TextCatalog clone smoke (workflows/text_catalog_clone_smoke.json)
+
+事前登録済み: items 2 件 (scene_a / scene_b) + relations 2 件 (両 ON、出力スロット 2 本想定)。
+
+- [ ] **load**: ワークフロー読込 → 出力スロットが 2 本生成され `_saxCoordinator` が onConfigure 経由で `captureFromExisting()` を実行 (リンク復元)
+- [ ] **clone**: ノード選択 → Ctrl+C / Ctrl+V で複製。複製先で別 `_saxCoordinator` instance が生成されることを Console から `node._saxCoordinator !== sourceNode._saxCoordinator` で確認
+- [ ] **toggle on clone**: 複製先で relation 1 (scene_a) の pill を OFF → ON にトグル → 出力リンクが維持される (`saveItemsValueOnly` 経路 = `applySaveOnly`)
+- [ ] **save / reload**: ワークフロー保存 → 再読込で source / clone 両方とも独立に復元される
+
+### M-2. TextCatalog invalid item_id recovery (workflows/text_catalog_invalid_item_id_recovery.json)
+
+事前登録済み: items 1 件 (`valid_id`) + relations 2 件 (`valid_id` + 削除済 `deleted_id`)。
+
+- [ ] **load**: ワークフロー読込 → onConfigure 内 validIds 再検証 fallback (`sax_text_catalog.js:1531-1536`) により `relations[1].item_id` が in-place で `null` 化される
+- [ ] **slot 表示**: 2 本目の出力スロット名が `(unset)` 表示 (slot 自体は削除されない仕様、`syncOutputSlots` の `relation.on === false` でも slot 保持と整合)
+- [ ] **no error**: コンソールにエラー表示なし

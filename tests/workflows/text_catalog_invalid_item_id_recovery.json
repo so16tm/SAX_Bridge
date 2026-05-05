@@ -1,0 +1,45 @@
+{
+  "id": "test-text-catalog-invalid-item-id-recovery",
+  "revision": 0,
+  "last_node_id": 2,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Text_Catalog",
+      "pos": [200, 200],
+      "size": [320, 220],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Text_Catalog" },
+      "title": "Text Catalog (invalid item_id recovery, Phase 1.2.A)",
+      "widgets_values": [
+        "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"valid_id\",\"name\":\"valid_text\",\"text\":\"a valid catalog item\",\"tags\":[\"positive\"]}],\"tag_definitions\":[\"positive\"]},\"relations\":[{\"item_id\":\"valid_id\",\"on\":true},{\"item_id\":\"deleted_id\",\"on\":true}]}"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "Note",
+      "pos": [580, 200],
+      "size": [380, 240],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "How to test (Phase 1.2.A NEW-HIGH-2 recovery)",
+      "widgets_values": [
+        "Phase 1.2.A NEW-HIGH-2 fallback (子プラン論点 4 v3 根拠 2):\n\n1. Load this workflow.\n2. The node has 2 relations: relation[0].item_id=\"valid_id\" (resolved), relation[1].item_id=\"deleted_id\" (catalog.items に存在しない).\n3. onConfigure 内 validIds 再検証 fallback (sax_text_catalog.js:1531-1536) により relation[1].item_id が in-place で null 化される。\n4. Verify: UI 上で relation 2 が \"(unset)\" 表示で invalid 状態にならないこと。\n5. syncOutputSlots 後に 2 番目の slot が \"(unset)\" 名で残ること (slot 自体は削除しない仕様)。"
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": { "ds": { "scale": 1, "offset": [0, 0] } },
+  "version": 0.4
+}
