@@ -7,6 +7,7 @@ import {
     captureOutputLinks, restoreOutputLinks,
     PRIMITIVE_TYPE_META, PRIMITIVE_BADGE_FALLBACK, PRIMITIVE_BADGE_TEXT_COLOR,
 } from "./sax_ui_base.js";
+import { DynamicSlotCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.PrimitiveStore";
 const NODE_TYPE = "SAX_Bridge_Primitive_Store";
@@ -258,12 +259,43 @@ function drawTypeBadge(ctx, item, x, midY, w, h) {
 // ウィジェット生成
 // ---------------------------------------------------------------------------
 
+/**
+ * PrimitiveStore 用 Coordinator を生成する。Phase 1.0 wrapper モードのため、
+ * captureLinksRaw / restoreLinksRaw に既存 captureOutputLinks / restoreOutputLinks を
+ * 渡している (これらフィールドは Phase 1.1 で削除予定)。
+ */
+function ensureCoordinator(node) {
+    if (node._saxCoordinator) return node._saxCoordinator;
+    node._saxCoordinator = new DynamicSlotCoordinator(node, {
+        direction:         "output",
+        getEntities:       () => node._primitiveItems ?? [],
+        entityToSlots:     (item) => [{
+            name: item.name,
+            type: OUTPUT_TYPE_MAP[item.type] ?? item.type,
+        }],
+        syncSlotStructure: () => syncOutputSlots(node, node._primitiveItems ?? []),
+        setEntities:       (newEntities) => { node._primitiveItems = newEntities; },
+        // Phase 1.0 wrapper フィールド (Phase 1.1 で削除予定)
+        captureLinksRaw:   (entities) => captureOutputLinks(node, entities),
+        restoreLinksRaw:   (entities, syncFn) => restoreOutputLinks(node, entities, syncFn),
+    });
+    return node._saxCoordinator;
+}
+
 function makeStoreWidget(node) {
     // node._primitiveItems を直接参照（クロージャの stale 回避）
     const getItems  = () => node._primitiveItems ?? [];
+    const coordinator = ensureCoordinator(node);
+
+    // makeItemListWidget の動作モデルは [beforeModify → in-place mutation → saveItems]。
+    // この 2 フェーズを Coordinator のトランザクションにマップする:
+    //   - beforeModify : captureFromExisting() で現状接続を内部スナップショットに記録
+    //   - saveItems    : applyAfterCapture(newItems) で配列差し替え + sync + restore
+    //
+    // Phase 1.1 で makeItemListWidget 自体を Coordinator 認識に書き換え、
+    // 2 フェーズを mutate(action) 1 個に畳む予定。applyAfterCapture は移行期限定 API。
     const saveItems = (newItems) => {
-        node._primitiveItems = newItems;
-        restoreOutputLinks(node, newItems, () => syncOutputSlots(node, newItems));
+        coordinator.applyAfterCapture(newItems);
     };
 
     return makeItemListWidget({
@@ -271,7 +303,7 @@ function makeStoreWidget(node) {
         maxItems:     MAX_ITEMS,
         getItems,
         saveItems,
-        beforeModify: (items) => captureOutputLinks(node, items),
+        beforeModify: () => coordinator.captureFromExisting(),
 
         leftElements: [
             {
@@ -377,14 +409,24 @@ function randomizeSeedsOnNodes(timing) {
         const items = node._primitiveItems;
         if (!items?.length) continue;
 
-        let changed = false;
-        for (const item of items) {
-            if (item.type === "SEED" && item.mode === "random" && item.timing === timing) {
-                item.value = randomSeed(item.max ?? 2 ** 53 - 1);
-                changed = true;
+        // SEED ランダム化は値のみ変更で slot 構造不変。Coordinator.mutate({ skipCapture: true })
+        // でトランザクション境界を明示しつつ capture/restore コストを避ける。
+        // coordinator は ensureCoordinator により onNodeCreated 時点で生成済み。
+        const coordinator = node._saxCoordinator;
+        const action = (entities) => {
+            for (const item of entities) {
+                if (item.type === "SEED" && item.mode === "random" && item.timing === timing) {
+                    item.value = randomSeed(item.max ?? 2 ** 53 - 1);
+                }
             }
+        };
+        if (coordinator) {
+            coordinator.mutate(action, { skipCapture: true });
+        } else {
+            // Coordinator 未生成のフォールバック (onNodeCreated 前のレース)
+            action(items);
+            syncOutputSlots(node, items);
         }
-        if (changed) syncOutputSlots(node, items);
     }
     app.canvas?.setDirty(true, true);
 }
@@ -461,9 +503,15 @@ app.registerExtension({
             // （setTimeout 内で Node Collector 側の connect 補完より後回しになる競合を回避）
             syncOutputSlots(this, items);
 
-            // LiteGraph のリンク復元完了後に _links を記録
+            // LiteGraph のリンク復元完了後に Coordinator 経由で snapshot を記録
+            // (Phase 1.0 wrapper: 内部で captureOutputLinks を呼ぶ)
+            const coordinator = this._saxCoordinator;
             setTimeout(() => {
-                captureOutputLinks(this, items);
+                if (coordinator) {
+                    coordinator.captureFromExisting();
+                } else {
+                    captureOutputLinks(this, items);
+                }
             }, 0);
         };
     },
