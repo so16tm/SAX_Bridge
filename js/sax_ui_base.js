@@ -1147,7 +1147,7 @@ export function makeItemListWidget(spec) {
  *   modifySource:  function,  — (node, srcIdx, updater) source 変更+rebuild+下流リンク復元
  * }}
  */
-export function makeSourceListWidget(spec) {
+export function makeSourceListWidget(spec, coordinator) {
     const {
         widgetName,
         serializeKey,
@@ -1185,6 +1185,11 @@ export function makeSourceListWidget(spec) {
     }
     if (hasOutputSlots && typeof buildOutputSlots !== "function") {
         throw new Error(`makeSourceListWidget [${widgetName}]: hasOutputSlots=true の場合 buildOutputSlots は必須です`);
+    }
+    // Phase 1.2.B 以降: 3 Collector ノード同時移行 (TODO 4) で coordinator は必須化された。
+    // capture/restore を Coordinator が一括管理するため未指定では契約破綻。
+    if (!coordinator) {
+        throw new Error(`makeSourceListWidget [${widgetName}]: coordinator は必須です`);
     }
 
     // ----------------------------------------------------------------
@@ -1248,6 +1253,7 @@ export function makeSourceListWidget(spec) {
     // 下流リンク保存（hasOutputSlots 時）
     // ----------------------------------------------------------------
 
+    // TODO(Phase 1.2.B TODO 6): TODO 4 (3 Collector 移行) 完了後に利用箇所 0、TODO 6 で削除予定
     function _captureDownstream(node) {
         if (!hasOutputSlots) return [];
         const sources     = _getSources(node);
@@ -1276,6 +1282,7 @@ export function makeSourceListWidget(spec) {
         return downstream;
     }
 
+    // TODO(Phase 1.2.B TODO 6): TODO 4 (3 Collector 移行) 完了後に利用箇所 0、TODO 6 で削除予定
     function _restoreDownstream(node, downstream) {
         if (!hasOutputSlots || !downstream.length) return;
         for (const ds of downstream) {
@@ -1309,8 +1316,9 @@ export function makeSourceListWidget(spec) {
     // ソース操作
     // ----------------------------------------------------------------
 
-    function addSource(collectorNode, srcNode) {
-        const sources   = collectorNode._remoteSources ?? [];
+    // Coordinator トランザクション (mutate) の内側で呼ぶための「素」の追加処理。
+    // capture/restore は外側の mutate に任せるため、ここでは何もしない。
+    function _addSourceInner(collectorNode, srcNode) {
         const offset    = _getTotalSlotCount(collectorNode);
         const remaining = maxSlots - offset;
         if (remaining <= 0) return;
@@ -1326,6 +1334,7 @@ export function makeSourceListWidget(spec) {
 
         src.sig = _sourceSignature(srcNode);
 
+        const sources   = collectorNode._remoteSources ?? [];
         const physCount = getSlotCount(src);
         for (let li = 0; li < physCount; li++) {
             collectorNode.addInput(`slot_${offset + li}`, "*");
@@ -1333,17 +1342,23 @@ export function makeSourceListWidget(spec) {
                 try { buildOutputSlots(src, offset + li, li, collectorNode); } catch (e) { console.warn(`[${widgetName}] buildOutputSlots error:`, e); }
             }
         }
-
         try {
             connectSource(srcNode, src, collectorNode, offset);
         } catch (e) {
             console.warn(`[${widgetName}] connectSource error:`, e);
         }
-
         sources.push(src);
         collectorNode._remoteSources = sources;
+    }
 
-        _syncSlotLabels(collectorNode);
+    function addSource(collectorNode, srcNode) {
+        // Coordinator 経由で capture → action (構造変更 + connectSource + sources push)
+        // → syncSlotStructure → restore を一括管理する。
+        coordinator.mutate(() => {
+            _addSourceInner(collectorNode, srcNode);
+            _syncSlotLabels(collectorNode);
+        });
+
         applyLinkVisibility(collectorNode);
         _autoResize(collectorNode);
     }
@@ -1355,66 +1370,108 @@ export function makeSourceListWidget(spec) {
         const offset    = _getOffset(node, idx);
         const physCount = getSlotCount(sources[idx]);
 
-        unhideSourceLinks(node);
-        for (let i = offset + physCount - 1; i >= offset; i--) {
-            const linkId = node.inputs[i]?.link;
-            if (linkId != null) app.graph.removeLink(linkId);
-            if (hasOutputSlots) node.removeOutput(i);
-            node.removeInput(i);
-        }
-        sources.splice(idx, 1);
-        node._remoteSources = sources;
+        // Coordinator が capture/restore を内蔵し、削除 entity の snapshot は
+        // partial restore semantics により自動的に skip される。
+        coordinator.mutate(() => {
+            unhideSourceLinks(node);
+            for (let i = offset + physCount - 1; i >= offset; i--) {
+                const linkId = node.inputs[i]?.link;
+                if (linkId != null) app.graph.removeLink(linkId);
+                if (hasOutputSlots) node.removeOutput(i);
+                node.removeInput(i);
+            }
+            const cur = node._remoteSources ?? [];
+            cur.splice(idx, 1);
+            node._remoteSources = cur;
 
-        for (const [id] of _hiddenLinkIds) {
-            if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
-        }
+            for (const [id] of _hiddenLinkIds) {
+                if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
+            }
 
-        _syncSlotLabels(node);
+            _syncSlotLabels(node);
+        });
+
         applyLinkVisibility(node);
         _autoResize(node);
         app.canvas?.setDirty(true, false);
     }
 
-    function rebuildAllSources(node, preDownstream = null) {
-        const savedSources = [..._getSources(node)];
-        const autoHints = hasOutputSlots && !node._rebuildHints;
-        if (autoHints) {
-            node._rebuildHints = new Map(
-                savedSources.map(s => [s.sourceId, { enabledSlots: s.enabledSlots, slotCount: s.slotCount }])
-            );
-        }
-        const downstream = preDownstream ?? _captureDownstream(node);
+    function rebuildAllSources(node) {
+        // Coordinator が capture/restore を内蔵するため preDownstream 引数は撤廃。
+        // entityHints の Coordinator 伝達 (mutate(action, { entityHints })) は TODO 4 で
+        // NodeCollector の _applySlotSelection 経由化と一体実装する。Image/Pipe Collector は
+        // hints を使わないため TODO 3 段階での未渡しは動作影響なし。
+        coordinator.mutate(() => {
+            const savedSources = [..._getSources(node)];
+            const autoHints = hasOutputSlots && !node._rebuildHints;
+            if (autoHints) {
+                node._rebuildHints = new Map(
+                    savedSources.map(s => [s.sourceId, { enabledSlots: s.enabledSlots, slotCount: s.slotCount }])
+                );
+            }
 
-        unhideSourceLinks(node);
-        for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
-            const linkId = node.inputs[i]?.link;
-            if (linkId != null) app.graph.removeLink(linkId);
-            node.removeInput(i);
-        }
-        if (hasOutputSlots) {
-            for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
-        }
-        node._remoteSources = [];
+            unhideSourceLinks(node);
+            for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
+                const linkId = node.inputs[i]?.link;
+                if (linkId != null) app.graph.removeLink(linkId);
+                node.removeInput(i);
+            }
+            if (hasOutputSlots) {
+                for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
+            }
+            node._remoteSources = [];
 
-        for (const src of savedSources) {
-            const srcNode = app.graph.getNodeById(src.sourceId);
-            if (srcNode) addSource(node, srcNode);
-        }
+            for (const src of savedSources) {
+                const srcNode = app.graph.getNodeById(src.sourceId);
+                if (srcNode) _addSourceInner(node, srcNode);
+            }
 
-        _restoreDownstream(node, downstream);
-        if (autoHints) node._rebuildHints = null;
+            _syncSlotLabels(node);
+            if (autoHints) node._rebuildHints = null;
+        });
     }
 
     function swapSources(node, si, sj) {
-        const sources    = _getSources(node);
-        const downstream = _captureDownstream(node);
-        [sources[si], sources[sj]] = [sources[sj], sources[si]];
-        rebuildAllSources(node, downstream);
+        // Coordinator 経由で capture → swap + rebuild → restore。二重 capture を解消。
+        // entityHints の Coordinator 伝達は TODO 4 で NodeCollector 移行と一体実装 (rebuildAllSources と同方針)。
+        coordinator.mutate(() => {
+            const sources = _getSources(node);
+            [sources[si], sources[sj]] = [sources[sj], sources[si]];
+
+            // 順序入れ替え後、現状の sources 配列をそのまま再構築する (rebuildAllSources の内側処理を inline)。
+            const savedSources = [...sources];
+            const autoHints = hasOutputSlots && !node._rebuildHints;
+            if (autoHints) {
+                node._rebuildHints = new Map(
+                    savedSources.map(s => [s.sourceId, { enabledSlots: s.enabledSlots, slotCount: s.slotCount }])
+                );
+            }
+            unhideSourceLinks(node);
+            for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
+                const linkId = node.inputs[i]?.link;
+                if (linkId != null) app.graph.removeLink(linkId);
+                node.removeInput(i);
+            }
+            if (hasOutputSlots) {
+                for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
+            }
+            node._remoteSources = [];
+            for (const src of savedSources) {
+                const srcNode = app.graph.getNodeById(src.sourceId);
+                if (srcNode) _addSourceInner(node, srcNode);
+            }
+            _syncSlotLabels(node);
+            if (autoHints) node._rebuildHints = null;
+        });
+
         applyLinkVisibility(node);
         _autoResize(node);
         app.canvas?.setDirty(true, false);
     }
 
+    // NOTE(Phase 1.2.B): resetAllSources は Coordinator.mutate を経由していない。
+    // 現状利用は hasOutputSlots=true 経路では発生しないが、TODO 4 で NodeCollector が
+    // hasOutputSlots=true で Coordinator 移行する際に再評価し、必要なら mutate ラップ化する。
     function resetAllSources(node) {
         for (const [id] of _hiddenLinkIds) {
             if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
@@ -1478,8 +1535,11 @@ export function makeSourceListWidget(spec) {
                 }
             }
             if (sigChangedDetected) {
-                const ds = _captureDownstream(drawNode);
-                setTimeout(() => rebuildAllSources(drawNode, ds), 0);
+                // Coordinator が capture/restore を内蔵するため _captureDownstream 直呼びを撤廃。
+                // draw コールバック内で同期 mutate 不可のため setTimeout(0) で次タスクに送る。
+                // Coordinator 内でスロット数変動時にさらに setTimeout(0) が走る二重ネストになるが、
+                // JS シングルスレッド実行モデル上 race は発生せず設計上許容 (SR レビュー確認済)。
+                setTimeout(() => rebuildAllSources(drawNode), 0);
                 return;
             }
 
@@ -1728,12 +1788,14 @@ export function makeSourceListWidget(spec) {
         }, 0);
     }
 
+    // updater は coordinator.mutate トランザクション外で実行される。
+    // capture は rebuildAllSources(→ coordinator.mutate) 先頭で updater 実行後の sources
+    // を基準に取得するため、呼出元で追加の coordinator.mutate ラップは不要 (二重 mutate を避ける)。
     function modifySource(node, srcIdx, updater) {
         const sources = _getSources(node);
         if (srcIdx < 0 || srcIdx >= sources.length) return;
-        const downstream = _captureDownstream(node);
         try { updater(sources[srcIdx]); } catch (e) { console.warn(`[${widgetName}] modifySource updater error:`, e); return; }
-        rebuildAllSources(node, downstream);
+        rebuildAllSources(node);
     }
 
     return {
