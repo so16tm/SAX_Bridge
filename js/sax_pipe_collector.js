@@ -1,16 +1,18 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
 import { makeSourceListWidget, ensureRenderLinkPatch } from "./sax_ui_base.js";
+import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.PipeCollector";
 const NODE_TYPE = "SAX_Bridge_Pipe_Collector";
 const MAX_SLOTS = 16;   // Python 側 MAX_SLOTS と合わせる
 
 // ---------------------------------------------------------------------------
-// makeSourceListWidget によるソースリストウィジェット構築
+// makeSourceListWidget の spec (coordinator はノードごとに別個のため、
+// onNodeCreated 内で makeSourceListWidget(spec, coordinator) を呼ぶ)
 // ---------------------------------------------------------------------------
 
-const SOURCE = makeSourceListWidget({
+const SOURCE_SPEC = {
     widgetName:  "__sax_pipe_collector",
     serializeKey: "sax_pipe_collector",
     maxSlots:    MAX_SLOTS,
@@ -60,7 +62,22 @@ const SOURCE = makeSourceListWidget({
     getOffset(_sources, srcIdx) {
         return srcIdx;
     },
-});
+};
+
+// Pipe_Collector は実質 1:1 (slotCount=1 固定) だが、API は 1:N で統一。
+// hasOutputSlots=false のため Coordinator の output 側 capture は no-op に近いが、
+// mutate() トランザクション化により _captureDownstream 削除 (TODO 6) 後の既存挙動を維持。
+function buildSpec(node) {
+    return {
+        direction:         "output",
+        getEntities:       () => node._remoteSources ?? [],
+        setEntities:       (newSources) => { node._remoteSources = newSources; },
+        entityToSlots:     (_src) => [{ name: "PIPE", type: "PIPE_LINE" }],
+        syncSlotStructure: () => {},
+        resolveLocalSlotBySlotName: null,
+        resolveLocalSlotByGlobalIdx: null,
+    };
+}
 
 // ---------------------------------------------------------------------------
 // 拡張登録
@@ -80,7 +97,11 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             origOnNodeCreated?.apply(this, arguments);
             for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
-            SOURCE.onNodeCreated.call(this);
+
+            const coordinator = ensureCoordinator(this, buildSpec);
+            this._saxSourceWidget = makeSourceListWidget(SOURCE_SPEC, coordinator);
+            this._saxSourceWidget.onNodeCreated.call(this);
+
             this.size[0] = Math.max(this.size[0], 280);
             this.size[1] = 1;
         };
@@ -88,13 +109,13 @@ app.registerExtension({
         const origOnSerialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (data) {
             origOnSerialize?.apply(this, arguments);
-            SOURCE.onSerialize.call(this, data);
+            this._saxSourceWidget?.onSerialize.call(this, data);
         };
 
         const origOnConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (data) {
             origOnConfigure?.apply(this, arguments);
-            SOURCE.onConfigure.call(this, data);
+            this._saxSourceWidget?.onConfigure.call(this, data);
         };
     },
 });

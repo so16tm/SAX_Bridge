@@ -1,16 +1,18 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
 import { makeSourceListWidget, ensureRenderLinkPatch, showDialog, h } from "./sax_ui_base.js";
+import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.NodeCollector";
 const NODE_TYPE = "SAX_Bridge_Node_Collector";
 const MAX_SLOTS = 32;   // Python 側 MAX_SLOTS と合わせる
 
 // ---------------------------------------------------------------------------
-// makeSourceListWidget によるソースリストウィジェット構築
+// makeSourceListWidget の spec (coordinator はノードごとに別個のため、
+// onNodeCreated 内で makeSourceListWidget(spec, coordinator) を呼ぶ)
 // ---------------------------------------------------------------------------
 
-const SOURCE = makeSourceListWidget({
+const SOURCE_SPEC = {
     widgetName:    "__sax_node_collector",
     serializeKey:  "sax_node_collector",
     maxSlots:      MAX_SLOTS,
@@ -25,7 +27,8 @@ const SOURCE = makeSourceListWidget({
         const allCount   = Math.min(srcOutputs.length, MAX_SLOTS, remaining);
         if (allCount === 0) return null;
 
-        // rebuildAllSources 時: 一時ヒントがあれば旧 enabledSlots を引き継ぐ
+        // rebuildAllSources 時: 一時ヒントがあれば旧 enabledSlots を引き継ぐ。
+        // hints は rebuildAllSources / swapSources の auto-hints (sax_ui_base.js) 経由で設定される。
         const hint = collectorNode._rebuildHints?.get(srcNode.id);
         let enabledSlots;
         if (hint?.enabledSlots) {
@@ -171,14 +174,58 @@ const SOURCE = makeSourceListWidget({
 
         return sources;
     },
-});
+};
+
+// Coordinator spec。NodeCollector は hasOutputSlots=true で下流出力リンクの
+// capture/restore が実体を持つ (Image/Pipe Collector と異なる)。enabledSlots 編集後
+// の restore で 段階1 (slotName) → 段階2 (globalSlotIdx) → 段階3 (skip) の fallback を
+// 提供することで、出力スロット順序や enabledSlots 変動でも下流リンクを維持する。
+function buildSpec(node) {
+    return {
+        direction:   "output",
+        getEntities: () => node._remoteSources ?? [],
+        setEntities: (newSources) => { node._remoteSources = newSources; },
+        // hints (entityHints) は sourceId をキーとする Map。framework
+        // (sax_ui_base.js:1408,1445) の rebuildAllSources auto-hints も
+        // node._rebuildHints に同形式で設定する。entityHints が未指定経路
+        // (rebuildAllSources 直接呼出) では node._rebuildHints をフォールバック参照する。
+        // framework auto-hints の例外時 cleanup 不足は別 Issue で対応予定。
+        entityToSlots: (src, hints) => {
+            const hint = hints?.get?.(src?.sourceId)
+                ?? node._rebuildHints?.get?.(src?.sourceId);
+            const enabled = hint?.enabledSlots ?? src?.enabledSlots
+                ?? Array.from({ length: src?.slotCount ?? 0 }, (_, i) => i);
+            const slotNames = src?.slotNames ?? [];
+            const slotTypes = src?.slotTypes ?? [];
+            return enabled.map((gi, li) => ({
+                name: slotNames[gi] || `out_${li}`,
+                type: slotTypes[gi] || "*",
+            }));
+        },
+        // 構造同期は makeSourceListWidget 内 (action 内 _syncSlotLabels) で完結。
+        syncSlotStructure: () => {},
+
+        // 段階1: slotName → globalSlotIdx (slotNames.indexOf) → enabledSlots.indexOf → localSlotIdx
+        resolveLocalSlotBySlotName: (entity, slotName) => {
+            const globalIdx = entity?.slotNames?.indexOf(slotName) ?? -1;
+            if (globalIdx < 0) return null;
+            const localIdx = entity?.enabledSlots?.indexOf(globalIdx) ?? -1;
+            return localIdx >= 0 ? localIdx : null;
+        },
+        // 段階2: globalSlotIdx → enabledSlots.indexOf → localSlotIdx
+        resolveLocalSlotByGlobalIdx: (entity, globalSlotIdx) => {
+            const localIdx = entity?.enabledSlots?.indexOf(globalSlotIdx) ?? -1;
+            return localIdx >= 0 ? localIdx : null;
+        },
+    };
+}
 
 // ---------------------------------------------------------------------------
 // スロット選択ダイアログ
 // ---------------------------------------------------------------------------
 
 function showSlotSelectDialog(node, si) {
-    const sources = SOURCE.getSources(node);
+    const sources = node._saxSourceWidget?.getSources(node) ?? [];
     const src     = sources[si];
     if (!src) return;
 
@@ -282,29 +329,16 @@ function showSlotSelectDialog(node, si) {
 // ---------------------------------------------------------------------------
 // スロット選択の適用
 //
-// modifySource は内部で rebuildAllSources を呼ぶ。その際に buildSource が
-// 呼ばれるため、_rebuildHints に全ソースの旧 enabledSlots を保持しておき、
-// buildSource 内でスロット数変化に対応しながら引き継げるようにする。
+// node._rebuildHints の手動設定は撤廃済み (Phase 1.2.B TODO 4)。
+// modifySource → coordinator.mutate トランザクション内で src.enabledSlots 更新 +
+// framework auto-hints が走り、下流リンクは段階1/2 fallback で復元される。
 // ---------------------------------------------------------------------------
 
 function _applySlotSelection(node, si, newEnabledSlots) {
-    const allSources = SOURCE.getSources(node);
     const sorted = [...newEnabledSlots].sort((a, b) => a - b);
-    node._rebuildHints = new Map(
-        allSources.map((s, i) => [
-            s.sourceId,
-            i === si
-                ? { enabledSlots: sorted, slotCount: s.slotCount }
-                : { enabledSlots: s.enabledSlots, slotCount: s.slotCount },
-        ])
-    );
-    try {
-        SOURCE.modifySource(node, si, (src) => {
-            src.enabledSlots = sorted;
-        });
-    } finally {
-        node._rebuildHints = null;
-    }
+    node._saxSourceWidget?.modifySource(node, si, (src) => {
+        src.enabledSlots = sorted;
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -327,7 +361,11 @@ app.registerExtension({
             // 出力・入力の両方を JS で動的管理するため Python 定義スロットをクリア
             for (let i = (this.outputs?.length ?? 0) - 1; i >= 0; i--) this.removeOutput(i);
             for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
-            SOURCE.onNodeCreated.call(this);
+
+            const coordinator = ensureCoordinator(this, buildSpec);
+            this._saxSourceWidget = makeSourceListWidget(SOURCE_SPEC, coordinator);
+            this._saxSourceWidget.onNodeCreated.call(this);
+
             this.size[0] = Math.max(this.size[0], 320);
             this.size[1] = 1;
         };
@@ -335,13 +373,13 @@ app.registerExtension({
         const origOnSerialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (data) {
             origOnSerialize?.apply(this, arguments);
-            SOURCE.onSerialize.call(this, data);
+            this._saxSourceWidget?.onSerialize.call(this, data);
         };
 
         const origOnConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (data) {
             origOnConfigure?.apply(this, arguments);
-            SOURCE.onConfigure.call(this, data);
+            this._saxSourceWidget?.onConfigure.call(this, data);
         };
     },
 });
