@@ -1,7 +1,15 @@
-// DynamicSlotCoordinator — Phase 1.2.A.0
+// DynamicSlotCoordinator — Phase 1.2.B
 //
 // 動的スロットの mutation トランザクション (capture → action → sync → restore) を
 // 集約する Coordinator API。
+//
+// Phase 1.2.B での変更:
+// - direction="output" 1:N 対応 (#captureSnapshots / #restoreFromSnapshots / #computeBaseOffset 経由)
+// - snapshot 構造拡張: { targetId, targetSlot, globalSlotIdx, slotName, localSlotIdx } (旧 _captureDownstream 完全踏襲)
+// - 段階1/段階2/段階3 fallback restore (spec.resolveLocalSlotBySlotName / spec.resolveLocalSlotByGlobalIdx 経由)
+// - atomic rollback (#snapshotNodeState / #restoreNodeState) for action 内例外時 best-effort link 復元
+// - asyncScheduled フラグベースの try/finally cleanup
+// - ensureCoordinator(node, specFactory, key?) 共通ヘルパ export 追加
 //
 // Phase 1.2.A.0 での変更:
 // - applyAfterCapture の非同期パスで #hints 退避・復元実装 (CR-MEDIUM-1 / TR-MEDIUM-1 解消、mutate と完全対称化)
@@ -12,8 +20,10 @@
 //   applyAfterCapture の wrapper 分岐) を削除
 //
 // 参照プラン:
-// - docs/plans/20260506-ui-phase1-1-coordinator-api-freeze.md (TODO 4)
-// - docs/plans/20260504-ui-phase1-0-coordinator-prototype.md (子プラン)
+// - docs/plans/20260506-ui-phase1-2b-nodecollector-migration.md (本子プラン)
+// - docs/plans/20260506-ui-phase1-2a-textcatalog-migration.md (Phase 1.2.A)
+// - docs/plans/20260506-ui-phase1-1-coordinator-api-freeze.md (Phase 1.1)
+// - docs/plans/20260504-ui-phase1-0-coordinator-prototype.md (Phase 1.0)
 // - docs/plans/20260503-ui-architecture-overhaul.md (親プラン)
 
 /**
@@ -36,6 +46,18 @@
  * @property {(newEntities: object[]) => void} [setEntities]
  *           commitState / applyAfterCapture / applySaveOnly で entity 配列全体を差し替えるための setter。
  *           利用側で `node._primitiveItems = newEntities` のような差し替えを行う。
+ * @property {(entity: object, slotName: string) => (number | null)} [resolveLocalSlotBySlotName]
+ *           Phase 1.2.B 追加 (output 1:N 段階1 fallback)。entity と slotName から localSlotIdx を返す。
+ *           NodeCollector では `slotNames.indexOf(slotName) → enabledSlots.indexOf(globalIdx) → localIdx` を実装。
+ *           1:1 ノード (PrimitiveStore / TextCatalog) や enabledSlots 編集機能なしの Collector (Image / Pipe) では
+ *           null 採用で段階1 を skip する (旧 _restoreDownstream L1287-1293 と互換)。
+ *           本フィールド自体を `null` / `undefined` のままにすると段階3 fallback 経路に倒れる。
+ * @property {(entity: object, globalSlotIdx: number) => (number | null)} [resolveLocalSlotByGlobalIdx]
+ *           Phase 1.2.B 追加 (output 1:N 段階2 fallback)。entity と globalSlotIdx から localSlotIdx を返す。
+ *           NodeCollector では `enabledSlots.indexOf(globalSlotIdx)` を実装。
+ *           1:1 ノードや Collector (Image / Pipe) では null 採用で段階2 を skip する
+ *           (旧 _restoreDownstream L1294-1297 と互換)。
+ *           本フィールド自体を `null` / `undefined` のままにすると段階3 fallback 経路に倒れる。
  */
 
 /**
@@ -64,7 +86,20 @@ export class DynamicSlotCoordinator {
 
     /**
      * 内部 ID → 接続情報スナップショット。mutate トランザクション内のみ生存。
-     * @type {Map<number, Array<{ targetId: number, targetSlot: number }>>}
+     *
+     * Phase 1.2.B 拡張: 1:N 対応のため `globalSlotIdx` / `slotName` / `localSlotIdx` を追加保持。
+     * 1:1 ノード (PrimitiveStore / TextCatalog) では `localSlotIdx === 0`、`globalSlotIdx === 0`、
+     * `slotName === outputs[entityIdx].name` となる (segregator 関数経由の復元で互換維持)。
+     *
+     * 旧 `_captureDownstream` (sax_ui_base.js:1265-1272) のフィールド構成と完全一致:
+     *   sourceId      → entityId (Coordinator 内部 ID)
+     *   globalSlotIdx → src.enabledSlots?.[li] ?? li
+     *   outName       → out.label ?? out.name ?? null  (slotName と命名統一)
+     *   localSlot     → li (localSlotIdx と命名統一)
+     *   targetId      → lnk.target_id
+     *   targetSlot    → lnk.target_slot
+     *
+     * @type {Map<number, Array<{ targetId: number, targetSlot: number, globalSlotIdx: number | null, slotName: string | null, localSlotIdx: number }>>}
      */
     #linkSnapshots = new Map();
 
@@ -119,38 +154,48 @@ export class DynamicSlotCoordinator {
         // capture: action 前のスロット数と接続スナップショットを記録
         const entitiesBefore = this.#spec.getEntities();
         const slotCountBefore = this.#getSlotCount();
-        this.#captureSnapshots(entitiesBefore);
 
+        // hints は #captureSnapshots / #computeBaseOffset で entityToSlots(entity, hints) に
+        // 渡されるため、capture 前に設定する必要がある (Phase 1.2.B: 1:N entityToSlots は
+        // hints 経由で slot 数を変える可能性がある)。
         this.#hints = options.entityHints ?? null;
 
-        // action 実行 + syncSlotStructure
+        this.#captureSnapshots(entitiesBefore);
+
+        // atomic rollback 用の pre-action 構造スナップショット (Phase 1.2.B 戦略 β)。
+        // action 内例外時に node.inputs/outputs/links を best-effort 復元する。
+        const preState = this.#snapshotNodeState();
+
         const capturedEntityIds = this.#collectCapturedIds(entitiesBefore);
-        let didScheduleAsync = false;
+        // asyncScheduled フラグ: 非同期 restore がスケジュールされたか。
+        // 早期 return / 同期 restore / 非同期 restore / 例外 の 4 経路で
+        // #linkSnapshots / #hints cleanup の二重実行・漏れを防ぐ。
+        let asyncScheduled = false;
         // 非同期 restore に切り替わるケースで、setTimeout コールバックが完了するまで
         // #hints を生存させる必要があるため、同期スコープでローカル変数に退避する。
         const hintsForAsync = this.#hints;
 
-        // action 例外時は link 復元情報を保持したまま hints のみクリアして再スロー (CR-2-M1)
-        let actionError = null;
+        // cleanup 経路 (asyncScheduled フラグで一元管理):
+        // - 早期 return (skipCapture): #runSkipCapture が cleanup 不要 (snapshot 未取得)
+        // - 同期 restore 成功: #restoreFromSnapshots 内で #linkSnapshots cleanup 完了
+        // - 非同期 restore (setTimeout(0)): 内側の finally で cleanup
+        // - action 内例外: outer catch で #restoreNodeState → outer finally で cleanup
+        // - #captureSnapshots 内例外: 内側 try/finally で partial cleanup 済 → outer finally は空振り (実害なし)
         try {
-            action(this.#spec.getEntities());
-        } catch (e) {
-            actionError = e;
-        }
+            // action 実行。例外時は atomic rollback を試行してから rethrow。
+            try {
+                action(this.#spec.getEntities());
+            } catch (actionError) {
+                this.#restoreNodeState(preState);
+                throw actionError;
+            }
 
-        if (actionError !== null) {
-            this.#hints = null;
-            throw actionError;
-        }
-
-        try {
-            // 内蔵実装パス
             this.#spec.syncSlotStructure();
             const slotCountAfter = this.#getSlotCount();
             const slotCountChanged = slotCountAfter !== slotCountBefore;
 
             if (slotCountChanged) {
-                didScheduleAsync = true;
+                asyncScheduled = true;
                 setTimeout(() => {
                     this.#hints = hintsForAsync;
                     try {
@@ -164,9 +209,9 @@ export class DynamicSlotCoordinator {
                 this.#restoreFromSnapshots();
             }
         } finally {
-            // 同期 restore 経路ではこの finally で #hints をクリアし snapshot cleanup する。
-            // 非同期 restore 経路 (didScheduleAsync=true) では setTimeout コールバック側で行う。
-            if (!didScheduleAsync) {
+            // 同期 restore 経路 / 例外経路ではこの finally で cleanup する。
+            // 非同期 restore 経路では setTimeout コールバック側で行う。
+            if (!asyncScheduled) {
                 this.#hints = null;
                 for (const id of capturedEntityIds) this.#cleanupSnapshot(id);
             }
@@ -387,34 +432,57 @@ export class DynamicSlotCoordinator {
     }
 
     /**
-     * 1:1 (PrimitiveStore) を前提とした現状スロット接続のスナップショット記録。
-     * direction に応じて outputs / inputs 側を読み出す。Phase 1.0 では PrimitiveStore のみ
-     * 想定するため 1:N (NodeCollector の enabledSlots) は Phase 1.1 で対応する。
+     * 現状スロット接続のスナップショット記録 (output direction、1:1 / 1:N 両対応)。
+     * Phase 1.2.B で旧 `_captureDownstream` (sax_ui_base.js:1251-1278) のロジックを移植。
+     *
+     * 各 entity について `entityToSlots(entity, hints).length` 個の slot を baseOffset から走査し、
+     * 各 slot の links を `{ targetId, targetSlot, globalSlotIdx, slotName, localSlotIdx }` 形式で snapshot。
+     * `slotName` は `outputs[absIdx].label ?? outputs[absIdx].name ?? null`、`globalSlotIdx` は
+     * `entityToSlots` 戻り値の対応エントリから (1:1 ノードは `null`、NodeCollector は entity.enabledSlots[localIdx])。
      *
      * @param {object[]} entities
      */
     #captureSnapshots(entities) {
         if (this.#spec.direction !== "output") {
-            // input 方向は Phase 1.1 以降で実装。現状は capture/restore せずに通過させる。
+            // input 方向は別 Phase で実装。現状は capture/restore せずに通過させる。
             return;
         }
         const outputs = this.#node.outputs ?? [];
-        const graphLinks = globalThis.app?.graph?.links ?? null;
+        const graphLinks = this.#node.graph?.links ?? globalThis.app?.graph?.links ?? null;
         // 防御コード (NEW3-MEDIUM-1): ループ途中例外時に部分書込みスナップショットを cleanup する。
         const writtenIds = [];
         try {
-            for (let i = 0; i < entities.length; i++) {
-                const entity = entities[i];
+            let baseOffset = 0;
+            for (let entityIdx = 0; entityIdx < entities.length; entityIdx++) {
+                const entity = entities[entityIdx];
                 const id = this.#getOrCreateId(entity);
-                const slot = outputs[i];
-                const linkIds = slot?.links ?? [];
+                const slots = this.#spec.entityToSlots(entity, this.#hints) ?? [];
                 const conns = [];
-                for (const linkId of linkIds) {
-                    const link = graphLinks?.[linkId];
-                    if (link) conns.push({ targetId: link.target_id, targetSlot: link.target_slot });
+                for (let localSlotIdx = 0; localSlotIdx < slots.length; localSlotIdx++) {
+                    const absIdx = baseOffset + localSlotIdx;
+                    const slot = outputs[absIdx];
+                    const linkIds = slot?.links ?? [];
+                    if (!linkIds.length) continue;
+                    // slotName: 旧 _captureDownstream L1268 と同じく label > name の優先順位
+                    const slotName = slot?.label ?? slot?.name ?? null;
+                    // globalSlotIdx: 1:N ノードでは entity.enabledSlots[localSlotIdx] (NodeCollector)、
+                    // 1:1 ノードでは null (段階2 fallback skip)
+                    const globalSlotIdx = entity?.enabledSlots?.[localSlotIdx] ?? null;
+                    for (const linkId of linkIds) {
+                        const link = graphLinks?.[linkId];
+                        if (!link) continue;
+                        conns.push({
+                            targetId: link.target_id,
+                            targetSlot: link.target_slot,
+                            globalSlotIdx,
+                            slotName,
+                            localSlotIdx,
+                        });
+                    }
                 }
                 this.#linkSnapshots.set(id, conns);
                 writtenIds.push(id);
+                baseOffset += slots.length;
             }
         } catch (e) {
             for (const id of writtenIds) this.#cleanupSnapshot(id);
@@ -423,16 +491,32 @@ export class DynamicSlotCoordinator {
     }
 
     /**
-     * #linkSnapshots に記録された接続を復元する。Phase 1.0 では entity → 現在のスロット index の
-     * 解決を「現 getEntities() 内での順序 index」で行う (1:1 前提)。
+     * #linkSnapshots に記録された接続を復元する。
+     *
+     * Phase 1.2.B で 1:N 対応: snapshot 1 件ごとに以下 3 段階で localSlotIdx を解決する
+     * (旧 `_restoreDownstream` sax_ui_base.js:1279-1306 のロジック準拠):
+     *   段階 1: spec.resolveLocalSlotBySlotName(entity, slotName) → localSlotIdx
+     *   段階 2: spec.resolveLocalSlotByGlobalIdx(entity, globalSlotIdx) → localSlotIdx
+     *   段階 3: skip (両 spec フィールド未定義時は ds.localSlotIdx をそのまま採用、
+     *           1:1 ノードや Image/Pipe Collector の互換動作)
+     *
+     * 削除 entity (`_remoteSources.splice(idx, 1)` 等) は `getEntities()` ループで
+     * 自動的に走査対象外となり partial restore が成立する (snapshot は cleanup 側で破棄)。
      */
     #restoreFromSnapshots() {
         if (this.#spec.direction !== "output") return;
         const entities = this.#spec.getEntities();
-        const graph = globalThis.app?.graph ?? null;
+        const graph = this.#node.graph ?? globalThis.app?.graph ?? null;
         if (!graph) return;
 
-        // 既存リンクをクリアしてから再接続
+        // 既存リンクをクリアしてから再接続 (capture 前の link は action 内で
+        // syncSlotStructure 経由 removeOutput により graph.links からも除去済の想定だが、
+        // 防御的に現状全 outputs 経由で残存 link を removeLink する)。
+        // 前提: このノードの全出力 slot が Coordinator 管理対象であることを前提とする。
+        // snapshot に記録されていない entity の link も一旦 removeLink される (capture 時に
+        // link がなかった entity に capture 後追加された link は復元されない、防御的動作)。
+        // static 接続と共存する場合は本ループのスコープを #linkSnapshots 記録分のみに
+        // 限定する変更が必要 (現 Phase 1.2.B では発生しない)。
         const outputs = this.#node.outputs ?? [];
         for (let i = 0; i < outputs.length; i++) {
             const links = outputs[i]?.links ?? [];
@@ -441,15 +525,129 @@ export class DynamicSlotCoordinator {
             }
         }
 
-        for (let i = 0; i < entities.length; i++) {
-            const id = this.#entityIds.get(entities[i]);
-            if (id === undefined) continue;
-            const conns = this.#linkSnapshots.get(id);
-            if (!conns?.length) continue;
-            for (const conn of conns) {
-                const targetNode = graph.getNodeById?.(conn.targetId);
-                if (targetNode && this.#node.outputs?.[i]) {
-                    this.#node.connect?.(i, targetNode, conn.targetSlot);
+        let baseOffset = 0;
+        for (let entityIdx = 0; entityIdx < entities.length; entityIdx++) {
+            const entity = entities[entityIdx];
+            const id = this.#entityIds.get(entity);
+            const slots = this.#spec.entityToSlots(entity, this.#hints) ?? [];
+
+            const conns = id !== undefined ? this.#linkSnapshots.get(id) : null;
+            if (!conns?.length) {
+                baseOffset += slots.length;
+                continue;
+            }
+
+            for (const ds of conns) {
+                let localSlotIdx = -1;
+                // 段階 1: slotName → localSlotIdx
+                if (ds.slotName != null && typeof this.#spec.resolveLocalSlotBySlotName === "function") {
+                    const resolved = this.#spec.resolveLocalSlotBySlotName(entity, ds.slotName);
+                    if (typeof resolved === "number" && resolved >= 0) localSlotIdx = resolved;
+                }
+                // 段階 2: globalSlotIdx → localSlotIdx
+                if (localSlotIdx < 0
+                    && ds.globalSlotIdx != null
+                    && typeof this.#spec.resolveLocalSlotByGlobalIdx === "function") {
+                    const resolved = this.#spec.resolveLocalSlotByGlobalIdx(entity, ds.globalSlotIdx);
+                    if (typeof resolved === "number" && resolved >= 0) localSlotIdx = resolved;
+                }
+                // 段階 3 fallback: 両 spec 未定義 (1:1 ノード / Image・Pipe Collector) の場合、
+                // capture 時の localSlotIdx をそのまま採用する。spec が定義されているのに
+                // resolve に失敗したケース (NodeCollector で enabledSlots 編集により globalIdx が消失)
+                // は restore skip。
+                // 段階3 fallback 判定: spec の resolver が両方とも function でない場合
+                // (null / undefined / 未定義) のみ ds.localSlotIdx をそのまま採用。
+                // 1:1 ノード (PrimitiveStore / TextCatalog)・enabledSlots 編集機能なし Collector
+                // (Image / Pipe) は両 resolver を null/未定義のままにすることでこの経路に倒れる。
+                if (localSlotIdx < 0) {
+                    const hasResolvers
+                        = typeof this.#spec.resolveLocalSlotBySlotName === "function"
+                        || typeof this.#spec.resolveLocalSlotByGlobalIdx === "function";
+                    if (hasResolvers) continue;
+                    localSlotIdx = ds.localSlotIdx;
+                }
+
+                const absIdx = baseOffset + localSlotIdx;
+                const targetNode = graph.getNodeById?.(ds.targetId);
+                if (targetNode && this.#node.outputs?.[absIdx]) {
+                    this.#node.connect?.(absIdx, targetNode, ds.targetSlot);
+                }
+            }
+            baseOffset += slots.length;
+        }
+    }
+
+    /**
+     * action 内例外時の atomic rollback 用に node.inputs / node.outputs / 関連 link を
+     * deep clone snapshot する (Phase 1.2.B 戦略 β、子プラン v3 L317-389)。
+     *
+     * @returns {{ inputs: Array, outputs: Array, links: object }}
+     */
+    #snapshotNodeState() {
+        const graph = this.#node.graph ?? globalThis.app?.graph ?? null;
+        const linkIds = new Set();
+        this.#node.inputs?.forEach(inp => { if (inp?.link != null) linkIds.add(inp.link); });
+        this.#node.outputs?.forEach(out => { out?.links?.forEach(id => linkIds.add(id)); });
+        const links = {};
+        for (const id of linkIds) {
+            const lnk = graph?.links?.[id];
+            if (lnk) links[id] = { ...lnk };
+        }
+        return {
+            inputs: this.#node.inputs?.map(inp => ({ name: inp.name, type: inp.type, link: inp.link })) ?? [],
+            outputs: this.#node.outputs?.map(out => ({ name: out.name, type: out.type, links: out.links?.slice() ?? null })) ?? [],
+            links,
+        };
+    }
+
+    /**
+     * action 内例外時に #snapshotNodeState の結果から node.inputs / node.outputs / 関連 link を
+     * best-effort 復元する。LiteGraph 仕様上、`removeInput`/`removeOutput` 連鎖で
+     * `app.graph.links` および上流 `outputs[].links` 配列の link id が同時除去されるため、
+     * step1 (構造削除) → step2 (構造再構築) → step3 (link Map 再挿入) → step4 (slot 側 link 参照復元)
+     * → step5 (上流 outputs[].links 再追加) の順序が必要 (Phase 1.2.B LOW-A 順序保証)。
+     *
+     * @param {{ inputs: Array, outputs: Array, links: object }} snap
+     */
+    #restoreNodeState(snap) {
+        const graph = this.#node.graph ?? globalThis.app?.graph ?? null;
+        // 1. 現 inputs/outputs を全削除 (LiteGraph が link を自動削除する)
+        while ((this.#node.inputs?.length ?? 0) > 0) this.#node.removeInput?.(0);
+        while ((this.#node.outputs?.length ?? 0) > 0) this.#node.removeOutput?.(0);
+        // 2. 構造再構築
+        for (const inp of snap.inputs) this.#node.addInput?.(inp.name, inp.type);
+        for (const out of snap.outputs) this.#node.addOutput?.(out.name, out.type);
+        // 3. graph.links Map 再挿入 (action 内 removeLink で消えたエントリを復活)
+        if (graph?.links) {
+            for (const [id, lnk] of Object.entries(snap.links)) {
+                // Object.entries は数値キーを文字列化するため Number() で明示変換
+                graph.links[Number(id)] = { ...lnk };
+            }
+        }
+        // 4. inputs[i].link / outputs[i].links を復元
+        for (let i = 0; i < snap.inputs.length; i++) {
+            if (this.#node.inputs?.[i] && snap.inputs[i].link != null) {
+                this.#node.inputs[i].link = snap.inputs[i].link;
+            }
+        }
+        for (let i = 0; i < snap.outputs.length; i++) {
+            if (this.#node.outputs?.[i] && snap.outputs[i].links) {
+                this.#node.outputs[i].links = snap.outputs[i].links.slice();
+            }
+        }
+        // 5. 上流ノードの outputs[origin_slot].links に link id 再追加
+        // MEDIUM-A null ガード: LiteGraph 実装上 originOut.links は通常 [] だが
+        // 異常状態 (link 復元中の partial state) では undefined の可能性があるため ??= で初期化。
+        if (graph?.links) {
+            for (const lnk of Object.values(snap.links)) {
+                const originNode = graph.getNodeById?.(lnk.origin_id);
+                const originOut = originNode?.outputs?.[lnk.origin_slot];
+                if (!originOut) continue;
+                // LiteGraph 内部 API: outputs[].links 配列は LiteGraph が参照保持するため、
+                // .slice() で新配列に置換すると内部参照が壊れる。in-place push が必須。
+                originOut.links ??= [];
+                if (!originOut.links.includes(lnk.id)) {
+                    originOut.links.push(lnk.id);
                 }
             }
         }
@@ -475,4 +673,36 @@ export class DynamicSlotCoordinator {
         if (this.#spec.direction === "output") return this.#node.outputs?.length ?? 0;
         return this.#node.inputs?.length ?? 0;
     }
+}
+
+/**
+ * `ensureCoordinator` で受け付けない key 名 (prototype pollution 防御)。
+ * これらを許可すると `node.__proto__` 等への代入で Object prototype を汚染できる。
+ */
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
+ * ノードに DynamicSlotCoordinator を 1 度だけ生成して返す共通ヘルパ (Phase 1.2.B 追加)。
+ *
+ * `specFactory` は **初回呼出時の 1 回のみ** 評価される。spec 内のクロージャ
+ * (`getEntities` / `setEntities` 等) は lazy 参照 + null-safe フォールバック
+ * (`?? defaultState()`) パターンで実装すること。これにより `ensureCoordinator` 呼出時点での
+ * state 初期化保証が不要となる (lifecycle.md / 子プラン v3 L487-505 参照)。
+ *
+ * `key` は将来の 1 ノード複数 Coordinator 並立 (例: input 用 + output 用) 拡張時に使用。
+ * Phase 1.2.B では既定値 `"_saxCoordinator"` 固定で API 表面のみ提供する。
+ *
+ * @param {object} node                        LiteGraph ノード
+ * @param {(node: object) => CoordinatorSpec} specFactory  spec を生成する factory (1 回のみ評価)
+ * @param {string} [key="_saxCoordinator"]     Coordinator を保管するノード上のキー
+ * @returns {DynamicSlotCoordinator}
+ */
+export function ensureCoordinator(node, specFactory, key = "_saxCoordinator") {
+    if (FORBIDDEN_KEYS.has(key)) {
+        throw new Error(`ensureCoordinator: forbidden key "${key}"`);
+    }
+    if (node[key]) return node[key];
+    const spec = specFactory(node);
+    node[key] = new DynamicSlotCoordinator(node, spec);
+    return node[key];
 }

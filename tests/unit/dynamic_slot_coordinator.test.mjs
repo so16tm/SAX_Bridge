@@ -9,7 +9,7 @@
 import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
 
-import { DynamicSlotCoordinator } from "../../js/sax_dynamic_slot_coordinator.js";
+import { DynamicSlotCoordinator, ensureCoordinator } from "../../js/sax_dynamic_slot_coordinator.js";
 
 // ---------------------------------------------------------------------------
 // LiteGraph / app モック
@@ -403,21 +403,16 @@ describe("DynamicSlotCoordinator: entityToSlots hints 伝播 (Phase 1.1)", () =>
             "mutate + entityHints で syncSlotStructure が呼ばれるべき");
         assert.equal(items[0].value, 1, "action が正しく実行されるべき");
 
-        // entityToSlots が hints 付きで呼ばれた場合にエラーが発生しないことを確認
-        // (シグネチャ変更後の互換性テスト)
-        const resultWithHints = entityToSlotsSpy.wrappedFn
-            ? entityToSlotsSpy.wrappedFn(items[0], hints)
-            : entityToSlotsSpy.mock.calls.length > 0
-              ? [{ name: items[0].name, type: items[0].type }]
-              : entityToSlotsSpy(items[0], hints);
-
-        // spy が直接呼ばれた場合の検証
-        const callWithHints = entityToSlotsSpy(items[0], hints);
-        assert.ok(callWithHints.length > 0,
-            "entityToSlots(entity, hints) は hints を受け取って正常に動作するべき");
+        // Coordinator が capture 時 (#captureSnapshots) に entityToSlots を hints 付きで呼んだことを直接検証。
+        // mock.fn は呼出履歴を mock.calls に記録するため、第 2 引数に渡された hints の identity を確認する。
+        assert.ok(entityToSlotsSpy.mock.calls.length > 0,
+            "Coordinator 内部で entityToSlots が呼ばれているべき");
+        const lastCall = entityToSlotsSpy.mock.calls[entityToSlotsSpy.mock.calls.length - 1];
+        assert.strictEqual(lastCall.arguments[1], hints,
+            "entityToSlots の第 2 引数に Coordinator から hints が渡されるべき");
         const capturedCall = capturedHintsInSlotsFn[capturedHintsInSlotsFn.length - 1];
         assert.strictEqual(capturedCall, hints,
-            "entityToSlots の第 2 引数に hints が渡されるべき");
+            "entityToSlots 関数本体側でも hints が観測されるべき");
     });
 
     it("entityToSlots: mutate トランザクション完了後 #hints が null になる", () => {
@@ -1077,5 +1072,369 @@ describe("DynamicSlotCoordinator.applyAfterCapture (内蔵パス)", () => {
         // 同期 restore: 1 link が再接続される
         assert.equal(node.connectCalls.length, 1,
             "内蔵パスでは captureFromExisting の snapshot から link が restore される");
+    });
+});
+
+// ===========================================================================
+// Phase 1.2.B: output 1:N capture/restore + atomic rollback + ensureCoordinator
+// ===========================================================================
+
+// NodeCollector 風の 1:N spec を生成するヘルパ。
+// entity = { sourceId, slotNames: string[], enabledSlots: number[] (globalIdx の配列) }
+// localSlotIdx は enabledSlots 内の index、globalSlotIdx は slotNames 内の絶対 index。
+function makeNodeCollectorLikeSpec(node, sources) {
+    const entityToSlots = (src) => {
+        return (src.enabledSlots ?? []).map(globalIdx => ({
+            name: src.slotNames[globalIdx],
+            type: "*",
+        }));
+    };
+    const syncSlotStructure = mock.fn(() => {
+        // 全 outputs を再構築
+        while (node.outputs.length > 0) node.removeOutput(node.outputs.length - 1);
+        for (const src of sources) {
+            for (const globalIdx of (src.enabledSlots ?? [])) {
+                node.addOutput(src.slotNames[globalIdx], "*");
+            }
+        }
+    });
+    return {
+        spec: {
+            direction: "output",
+            getEntities: () => sources,
+            entityToSlots,
+            syncSlotStructure,
+            setEntities: (newSources) => { sources.length = 0; sources.push(...newSources); },
+            resolveLocalSlotBySlotName: (entity, slotName) => {
+                const globalIdx = entity.slotNames?.indexOf(slotName) ?? -1;
+                if (globalIdx < 0) return null;
+                const localIdx = entity.enabledSlots?.indexOf(globalIdx) ?? -1;
+                return localIdx >= 0 ? localIdx : null;
+            },
+            resolveLocalSlotByGlobalIdx: (entity, globalSlotIdx) => {
+                const localIdx = entity.enabledSlots?.indexOf(globalSlotIdx) ?? -1;
+                return localIdx >= 0 ? localIdx : null;
+            },
+        },
+        syncSlotStructure,
+    };
+}
+
+describe("DynamicSlotCoordinator: output 1:N capture/restore (Phase 1.2.B)", () => {
+    let graph;
+    beforeEach(() => { graph = makeGraphMock(); installAppMock(graph); });
+    afterEach(() => { uninstallAppMock(); });
+
+    it("1:N: 1 entity が複数 slot を返す capture が成立する", () => {
+        // 1 entity が slot 2 つ ([0, 1]) を返す → outputs 2 本に capture が入る。
+        const node = makeNode({ outputCount: 2 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(1001);
+        graph.registerNode(target);
+
+        const sources = [
+            { sourceId: "s1", slotNames: ["A", "B"], enabledSlots: [0, 1] },
+        ];
+        node.outputs[0].name = "A";
+        node.outputs[1].name = "B";
+        node.connect(0, target, 0);
+        node.connect(1, target, 0);
+
+        const { spec } = makeNodeCollectorLikeSpec(node, sources);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        coord.captureFromExisting();
+        node.connectCalls = [];
+        // slot 数不変で applyAfterCapture (同 sources)
+        coord.applyAfterCapture([sources[0]]);
+
+        // 2 link が同期 restore されること
+        assert.equal(node.connectCalls.length, 2,
+            "1:N entity の 2 slot 分 link が restore されるべき");
+    });
+
+    it("1:N restore 段階1: slotName 一致での復元", () => {
+        // capture 後に enabledSlots を並べ替えて localSlotIdx が変わるが、
+        // slotName 経由で正しい新 localSlotIdx に復元されること。
+        const node = makeNode({ outputCount: 2 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(1002);
+        graph.registerNode(target);
+
+        const sources = [
+            { sourceId: "s1", slotNames: ["A", "B"], enabledSlots: [0, 1] },
+        ];
+        node.outputs[0].name = "A";
+        node.outputs[1].name = "B";
+        node.connect(0, target, 0); // "A" に link
+
+        const { spec } = makeNodeCollectorLikeSpec(node, sources);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        coord.mutate((entities) => {
+            // enabledSlots を入れ替え (B, A の順、A は localSlotIdx=1 へ移る)
+            entities[0].enabledSlots = [1, 0];
+        });
+
+        // 同期 restore (slot 数 2→2 不変)。
+        // capture 時 "A" は localSlotIdx=0 だったが、restore 時 enabledSlots=[1,0] により
+        // resolveLocalSlotBySlotName("A") → globalIdx=0 → enabledSlots.indexOf(0)=1 となり、
+        // 新 absIdx=1 (baseOffset 0 + localSlotIdx 1) に再接続されるべき。
+        const aSlotConnects = node.connectCalls.filter(c => c.slotIndex === 1);
+        assert.ok(aSlotConnects.length >= 1,
+            "slotName 'A' は新 localSlotIdx=1 に再接続されるべき (段階1 fallback)");
+    });
+
+    it("1:N restore 段階2: globalSlotIdx 一致での復元", () => {
+        // slotName resolver が null を返しても、globalSlotIdx resolver が一致するケース。
+        const node = makeNode({ outputCount: 1 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(1003);
+        graph.registerNode(target);
+
+        const sources = [
+            { sourceId: "s1", slotNames: ["X"], enabledSlots: [0] },
+        ];
+        node.outputs[0].name = "X";
+        node.connect(0, target, 0);
+
+        const { spec } = makeNodeCollectorLikeSpec(node, sources);
+        // 段階1 を強制的に null 返却に置換 (= 段階2 にフォールバックされる)
+        spec.resolveLocalSlotBySlotName = () => null;
+
+        const coord = new DynamicSlotCoordinator(node, spec);
+        coord.captureFromExisting();
+        node.connectCalls = [];
+        coord.applyAfterCapture([sources[0]]);
+
+        // 段階2 経由で globalSlotIdx=0 → enabledSlots.indexOf(0)=0 → localSlotIdx=0 に復元
+        assert.equal(node.connectCalls.length, 1,
+            "段階2 (globalSlotIdx) で localSlotIdx=0 に復元されるべき");
+        assert.equal(node.connectCalls[0].slotIndex, 0);
+    });
+
+    it("1:N restore 段階3: 両 resolver が null/失敗で skip", () => {
+        // resolver が定義されているが両方とも null を返す → 段階3 で skip (再接続しない)
+        const node = makeNode({ outputCount: 1 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(1004);
+        graph.registerNode(target);
+
+        const sources = [
+            { sourceId: "s1", slotNames: ["Z"], enabledSlots: [0] },
+        ];
+        node.outputs[0].name = "Z";
+        node.connect(0, target, 0);
+
+        const { spec } = makeNodeCollectorLikeSpec(node, sources);
+        spec.resolveLocalSlotBySlotName = () => null;
+        spec.resolveLocalSlotByGlobalIdx = () => null;
+
+        const coord = new DynamicSlotCoordinator(node, spec);
+        coord.captureFromExisting();
+        node.connectCalls = [];
+        coord.applyAfterCapture([sources[0]]);
+
+        // 両 resolver が null → 段階3 で skip (再接続しない)
+        assert.equal(node.connectCalls.length, 0,
+            "両 resolver が null を返したケースは restore skip されるべき");
+    });
+
+    it("1:N restore: 削除 entity は自動 skip (partial restore)", async () => {
+        // 2 entity capture → 1 entity を削除して mutate → 残った entity の link のみ restore
+        const node = makeNode({ outputCount: 2 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const t1 = makeTargetNode(1005);
+        const t2 = makeTargetNode(1006);
+        graph.registerNode(t1);
+        graph.registerNode(t2);
+
+        const sources = [
+            { sourceId: "s1", slotNames: ["A"], enabledSlots: [0] },
+            { sourceId: "s2", slotNames: ["B"], enabledSlots: [0] },
+        ];
+        node.outputs[0].name = "A";
+        node.outputs[1].name = "B";
+        node.connect(0, t1, 0);
+        node.connect(1, t2, 0);
+
+        const { spec } = makeNodeCollectorLikeSpec(node, sources);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        // 初期セットアップの connect を計測対象から除外
+        node.connectCalls = [];
+        coord.mutate((entities) => {
+            // s2 削除
+            entities.splice(1, 1);
+        });
+
+        // setTimeout(0) 経由 (slot 数 2→1 変動) → 待つ
+        // 5ms: 非同期 restore (setTimeout(0)) のコールバック完了 + node:test 実行環境の
+        // timer 精度余裕を含む待機時間。1ms では稀に flaky 化する観測のため 5ms 採用。
+        await new Promise(resolve => setTimeout(resolve, 5));
+
+        // s1 の link のみ復元、s2 は entity 配列にいないため自動 skip
+        const reconnects = node.connectCalls.filter(c => c.targetId === t1.id);
+        assert.ok(reconnects.length >= 1, "残存 entity s1 の link が restore されるべき");
+        const s2Reconnects = node.connectCalls.filter(c => c.targetId === t2.id);
+        assert.equal(s2Reconnects.length, 0, "削除 entity s2 の link は restore されないべき");
+    });
+
+    it("1:N capture: baseOffset が複数 entity で累積する", () => {
+        // 2 entity (s1 slot=2, s2 slot=2) → outputs 4 本。s2 の slot は absIdx 2/3 で capture されるべき。
+        const node = makeNode({ outputCount: 4 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(1007);
+        graph.registerNode(target);
+
+        const sources = [
+            { sourceId: "s1", slotNames: ["A", "B"], enabledSlots: [0, 1] },
+            { sourceId: "s2", slotNames: ["C", "D"], enabledSlots: [0, 1] },
+        ];
+        node.outputs[0].name = "A";
+        node.outputs[1].name = "B";
+        node.outputs[2].name = "C";
+        node.outputs[3].name = "D";
+        // s2 の slot 1 (absIdx=3 = "D") に link
+        node.connect(3, target, 0);
+
+        const { spec } = makeNodeCollectorLikeSpec(node, sources);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        coord.captureFromExisting();
+        node.connectCalls = [];
+        coord.applyAfterCapture([sources[0], sources[1]]);
+
+        // capture が baseOffset 2 (s1 slot=2) を加味した上で s2 の slot 1 を localSlotIdx=1 として記録し、
+        // restore 時に baseOffset 2 + localSlotIdx 1 = absIdx 3 に再接続することを確認
+        const dConnect = node.connectCalls.find(c => c.slotIndex === 3);
+        assert.ok(dConnect, "s2 entity 内 localSlotIdx=1 (absIdx=3) に restore されるべき");
+    });
+
+    it("1:N capture: hints 引数が entityToSlots に伝播し enabledSlots 引き継ぎが機能する", () => {
+        // entityHints 経由で hint を渡す → entityToSlots(entity, hints) で hint を読んで slot 配列を変える
+        const node = makeNode({ outputCount: 1 });
+        node._graph = graph;
+        graph.registerNode(node);
+
+        const sources = [
+            { sourceId: "s1", slotNames: ["A", "B"], enabledSlots: [0] },
+        ];
+        node.outputs[0].name = "A";
+
+        const capturedHints = [];
+        const spec = {
+            direction: "output",
+            getEntities: () => sources,
+            entityToSlots: (entity, hints) => {
+                capturedHints.push(hints);
+                const enabled = hints?.get(entity)?.enabledSlots ?? entity.enabledSlots ?? [];
+                return enabled.map(globalIdx => ({ name: entity.slotNames[globalIdx], type: "*" }));
+            },
+            syncSlotStructure: () => {
+                while (node.outputs.length > 0) node.removeOutput(node.outputs.length - 1);
+                for (const globalIdx of sources[0].enabledSlots) {
+                    node.addOutput(sources[0].slotNames[globalIdx], "*");
+                }
+            },
+            setEntities: (newSources) => { sources.length = 0; sources.push(...newSources); },
+        };
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        const hints = new Map([[sources[0], { enabledSlots: [0, 1] }]]);
+        coord.mutate((entities) => {
+            entities[0].enabledSlots = [0, 1];
+        }, { entityHints: hints });
+
+        // entityToSlots が hints 付きで呼ばれていること (capture / baseOffset 計算経由)
+        const hintedCalls = capturedHints.filter(h => h === hints);
+        assert.ok(hintedCalls.length >= 1,
+            "mutate トランザクション内で entityToSlots に hints が伝播するべき");
+    });
+
+    it("atomic rollback: action 内例外時に node.inputs/outputs/links が復元される", () => {
+        const node = makeNode({ outputCount: 2 });
+        node._graph = graph;
+        node.graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(1008);
+        graph.registerNode(target);
+
+        // addInput / removeInput を持つよう拡張 (makeNode は output しか持たない簡易モック)
+        node.addInput = function(name, type) { this.inputs.push({ name, type, link: null }); };
+        node.removeInput = function(idx) {
+            const removed = this.inputs.splice(idx, 1)[0];
+            if (removed?.link != null) {
+                graph.removeLink(removed.link);
+            }
+        };
+
+        const items = [{ name: "a", type: "INT" }, { name: "b", type: "STRING" }];
+        node.outputs[0].name = "a";
+        node.outputs[1].name = "b";
+        node.connect(0, target, 0);
+        node.connect(1, target, 0);
+
+        const linksBefore = Object.keys(graph.links).length;
+        const outputsBefore = node.outputs.length;
+
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        // action 内で構造を破壊してから throw (rollback テスト)
+        assert.throws(() => {
+            coord.mutate(() => {
+                // 部分的破壊 (1 つ削除) → throw
+                node.removeOutput(0);
+                items.splice(0, 1);
+                throw new Error("action failure");
+            });
+        }, /action failure/);
+
+        // rollback により outputs / links が action 開始前状態に best-effort 復元される
+        assert.equal(node.outputs.length, outputsBefore,
+            "rollback により outputs 数が復元されるべき");
+        assert.equal(Object.keys(graph.links).length, linksBefore,
+            "rollback により graph.links が復元されるべき");
+    });
+});
+
+describe("DynamicSlotCoordinator: ensureCoordinator (Phase 1.2.B)", () => {
+    let graph;
+    beforeEach(() => { graph = makeGraphMock(); installAppMock(graph); });
+    afterEach(() => { uninstallAppMock(); });
+
+    it("ensureCoordinator: 初回呼出で生成、2 回目以降は同じインスタンスを返す", () => {
+        const node = makeNode({ outputCount: 0 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const items = [];
+
+        let factoryCalls = 0;
+        const factory = (n) => {
+            factoryCalls++;
+            return {
+                direction: "output",
+                getEntities: () => n.items ?? items,
+                entityToSlots: (item) => [{ name: item.name, type: item.type }],
+                syncSlotStructure: () => {},
+                setEntities: (newItems) => { n.items = newItems; },
+            };
+        };
+
+        const c1 = ensureCoordinator(node, factory);
+        const c2 = ensureCoordinator(node, factory);
+
+        assert.strictEqual(c1, c2, "2 回目以降は同じインスタンスを返すべき");
+        assert.equal(factoryCalls, 1, "factory は 1 度だけ評価されるべき");
+        assert.ok(c1 instanceof DynamicSlotCoordinator);
+        // 既定 key で保管されている
+        assert.strictEqual(node._saxCoordinator, c1);
     });
 });
