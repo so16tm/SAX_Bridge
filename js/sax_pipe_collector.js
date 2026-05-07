@@ -67,12 +67,12 @@ const SOURCE_SPEC = {
 // Pipe_Collector は実質 1:1 (slotCount=1 固定) だが、API は 1:N で統一。
 // hasOutputSlots=false のため Coordinator の output 側 capture は no-op に近いが、
 // mutate() トランザクション化により _captureDownstream 削除 (TODO 6) 後の既存挙動を維持。
-function buildSpec(node) {
+function buildPipeCollectorSpec(node) {
     return {
         direction:         "output",
         getEntities:       () => node._remoteSources ?? [],
         setEntities:       (newSources) => { node._remoteSources = newSources; },
-        entityToSlots:     (_src) => [{ name: "PIPE", type: "PIPE_LINE" }],
+        entityToSlots:     (_src, _hints) => [{ name: "PIPE", type: "PIPE_LINE" }],
         syncSlotStructure: () => {},
         resolveLocalSlotBySlotName: null,
         resolveLocalSlotByGlobalIdx: null,
@@ -98,7 +98,7 @@ app.registerExtension({
             origOnNodeCreated?.apply(this, arguments);
             for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
 
-            const coordinator = ensureCoordinator(this, buildSpec);
+            const coordinator = ensureCoordinator(this, buildPipeCollectorSpec);
             this._saxSourceWidget = makeSourceListWidget(SOURCE_SPEC, coordinator);
             this._saxSourceWidget.onNodeCreated.call(this);
 

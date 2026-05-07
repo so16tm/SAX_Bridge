@@ -6,7 +6,7 @@ import {
     makeItemListWidget, showItemEditDialog, getComfyTheme,
     PRIMITIVE_TYPE_META, PRIMITIVE_BADGE_FALLBACK, PRIMITIVE_BADGE_TEXT_COLOR,
 } from "./sax_ui_base.js";
-import { DynamicSlotCoordinator } from "./sax_dynamic_slot_coordinator.js";
+import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.PrimitiveStore";
 const NODE_TYPE = "SAX_Bridge_Primitive_Store";
@@ -259,27 +259,26 @@ function drawTypeBadge(ctx, item, x, midY, w, h) {
 // ---------------------------------------------------------------------------
 
 /**
- * PrimitiveStore 用 Coordinator を生成する。
+ * PrimitiveStore 用 DynamicSlotCoordinator spec factory。
+ * item 1 件 → output slot 1 件 (1:1) の output direction Coordinator。
  */
-function ensureCoordinator(node) {
-    if (node._saxCoordinator) return node._saxCoordinator;
-    node._saxCoordinator = new DynamicSlotCoordinator(node, {
+function buildPrimitiveStoreSpec(node) {
+    return {
         direction:         "output",
         getEntities:       () => node._primitiveItems ?? [],
-        entityToSlots:     (item) => [{
+        entityToSlots:     (item, _hints) => [{
             name: item.name,
             type: OUTPUT_TYPE_MAP[item.type] ?? item.type,
         }],
         syncSlotStructure: () => syncOutputSlots(node, node._primitiveItems ?? []),
         setEntities:       (newEntities) => { node._primitiveItems = newEntities; },
-    });
-    return node._saxCoordinator;
+    };
 }
 
 function makeStoreWidget(node) {
     // node._primitiveItems を直接参照（クロージャの stale 回避）
     const getItems  = () => node._primitiveItems ?? [];
-    const coordinator = ensureCoordinator(node);
+    const coordinator = ensureCoordinator(node, buildPrimitiveStoreSpec);
 
     // beforeModify 経由 (add/del/move): capture 済みスナップショットを使って restore まで行う
     const saveItemsCapturing = (newItems) => coordinator.applyAfterCapture(newItems);
@@ -493,7 +492,7 @@ app.registerExtension({
             syncOutputSlots(this, items);
 
             // LiteGraph のリンク復元完了後に Coordinator 経由で snapshot を記録
-            const coordinator = this._saxCoordinator;
+            const coordinator = ensureCoordinator(this, buildPrimitiveStoreSpec);
             setTimeout(() => {
                 coordinator.captureFromExisting();
             }, 0);

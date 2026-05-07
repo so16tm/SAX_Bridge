@@ -5,7 +5,7 @@ import {
     showDialog,
     showFilePicker,
 } from "./sax_ui_base.js";
-import { DynamicSlotCoordinator } from "./sax_dynamic_slot_coordinator.js";
+import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME      = "SAX.TextCatalog";
 const NODE_TYPE     = "SAX_Bridge_Text_Catalog";
@@ -1311,33 +1311,26 @@ function drawRelationContent(ctx, state, relation, x, y, w, rowH, on = true) {
 // ---------------------------------------------------------------------------
 
 /**
- * TextCatalog 用 DynamicSlotCoordinator を生成する。
- * PrimitiveStore の ensureCoordinator と同パターン (Phase 1.2.B / Phase 9 で共通化検討)。
+ * TextCatalog 用 DynamicSlotCoordinator spec factory。
  * relation 1 件 → output slot 1 件 (1:1) の output direction Coordinator。
- * entityHints は TextCatalog では不使用。
  */
-function ensureCoordinator(node) {
-    if (node._saxCoordinator) return node._saxCoordinator;
-    node._saxCoordinator = new DynamicSlotCoordinator(node, {
+function buildTextCatalogSpec(node) {
+    return {
         direction: "output",
         getEntities: () => (node._textCatalogState ?? emptyState()).relations,
-        // syncOutputSlots 内の slot 名 / type 導出ロジックを 1:1 で再利用するため、
-        // ここでは name / type のプレースホルダを返すのみ (実際の name / type は
-        // syncSlotStructure 内の syncOutputSlots が relationStatus / resolveRelationLabel
-        // を使って書き込む)。Coordinator は slot 数のみを spec から読み取る。
-        entityToSlots: (_relation, _hints) => [{ name: "", type: "STRING" }],
+        // placeholder のみ。実 name/type は syncSlotStructure (syncOutputSlots) が書き込む。_hints は TextCatalog では不使用。
+        entityToSlots: (_entity, _hints) => [{ name: "", type: "STRING" }],
         syncSlotStructure: () => syncOutputSlots(node, node._textCatalogState ?? emptyState()),
         setEntities: (newRelations) => {
             const prev = node._textCatalogState ?? emptyState();
             node._textCatalogState = { ...prev, relations: newRelations };
         },
-    });
-    return node._saxCoordinator;
+    };
 }
 
 function makeCatalogWidget(node) {
     const getState = () => node._textCatalogState ?? emptyState();
-    const coordinator = ensureCoordinator(node);
+    const coordinator = ensureCoordinator(node, buildTextCatalogSpec);
 
     const openManager = () => {
         showManagerDialog(node, getState, (draftCatalog) => {
@@ -1551,7 +1544,7 @@ app.registerExtension({
 
             // LiteGraph のリンク復元完了後に Coordinator が現状接続を snapshot に取り込む。
             // setTimeout(0) は LiteGraph link 復元完了待ち (PrimitiveStore L497-499 と同パターン)。
-            const coordinator = this._saxCoordinator;
+            const coordinator = ensureCoordinator(this, buildTextCatalogSpec);
             setTimeout(() => {
                 coordinator.captureFromExisting();
             }, 0);

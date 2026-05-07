@@ -69,13 +69,13 @@ const SOURCE_SPEC = {
 // Image_Collector は hasOutputSlots=false のため Coordinator の snapshot は空。
 // それでも mutate() トランザクション経由で構造変更することで、
 // TODO 6 (_captureDownstream 削除) 後も既存挙動を維持する。
-function buildSpec(node) {
+function buildImageCollectorSpec(node) {
     return {
         direction:         "output",
         getEntities:       () => node._remoteSources ?? [],
         setEntities:       (newSources) => { node._remoteSources = newSources; },
         // 1:N (slotCount 個の IMAGE slot)。hints は使用しない。
-        entityToSlots:     (src) => {
+        entityToSlots:     (src, _hints) => {
             const n = src?.slotCount ?? 0;
             return Array.from({ length: n }, (_, i) => ({
                 name: `slot_${i}`,
@@ -110,7 +110,7 @@ app.registerExtension({
             // Python 定義の slot_* 入力をクリア（JS で動的管理する）
             for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
 
-            const coordinator = ensureCoordinator(this, buildSpec);
+            const coordinator = ensureCoordinator(this, buildImageCollectorSpec);
             this._saxSourceWidget = makeSourceListWidget(SOURCE_SPEC, coordinator);
             this._saxSourceWidget.onNodeCreated.call(this);
 

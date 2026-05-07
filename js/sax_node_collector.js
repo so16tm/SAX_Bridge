@@ -180,7 +180,7 @@ const SOURCE_SPEC = {
 // capture/restore が実体を持つ (Image/Pipe Collector と異なる)。enabledSlots 編集後
 // の restore で 段階1 (slotName) → 段階2 (globalSlotIdx) → 段階3 (skip) の fallback を
 // 提供することで、出力スロット順序や enabledSlots 変動でも下流リンクを維持する。
-function buildSpec(node) {
+function buildNodeCollectorSpec(node) {
     return {
         direction:   "output",
         getEntities: () => node._remoteSources ?? [],
@@ -362,7 +362,7 @@ app.registerExtension({
             for (let i = (this.outputs?.length ?? 0) - 1; i >= 0; i--) this.removeOutput(i);
             for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
 
-            const coordinator = ensureCoordinator(this, buildSpec);
+            const coordinator = ensureCoordinator(this, buildNodeCollectorSpec);
             this._saxSourceWidget = makeSourceListWidget(SOURCE_SPEC, coordinator);
             this._saxSourceWidget.onNodeCreated.call(this);
 
