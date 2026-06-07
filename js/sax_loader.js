@@ -3,17 +3,7 @@
  */
 
 import { app } from "../../scripts/app.js";
-import { showFilePicker } from "./sax_ui_base.js";
-
-const ckptDisplayName = (full) =>
-    full.replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "");
-
-const loraDisplayName = (full) =>
-    full.replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "");
-
-function dismissComboMenu() {
-    document.querySelectorAll(".litecontextmenu").forEach(e => e.remove());
-}
+import { showFilePicker, fileBasenameWithoutExt, dismissComboMenu } from "./sax_ui_base.js";
 
 function replaceComboWithPicker(widget, { title, placeholder, className, displayName: displayFn }) {
     const origMouse = widget.mouse;
@@ -53,7 +43,7 @@ app.registerExtension({
                 title:       "Select Checkpoint",
                 placeholder: "Search checkpoint…",
                 className:   "__sax_ckpt_picker",
-                displayName: ckptDisplayName,
+                displayName: fileBasenameWithoutExt,
             });
         }
 
@@ -63,7 +53,7 @@ app.registerExtension({
                 title:       "Select LoRA",
                 placeholder: "Search LoRA name…",
                 className:   "__sax_lora_picker",
-                displayName: loraDisplayName,
+                displayName: fileBasenameWithoutExt,
             });
         }
     },

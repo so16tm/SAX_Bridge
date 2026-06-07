@@ -14,11 +14,12 @@ import {
     makeItemListWidget,
     getComfyTheme,
     showFilePicker,
+    fileBasenameWithoutExt,
+    hideWidget,
 } from "./sax_ui_base.js";
 
 // LoRA 表示名（パス・拡張子なし）— モジュールスコープで共有
-const displayName = (full) =>
-    full.replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "");
+const displayName = fileBasenameWithoutExt;
 
 const EXT_NAME   = "SAX.LoraLoader";
 const NODE_TYPE  = "SAX_Bridge_Loader_Lora";
@@ -137,13 +138,7 @@ function showLoraEditDialog(node, items, rowIndex) {
 function buildUI(node) {
     for (const name of [WIDGET_JSON, "enabled"]) {
         const w = node.widgets?.find(w => w.name === name);
-        if (w && !w._saxHidden) {
-            w._saxHidden  = true;
-            w.computeSize = () => [0, -4];
-            w.draw        = () => {};
-            w.mouse       = () => false;
-            if (w.element) w.element.style.display = "none";
-        }
+        hideWidget(w);
     }
 
     const widget = makeItemListWidget({

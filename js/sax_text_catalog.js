@@ -4,6 +4,9 @@ import {
     makeItemListWidget,
     showDialog,
     showFilePicker,
+    fileBasenameWithoutExt,
+    hideWidget as _hideWidgetCommon,
+    clearAllSlots,
 } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
@@ -76,10 +79,9 @@ function sanitizeForDialog(s, maxLen = 80) {
     return String(s ?? "").replace(sanitizeForDialog._re, " ").slice(0, maxLen);
 }
 
-/** 隠しウィジェットを描画から除外する（Primitive Store と同パターン） */
+/** 隠しウィジェットを描画から除外する（Primitive Store と同パターン、type は変更しない） */
 function hideWidget(widget) {
-    widget.computeSize = () => [0, -4];
-    widget.draw        = () => {};
+    _hideWidgetCommon(widget, { mode: "minimal" });
 }
 
 // ---------------------------------------------------------------------------
@@ -153,8 +155,7 @@ const LORA_PLACEHOLDER      = "Select the LoRA to add to the text";
 const WILDCARD_PLACEHOLDER  = "Select the Wildcard to add to the text";
 
 /** 表示用に LoRA フルパスから .safetensors とディレクトリを除去 */
-const loraDisplayName = (full) =>
-    String(full).replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "");
+const loraDisplayName = fileBasenameWithoutExt;
 
 /** combo widget の選択肢からプレースホルダを除外して取得 */
 function getComboOptions(node, comboName, placeholder) {
@@ -1490,9 +1491,7 @@ app.registerExtension({
 
             // 静的に定義された 32 個の出力スロットをいったん全削除し、
             // Relation 配列に応じて動的に再構築する
-            for (let i = (this.outputs?.length ?? 0) - 1; i >= 0; i--) {
-                this.removeOutput(i);
-            }
+            clearAllSlots(this, { inputs: false });
 
             addManagerButton(this);
             this.addCustomWidget(makeCatalogWidget(this));

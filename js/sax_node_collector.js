@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
-import { makeSourceListWidget, ensureRenderLinkPatch, showDialog, h } from "./sax_ui_base.js";
+import { makeSourceListWidget, ensureRenderLinkPatch, showDialog, h, clearAllSlots } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.NodeCollector";
@@ -359,8 +359,7 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             origOnNodeCreated?.apply(this, arguments);
             // 出力・入力の両方を JS で動的管理するため Python 定義スロットをクリア
-            for (let i = (this.outputs?.length ?? 0) - 1; i >= 0; i--) this.removeOutput(i);
-            for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
+            clearAllSlots(this);
 
             const coordinator = ensureCoordinator(this, buildNodeCollectorSpec);
             this._saxSourceWidget = makeSourceListWidget(SOURCE_SPEC, coordinator);

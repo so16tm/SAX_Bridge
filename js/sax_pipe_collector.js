@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
-import { makeSourceListWidget, ensureRenderLinkPatch } from "./sax_ui_base.js";
+import { makeSourceListWidget, ensureRenderLinkPatch, clearAllSlots } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.PipeCollector";
@@ -96,7 +96,7 @@ app.registerExtension({
         const origOnNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             origOnNodeCreated?.apply(this, arguments);
-            for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
+            clearAllSlots(this, { outputs: false });
 
             const coordinator = ensureCoordinator(this, buildPipeCollectorSpec);
             this._saxSourceWidget = makeSourceListWidget(SOURCE_SPEC, coordinator);

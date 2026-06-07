@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
-import { makeSourceListWidget, ensureRenderLinkPatch } from "./sax_ui_base.js";
+import { makeSourceListWidget, ensureRenderLinkPatch, clearAllSlots } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.ImageCollector";
@@ -108,7 +108,7 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             origOnNodeCreated?.apply(this, arguments);
             // Python 定義の slot_* 入力をクリア（JS で動的管理する）
-            for (let i = (this.inputs?.length ?? 0) - 1; i >= 0; i--) this.removeInput(i);
+            clearAllSlots(this, { outputs: false });
 
             const coordinator = ensureCoordinator(this, buildImageCollectorSpec);
             this._saxSourceWidget = makeSourceListWidget(SOURCE_SPEC, coordinator);

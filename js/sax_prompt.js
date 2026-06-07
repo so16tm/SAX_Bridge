@@ -1,8 +1,5 @@
 import { app } from "../../scripts/app.js";
-import { showFilePicker } from "./sax_ui_base.js";
-
-const loraDisplayName = (full) =>
-    full.replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "");
+import { showFilePicker, fileBasenameWithoutExt, dismissComboMenu } from "./sax_ui_base.js";
 
 let _wildcards_list_cache = null;
 
@@ -19,11 +16,6 @@ async function loadWildcardsFromAPI() {
         // Impact Pack のサーバーAPIが無い場合は空リスト
     }
     return [];
-}
-
-// COMBO の標準 ContextMenu を閉じる
-function dismissComboMenu() {
-    document.querySelectorAll(".litecontextmenu").forEach(e => e.remove());
 }
 
 app.registerExtension({
@@ -56,7 +48,7 @@ app.registerExtension({
                             placeholder: "Search LoRA name…",
                             mode: "single",
                             className: "__sax_prompt_lora_picker",
-                            displayName: loraDisplayName,
+                            displayName: fileBasenameWithoutExt,
                             onSelect(name) {
                                 if (!tbox) return;
                                 let lora_name = name;

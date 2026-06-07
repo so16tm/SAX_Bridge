@@ -177,6 +177,81 @@ export function inX(pos, x0, w) {
 }
 
 // ---------------------------------------------------------------------------
+// 共通文字列ユーティリティ
+// ---------------------------------------------------------------------------
+
+/**
+ * ファイルパスから拡張子 `.safetensors` (大文字小文字不問) と先頭ディレクトリを除去する。
+ * Checkpoint / LoRA / その他 safetensors ファイル名の表示用変換に共通利用する。
+ *
+ * @param {string} full フルパス
+ * @returns {string} basename (拡張子なし)
+ */
+export function fileBasenameWithoutExt(full) {
+    return String(full).replace(/\.safetensors$/i, "").replace(/^.*[\\/]/, "");
+}
+
+/**
+ * 内部プロパティ `_links` を除外したシャローコピー配列を返す。
+ * シリアライズ・onSerialize 等で内部メタを外す共通実装。
+ *
+ * @param {object[]} items
+ * @returns {object[]}
+ */
+export function stripInternal(items) {
+    return items.map(({ _links, ...rest }) => rest);
+}
+
+/**
+ * LiteGraph のコンテキストメニュー (`.litecontextmenu`) を全て閉じる。
+ * COMBO の標準メニューを抑止してカスタムピッカーを開く用途で共通利用する。
+ */
+export function dismissComboMenu() {
+    document.querySelectorAll(".litecontextmenu").forEach(e => e.remove());
+}
+
+/**
+ * 隠しウィジェットを描画から除外する共通ヘルパー。
+ *
+ * - `mode: "minimal"` : computeSize=0/-4, draw=noop のみ (type 変更なしで Comfy プロンプト収集を阻害しない)
+ * - `mode: "full"`    : 上記 + mouse=false, element.display=none, _saxHidden フラグ
+ *
+ * 二重 hide ガード: 既に `_saxHidden` が立っているウィジェットは何もしない。
+ *
+ * @param {object} widget
+ * @param {{ mode?: "minimal" | "full" }} [opts]
+ */
+export function hideWidget(widget, { mode = "full" } = {}) {
+    if (!widget || widget._saxHidden) return;
+    widget.computeSize = () => [0, -4];
+    widget.draw        = () => {};
+    if (mode === "full") {
+        widget.mouse = () => false;
+        if (widget.element) widget.element.style.display = "none";
+        widget._saxHidden = true;
+    }
+}
+
+/**
+ * ノードの入力 / 出力スロットを末尾から全て削除する共通ヘルパー。
+ *
+ * @param {object} node
+ * @param {{ inputs?: boolean, outputs?: boolean }} [opts]
+ */
+export function clearAllSlots(node, { inputs = true, outputs = true } = {}) {
+    if (outputs) {
+        for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) {
+            node.removeOutput(i);
+        }
+    }
+    if (inputs) {
+        for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
+            node.removeInput(i);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 共通 UI パーツ描画
 // ---------------------------------------------------------------------------
 
@@ -1246,69 +1321,6 @@ export function makeSourceListWidget(spec, coordinator) {
             try { syncSlotLabels(node, _getSources(node)); } catch (e) { console.warn(`[${widgetName}] syncSlotLabels error:`, e); }
         } else {
             _defaultSyncSlotLabels(node);
-        }
-    }
-
-    // ----------------------------------------------------------------
-    // 下流リンク保存（hasOutputSlots 時）
-    // ----------------------------------------------------------------
-
-    // TODO(Phase 1.2.B TODO 6): TODO 4 (3 Collector 移行) 完了後に利用箇所 0、TODO 6 で削除予定
-    function _captureDownstream(node) {
-        if (!hasOutputSlots) return [];
-        const sources     = _getSources(node);
-        const downstream  = [];
-        for (let si = 0; si < sources.length; si++) {
-            const src    = sources[si];
-            const offset = _getOffset(node, si);
-            const count  = getSlotCount(src);
-            for (let li = 0; li < count; li++) {
-                const absIdx = offset + li;
-                const out    = node.outputs?.[absIdx];
-                if (!out?.links?.length) continue;
-                for (const lid of out.links) {
-                    const lnk = app.graph.links?.[lid];
-                    if (lnk) downstream.push({
-                        sourceId:      src.sourceId,
-                        globalSlotIdx: src.enabledSlots?.[li] ?? li,
-                        outName:       out.label ?? out.name ?? null,
-                        localSlot:     li,
-                        targetId:      lnk.target_id,
-                        targetSlot:    lnk.target_slot,
-                    });
-                }
-            }
-        }
-        return downstream;
-    }
-
-    // TODO(Phase 1.2.B TODO 6): TODO 4 (3 Collector 移行) 完了後に利用箇所 0、TODO 6 で削除予定
-    function _restoreDownstream(node, downstream) {
-        if (!hasOutputSlots || !downstream.length) return;
-        for (const ds of downstream) {
-            const si = _getSources(node).findIndex(s => s.sourceId === ds.sourceId);
-            if (si < 0) continue;
-            const src = _getSources(node)[si];
-
-            let resolvedLocalSlot = -1;
-            if (ds.outName != null && src.slotNames) {
-                const nameIdx = src.slotNames.indexOf(ds.outName);
-                if (nameIdx >= 0) {
-                    const localIdx = (src.enabledSlots ?? []).indexOf(nameIdx);
-                    if (localIdx >= 0) resolvedLocalSlot = localIdx;
-                }
-            }
-            if (resolvedLocalSlot < 0 && ds.globalSlotIdx != null && src.enabledSlots) {
-                const localIdx = src.enabledSlots.indexOf(ds.globalSlotIdx);
-                if (localIdx >= 0) resolvedLocalSlot = localIdx;
-            }
-            if (resolvedLocalSlot < 0) continue;
-
-            const newAbsIdx = _getOffset(node, si) + resolvedLocalSlot;
-            const tgtNode   = app.graph.getNodeById(ds.targetId);
-            if (tgtNode && node.outputs?.[newAbsIdx]) {
-                node.connect(newAbsIdx, tgtNode, ds.targetSlot);
-            }
         }
     }
 

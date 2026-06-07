@@ -20,6 +20,7 @@ import {
     getComfyTheme,
     rrect,
     txt,
+    hideWidget,
 } from "./sax_ui_base.js";
 
 const EXT_NAME    = "SAX.SAM3Multi";
@@ -99,13 +100,7 @@ function showEditDialog(node, items, rowIndex) {
 
 function buildUI(node) {
     const jsonW = node.widgets?.find(w => w.name === JSON_WIDGET);
-    if (jsonW && !jsonW._saxHidden) {
-        jsonW._saxHidden  = true;
-        jsonW.computeSize = () => [0, -4];
-        jsonW.draw        = () => {};
-        jsonW.mouse       = () => false;
-        if (jsonW.element) jsonW.element.style.display = "none";
-    }
+    hideWidget(jsonW);
 
     node.widgets = (node.widgets ?? []).filter(w => w.name === JSON_WIDGET);
 

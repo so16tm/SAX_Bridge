@@ -19,6 +19,7 @@ import {
     drawDeleteBtn,
     drawRowBg,
     rowLayout,
+    hideWidget,
 } from "./sax_ui_base.js";
 
 const EXT_NAME   = "SAX.ToggleManager";
@@ -245,12 +246,7 @@ function exitToRootGraph() {
         app.canvas.connecting_node       = null;
         app.canvas.node_over             = null;
         app.canvas.node_capturing_input  = null;
-        if (typeof app.canvas.deselectAllNodes === "function") {
-            app.canvas.deselectAllNodes();
-        } else if (app.canvas.selected_nodes) {
-            app.canvas.selected_nodes = {};
-        }
-        app.canvas.setDirty(true, true);
+        clearPickerHighlight();
     } catch (e) { console.warn("[SAX Toggle] exitToRootGraph:", e); }
 }
 
@@ -893,13 +889,7 @@ function makeToggleWidget(node, item, index) {
 
 function rebuildUI(node) {
     const cfgW = node.widgets?.find(w => w.name === WIDGET_CFG);
-    if (cfgW && !cfgW._saxHidden) {
-        cfgW._saxHidden  = true;
-        cfgW.computeSize = () => [0, -4];
-        cfgW.draw        = () => {};
-        cfgW.mouse       = () => false;
-        if (cfgW.element) cfgW.element.style.display = "none";
-    }
+    hideWidget(cfgW);
 
     node.widgets = node.widgets?.filter(w => w.name === WIDGET_CFG) ?? [];
     const config = getConfig(node);

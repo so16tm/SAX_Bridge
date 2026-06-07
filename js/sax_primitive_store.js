@@ -5,6 +5,9 @@ import {
     txt, rrect,
     makeItemListWidget, showItemEditDialog, getComfyTheme,
     PRIMITIVE_TYPE_META, PRIMITIVE_BADGE_FALLBACK, PRIMITIVE_BADGE_TEXT_COLOR,
+    hideWidget as _hideWidgetCommon,
+    stripInternal,
+    clearAllSlots,
 } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
@@ -20,8 +23,7 @@ function stepDecimals(step) {
 
 /** type を変更すると ComfyUI がプロンプト収集でスキップするため、描画のみ無効化する */
 function hideWidget(widget) {
-    widget.computeSize = () => [0, -4];
-    widget.draw        = () => {};
+    _hideWidgetCommon(widget, { mode: "minimal" });
 }
 
 const TYPE_META = PRIMITIVE_TYPE_META;
@@ -70,8 +72,7 @@ function syncOutputSlots(node, items) {
     // _links は接続維持用の内部プロパティのため JSON から除外
     const w = node.widgets?.find(w => w.name === "items_json");
     if (w) {
-        const serializable = items.map(({ _links, ...rest }) => rest);
-        w.value = JSON.stringify(serializable);
+        w.value = JSON.stringify(stripInternal(items));
     }
 
     node.size[1] = node.computeSize()[1];
@@ -456,8 +457,7 @@ app.registerExtension({
             const hw = this.widgets?.find(w => w.name === "items_json");
             if (hw) hideWidget(hw);
 
-            for (let i = (this.outputs?.length ?? 0) - 1; i >= 0; i--)
-                this.removeOutput(i);
+            clearAllSlots(this, { inputs: false });
 
             this.addCustomWidget(makeStoreWidget(this));
             this.size[0] = Math.max(this.size[0], 260);
