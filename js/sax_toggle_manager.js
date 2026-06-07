@@ -21,6 +21,11 @@ import {
     rowLayout,
     hideWidget,
 } from "./sax_ui_base.js";
+import {
+    getNodesInGroup,
+    findGroup,
+    matchGroup,
+} from "./sax_litegraph_helpers.js";
 
 const EXT_NAME   = "SAX.ToggleManager";
 const NODE_TYPE  = "SAX_Bridge_Toggle_Manager";
@@ -52,28 +57,6 @@ function saveConfig(node, config) {
 // Item helpers
 // ---------------------------------------------------------------------------
 
-// pos OR title どちらかが一致すれば存在すると判断（Rescan の missing 判定に使用）
-function matchGroup(g, item) {
-    if (item.pos == null) return g.title === item.title;
-    const posMatch = Math.abs(g.pos[0] - item.pos[0]) <= 8 && Math.abs(g.pos[1] - item.pos[1]) <= 8;
-    return posMatch || g.title === item.title;
-}
-
-function findGroup(item) {
-    const groups = app.graph._groups ?? [];
-    if (item.pos == null) return groups.find(g => g.title === item.title) ?? null;
-    const exact = groups.find(g =>
-        g.title === item.title &&
-        Math.abs(g.pos[0] - item.pos[0]) <= 8 && Math.abs(g.pos[1] - item.pos[1]) <= 8
-    );
-    if (exact) return exact;
-    const byPos = groups.find(g =>
-        Math.abs(g.pos[0] - item.pos[0]) <= 8 && Math.abs(g.pos[1] - item.pos[1]) <= 8
-    );
-    if (byPos) return byPos;
-    return groups.find(g => g.title === item.title) ?? null;
-}
-
 function isSubgraphNode(n) { return n.subgraph != null; }
 
 function itemLabel(item) {
@@ -102,21 +85,6 @@ function applyScene(config) {
     for (const item of config.managed)
         applyItem(item, scene[itemKey(item)] ?? true);
     app.graph.setDirtyCanvas(true, false);
-}
-
-// グループ内のノードを取得する（_children が空の場合はバウンディングボックスで判定）
-function getNodesInGroup(group) {
-    if (group._children?.size > 0) {
-        return Array.from(group._children).filter(c => c?.id != null && typeof c.mode === "number");
-    }
-    const x1 = group.pos[0];
-    const y1 = group.pos[1];
-    const x2 = x1 + group.size[0];
-    const y2 = y1 + group.size[1];
-    return (app.graph._nodes ?? []).filter(n =>
-        n.pos[0] >= x1 && n.pos[0] < x2 &&
-        n.pos[1] >= y1 && n.pos[1] < y2
-    );
 }
 
 function applyItem(item, value) {

@@ -17,6 +17,7 @@
  *   showParamPopup(screenX, screenY, currentVal, cfg, onCommit)
  *   makeItemListWidget(node, spec)
  *   makeSourceListWidget(spec) — Collector ノード共通ソースリストウィジェット
+ *   autoResize(node, opts?) — ノード高さを computeSize に合わせて更新する
  *
  * 出力スロット接続維持ユーティリティ:
  *   captureOutputLinks(node, items, slotOffset?)
@@ -1299,6 +1300,26 @@ export function makeSourceListWidget(spec, coordinator) {
             app.canvas?.setDirty(true, true);
         }
     }
+
+// ---------------------------------------------------------------------------
+// autoResize — ノード高さを computeSize に合わせて更新するユーティリティ
+// ---------------------------------------------------------------------------
+
+/**
+ * ノードの高さを computeSize の結果に合わせて更新する。
+ *
+ * @param {object} node - LiteGraph ノード
+ * @param {{ minH?: number }} [opts]
+ */
+export function autoResize(node, { minH = 0 } = {}) {
+    const sz = node.computeSize?.();
+    if (!sz) return;
+    const newH = Math.max(sz[1], minH);
+    if (node.size[1] !== newH) {
+        node.size[1] = newH;
+        app.canvas?.setDirty(true, true);
+    }
+}
 
     function _defaultSyncSlotLabels(node) {
         const sources = _getSources(node);
