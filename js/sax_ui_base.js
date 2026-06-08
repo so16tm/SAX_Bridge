@@ -204,6 +204,26 @@ export function stripInternal(items) {
 }
 
 /**
+ * Collector 系 `buildSource(srcNode, ...)` で共通の sourceId / sourceTitle /
+ * isSub / sig 初期化を返す。各 Collector はこれを spread して固有プロパティ
+ * (slotCount / enabledSlots / pipeSlotIndex 等) を追加する。
+ *
+ * `sig` は makeSourceListWidget 内部の onConfigure setTimeout で上書きされる
+ * ため空文字列で初期化する。
+ *
+ * @param {object} srcNode  ソースノード (LiteGraph node)
+ * @returns {{ sourceId, sourceTitle, isSub, sig }}
+ */
+export function initSourceBase(srcNode) {
+    return {
+        sourceId:    srcNode.id,
+        sourceTitle: srcNode.title || srcNode.type || `Node#${srcNode.id}`,
+        isSub:       srcNode.subgraph != null,
+        sig:         "",
+    };
+}
+
+/**
  * LiteGraph のコンテキストメニュー (`.litecontextmenu`) を全て閉じる。
  * COMBO の標準メニューを抑止してカスタムピッカーを開く用途で共通利用する。
  */

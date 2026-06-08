@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
-import { ensureRenderLinkPatch, showDialog, h, clearAllSlots, applySourceListLifecycle } from "./sax_ui_base.js";
+import { ensureRenderLinkPatch, showDialog, h, clearAllSlots, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.NodeCollector";
@@ -60,14 +60,11 @@ const SOURCE_SPEC = {
         }
 
         return {
-            sourceId:     srcNode.id,
-            sourceTitle:  srcNode.title || srcNode.type || `Node#${srcNode.id}`,
+            ...initSourceBase(srcNode),
             slotCount:    allCount,
             enabledSlots,
             slotNames,
             slotTypes,
-            sig:          "",
-            isSub:        srcNode.subgraph != null,
         };
     },
 

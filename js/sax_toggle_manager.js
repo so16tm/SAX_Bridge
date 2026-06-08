@@ -24,6 +24,9 @@ import {
     hideWidget,
     autoResize,
     makeJsonWidgetAccessor,
+    showConfirmDialog,
+    showPromptDialog,
+    showAlertDialog,
 } from "./sax_ui_base.js";
 import {
     getNodesInGroup,
@@ -360,7 +363,7 @@ function runAdd(node) {
     });
 }
 
-function runRescan(node) {
+async function runRescan(node) {
     const config = getConfig(node);
 
     const missing = config.managed.filter(item => {
@@ -377,7 +380,13 @@ function runRescan(node) {
 
     if (missing.length > 0) {
         const names = missing.map(i => itemLabel(i).trim()).join("\n");
-        if (!confirm(`Rescan will remove ${missing.length} item(s) that no longer exist:\n\n${names}\n\nContinue?`)) return;
+        const ok = await showConfirmDialog({
+            title:   "Rescan",
+            message: `Rescan will remove ${missing.length} item(s) that no longer exist:\n\n${names}\n\nContinue?`,
+            danger:  true,
+            okLabel: "Remove",
+        });
+        if (!ok) return;
     }
 
     config.managed = config.managed.filter(item => {
@@ -562,11 +571,20 @@ function showSceneManager(node) {
             row.appendChild(lbl);
 
             row.appendChild(makeBtn("✎",
-                "var(--comfy-input-bg,#222)", "var(--content-bg,#4e4e4e)", "var(--input-text,#ddd)", () => {
+                "var(--comfy-input-bg,#222)", "var(--content-bg,#4e4e4e)", "var(--input-text,#ddd)", async () => {
                     const cfg     = getConfig(node);
-                    const newName = prompt("Rename scene:", name);
+                    const newName = await showPromptDialog({
+                        title:        "Rename scene",
+                        defaultValue: name,
+                    });
                     if (!newName?.trim() || newName.trim() === name) return;
-                    if (cfg.scenes[newName.trim()]) { alert("A scene with that name already exists."); return; }
+                    if (cfg.scenes[newName.trim()]) {
+                        await showAlertDialog({
+                            title:   "Rename scene",
+                            message: "A scene with that name already exists.",
+                        });
+                        return;
+                    }
                     const newScenes = {};
                     for (const k of Object.keys(cfg.scenes))
                         newScenes[k === name ? newName.trim() : k] = cfg.scenes[k];
@@ -608,9 +626,15 @@ function showSceneManager(node) {
                 canDel ? "#3a1a1a"                      : "var(--comfy-menu-bg,#171718)",
                 canDel ? "#6a2a2a"                      : "var(--border-color,#4e4e4e)",
                 canDel ? "#d77"                         : "var(--content-bg,#4e4e4e)",
-                () => {
+                async () => {
                     if (!canDel) return;
-                    if (!confirm(`Delete scene "${name}"?`)) return;
+                    const ok = await showConfirmDialog({
+                        title:   "Delete scene",
+                        message: `Delete scene "${name}"?`,
+                        danger:  true,
+                        okLabel: "Delete",
+                    });
+                    if (!ok) return;
                     const cfg = getConfig(node);
                     delete cfg.scenes[name];
                     if (cfg.currentScene === name) {
@@ -632,9 +656,12 @@ function showSceneManager(node) {
         "padding:6px 12px;background:var(--comfy-input-bg,#222);border:1px solid var(--content-bg,#4e4e4e);" +
         "border-radius:4px;color:var(--input-text,#ddd);cursor:pointer;font-size:12px;");
     newBtn.textContent = "+ New Scene";
-    newBtn.addEventListener("click", () => {
+    newBtn.addEventListener("click", async () => {
         const cfg  = getConfig(node);
-        const name = prompt("New scene name:", `Scene ${Object.keys(cfg.scenes).length + 1}`);
+        const name = await showPromptDialog({
+            title:        "New scene",
+            defaultValue: `Scene ${Object.keys(cfg.scenes).length + 1}`,
+        });
         if (!name?.trim() || cfg.scenes[name.trim()]) return;
         cfg.scenes[name.trim()] = snapshotCurrentState(cfg);
         cfg.currentScene = name.trim();

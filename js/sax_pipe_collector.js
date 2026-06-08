@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
-import { ensureRenderLinkPatch, clearAllSlots, applySourceListLifecycle } from "./sax_ui_base.js";
+import { ensureRenderLinkPatch, clearAllSlots, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.PipeCollector";
@@ -26,12 +26,9 @@ const SOURCE_SPEC = {
         if (!pipeOutput) return null;
         const gi = (srcNode.outputs ?? []).indexOf(pipeOutput);
         return {
-            sourceId:      srcNode.id,
-            sourceTitle:   srcNode.title || srcNode.type || `Node#${srcNode.id}`,
+            ...initSourceBase(srcNode),
             pipeSlotIndex: gi,
             slotCount:     1,
-            sig:           "",
-            isSub:         srcNode.subgraph != null,
         };
     },
 

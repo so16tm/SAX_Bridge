@@ -8,6 +8,7 @@ import {
     hideWidget as _hideWidgetCommon,
     clearAllSlots,
     loadWildcardList,
+    showConfirmDialog,
 } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
@@ -824,12 +825,16 @@ function showManagerDialog(node, getState, applyDraft) {
             renderAll();
         });
         const delBtn = h("button", STYLE.btn + "color:#fcc;border-color:#622;", `Delete${refs > 0 ? ` (${refs} refs)` : ""}`);
-        delBtn.addEventListener("click", () => {
+        delBtn.addEventListener("click", async () => {
             if (refs > 0) {
                 const safeName = sanitizeForDialog(item.name, 80);
-                if (!confirm(`"${safeName}" is referenced by ${refs} relation(s).\n\nDelete it? Affected relations will become unset.`)) {
-                    return;
-                }
+                const ok = await showConfirmDialog({
+                    title:   "Delete item",
+                    message: `"${safeName}" is referenced by ${refs} relation(s).\n\nDelete it? Affected relations will become unset.`,
+                    danger:  true,
+                    okLabel: "Delete",
+                });
+                if (!ok) return;
             }
             draft.items = draft.items.filter(it => it.id !== item.id);
             // 削除後のフォールバックもリスト表示順の先頭にする（draft.items[0] ではない）
@@ -926,9 +931,15 @@ function showManagerDialog(node, getState, applyDraft) {
             const foot = h("div", "display:flex;gap:8px;justify-content:flex-end;margin-top:4px;flex-shrink:0;");
             const closeBtn = h("button", STYLE.btn + "padding:7px 16px;", "Close");
             const saveBtn  = h("button", STYLE.primaryBtn, "Save");
-            closeBtn.addEventListener("click", () => {
+            closeBtn.addEventListener("click", async () => {
                 if (dirty) {
-                    if (!confirm("You have unsaved changes. Discard and close?")) return;
+                    const ok = await showConfirmDialog({
+                        title:   "Discard changes?",
+                        message: "You have unsaved changes. Discard and close?",
+                        danger:  true,
+                        okLabel: "Discard",
+                    });
+                    if (!ok) return;
                 }
                 close();
             });
@@ -1055,12 +1066,16 @@ function showManagerDialog(node, getState, applyDraft) {
                     row.appendChild(h("span", "font-size:10px;color:#888;flex-shrink:0;", `${refs} item(s)`));
 
                     const delBtn = h("button", STYLE.btn + "padding:3px 8px;font-size:11px;color:#fcc;flex-shrink:0;", "Remove");
-                    delBtn.addEventListener("click", () => {
+                    delBtn.addEventListener("click", async () => {
                         if (refs > 0) {
                             const safeTag = sanitizeForDialog(tag, 60);
-                            if (!confirm(`Tag "${safeTag}" is used by ${refs} item(s).\n\nRemove it? Affected items will lose this tag.`)) {
-                                return;
-                            }
+                            const ok = await showConfirmDialog({
+                                title:   "Remove tag",
+                                message: `Tag "${safeTag}" is used by ${refs} item(s).\n\nRemove it? Affected items will lose this tag.`,
+                                danger:  true,
+                                okLabel: "Remove",
+                            });
+                            if (!ok) return;
                             draft.items = draft.items.map(it => ({
                                 ...it,
                                 tags: (it.tags ?? []).filter(t => t !== tag),

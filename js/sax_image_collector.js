@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
-import { ensureRenderLinkPatch, clearAllSlots, applySourceListLifecycle } from "./sax_ui_base.js";
+import { ensureRenderLinkPatch, clearAllSlots, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.ImageCollector";
@@ -29,12 +29,9 @@ const SOURCE_SPEC = {
         const slotsTaken       = Math.min(imageOutputs.length, remaining);
         const imageSlotIndices = imageOutputs.slice(0, slotsTaken).map(({ gi }) => gi);
         return {
-            sourceId:        srcNode.id,
-            sourceTitle:     srcNode.title || srcNode.type || `Node#${srcNode.id}`,
+            ...initSourceBase(srcNode),
             imageSlotIndices,
             slotCount:       imageSlotIndices.length,
-            sig:             "",   // makeSourceListWidget 内部の onConfigure setTimeout で上書きされる
-            isSub:           srcNode.subgraph != null,
         };
     },
 
