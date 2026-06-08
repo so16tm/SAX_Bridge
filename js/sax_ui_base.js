@@ -2,7 +2,17 @@
  * sax_ui_base.js — SAX シリーズ共通 Canvas UI テンプレート
  *
  * Exports:
- *   PAD, ROW_H
+ *
+ * 定数:
+ *   PAD, ROW_H, HEADER_H, COLUMN_HEADER_H, ADD_H, ADD_BTN_LABEL,
+ *   GAP, BTN_RADIUS, ITEM_MARGIN, BOTTOM_PAD, AUTO_EXPAND_THRESHOLD
+ *   SAX_COLORS                    — アイテム種別色 / フィードバック色 / プライマリアクション色
+ *   PRIMITIVE_TYPE_META, PRIMITIVE_BADGE_FALLBACK, PRIMITIVE_BADGE_TEXT_COLOR
+ *
+ * テーマ:
+ *   getComfyTheme()
+ *
+ * 描画プリミティブ:
  *   rrect(ctx, x, y, w, h, r, fill, stroke)
  *   txt(ctx, s, x, y, color, align, size)
  *   inX(pos, x, w)
@@ -14,29 +24,51 @@
  *   drawRowBg(ctx, W, y, h?)
  *   drawAddBtn(ctx, W, y, label, canAdd)
  *   rowLayout(W, opts)
+ *
+ * 文字列・ノード操作ユーティリティ:
+ *   fileBasenameWithoutExt(full)
+ *   stripInternal(items)
+ *   initSourceBase(srcNode)
+ *   dismissComboMenu()
+ *   hideWidget(widget, opts?)
+ *   clearAllSlots(node, opts?)
+ *
+ * widget factory:
+ *   makeItemListWidget(spec)
+ *   makeSourceListWidget(spec, coordinator) — Collector ノード共通ソースリストウィジェット
+ *   applySourceListLifecycle(nodeType, spec) — Collector 系 onNodeCreated/onSerialize/onConfigure 集約
+ *   makeJsonWidgetAccessor(widgetName, fallback?, opts?)
+ *
+ * dialog / popup:
  *   showParamPopup(screenX, screenY, currentVal, cfg, onCommit)
- *   makeItemListWidget(node, spec)
- *   makeSourceListWidget(spec) — Collector ノード共通ソースリストウィジェット
- *   autoResize(node, opts?) — ノード高さを computeSize に合わせて更新する
+ *   showDialog({ title, width?, maxHeight?, gap?, className?, build, onClose? })
+ *   showConfirmDialog({ title, message, danger?, okLabel?, cancelLabel? }) → Promise<boolean>
+ *   showPromptDialog({ title, defaultValue?, placeholder?, validate?, okLabel?, cancelLabel? }) → Promise<string|null>
+ *   showAlertDialog({ title, message, okLabel? }) → Promise<void>
+ *   showItemEditDialog({ title, width?, className?, fields, data, onCommit })
+ *
+ * リサイズ / リンク表示:
+ *   autoResize(node, opts?)
+ *   ensureRenderLinkPatch()
+ *   hideSourceLinks(node) / unhideSourceLinks(node)
+ *   applyLinkVisibility(node) / toggleLinkVisibility(node)
  *
  * 出力スロット接続維持ユーティリティ:
  *   captureOutputLinks(node, items, slotOffset?)
  *   restoreOutputLinks(node, items, syncFn, slotOffset?)
  *
+ * Combo → ファイルピッカー置換 / Wildcard:
+ *   replaceComboWithFilePicker(widget, opts)
+ *   loadWildcardList(opts?) → Promise<string[]>
+ *
  * ピッカー共通ユーティリティ:
- *   AUTO_EXPAND_THRESHOLD       — セクション強制展開の閾値定数
- *   makePickerSection(collapsed, key, label, color, childEls, defaultCollapsed?, forceOpen?)
+ *   makePickerSection(collapsed, key, label, color, childEls, defaultCollapsed?, forceOpen?, mode?)
  *   buildPickerContent({ mode, placeholder, renderContent, onApply, onCancel })
  *     → { element, focusSearch, cleanup }
- *   showFilePicker(opts)         — 汎用ファイルピッカーダイアログ
+ *   showFilePicker(opts) — 汎用ファイルピッカーダイアログ
  *
  * DOM UI ヘルパー:
  *   h(tag, css, text)
- *   showDialog({ title, width, maxHeight, gap, className, build })
- *
- * SAX 共通配色:
- *   SAX_COLORS.group / subgraph / node / widget  — アイテム種別テキスト色
- *   SAX_COLORS.primaryBg / primaryHoverBg / primaryText  — プライマリアクション
  */
 
 import { app } from "../../scripts/app.js";
@@ -561,7 +593,7 @@ export function showParamPopup(screenX, screenY, currentVal, cfg, onCommit) {
     };
 
     input.addEventListener("keydown", e => {
-        if (e.key === "Enter")                              { e.preventDefault(); commit(); }
+        if (e.key === "Enter" && !e.isComposing)            { e.preventDefault(); commit(); }
         if (e.key === "Escape")                             { close(); }
         if (e.key === "ArrowLeft"  || e.key === "ArrowDown")  { e.preventDefault(); applyDelta(-step); }
         if (e.key === "ArrowRight" || e.key === "ArrowUp")    { e.preventDefault(); applyDelta(+step); }
@@ -662,13 +694,18 @@ export function showConfirmDialog({ title, message, danger = false, okLabel = "O
     return new Promise((resolve) => {
         let answered = false;
         const finish = (v) => { if (answered) return; answered = true; resolve(v); };
+        let onKey = null;
+        const cleanup = () => {
+            if (onKey) document.removeEventListener("keydown", onKey);
+            onKey = null;
+        };
 
-        const close = showDialog({
+        showDialog({
             title,
             width: 380,
             gap: 12,
             className: "__sax_confirm_dlg",
-            onClose: () => finish(false),
+            onClose: () => { cleanup(); finish(false); },
             build(dlg, closeFn) {
                 const msg = h("div",
                     "white-space:pre-wrap;color:var(--input-text,#ddd);font-size:12px;line-height:1.5;",
@@ -686,6 +723,8 @@ export function showConfirmDialog({ title, message, danger = false, okLabel = "O
                     `background:${okBg};color:#fff;cursor:pointer;font-weight:bold;`,
                     okLabel);
 
+                // closeFn は onClose 経由で cleanup を実行するため、keydown ハンドラ側で
+                // 重複 removeEventListener を呼ばない (onClose で集約)。
                 cancelBtn.addEventListener("click", () => { finish(false); closeFn(); });
                 okBtn.addEventListener("click",     () => { finish(true);  closeFn(); });
 
@@ -693,27 +732,11 @@ export function showConfirmDialog({ title, message, danger = false, okLabel = "O
                 foot.appendChild(okBtn);
                 dlg.appendChild(foot);
 
-                const onKey = (e) => {
+                onKey = (e) => {
                     if (e.key === "Enter")  { e.preventDefault(); finish(true);  closeFn(); }
                     if (e.key === "Escape") { e.preventDefault(); finish(false); closeFn(); }
                 };
                 document.addEventListener("keydown", onKey);
-                // close 時に keydown を外す
-                const origOnClose = close;
-                // showDialog の onClose は外側でハンドリング済みのため
-                // overlay.remove で removeEventListener が確実に走るよう、ここでも close 時にクリーンアップする。
-                const cleanup = () => document.removeEventListener("keydown", onKey);
-                // closeFn は build 引数で受け取った close — 上書きせずに wrap する代わりに、
-                // overlay の remove を観測する Promise で cleanup を保証。
-                Promise.resolve().then(() => {
-                    const obs = new MutationObserver(() => {
-                        if (!document.body.contains(close.overlay)) {
-                            cleanup();
-                            obs.disconnect();
-                        }
-                    });
-                    obs.observe(document.body, { childList: true });
-                });
 
                 requestAnimationFrame(() => okBtn.focus());
             },
@@ -782,7 +805,7 @@ export function showPromptDialog({ title, defaultValue = "", placeholder = "", v
                 okBtn.addEventListener("click", tryCommit);
 
                 inp.addEventListener("keydown", (e) => {
-                    if (e.key === "Enter")  { e.preventDefault(); tryCommit(); }
+                    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); tryCommit(); }
                     if (e.key === "Escape") { e.preventDefault(); finish(null); closeFn(); }
                 });
 
@@ -806,13 +829,18 @@ export function showAlertDialog({ title, message, okLabel = "OK" }) {
     return new Promise((resolve) => {
         let answered = false;
         const finish = () => { if (answered) return; answered = true; resolve(); };
+        let onKey = null;
+        const cleanup = () => {
+            if (onKey) document.removeEventListener("keydown", onKey);
+            onKey = null;
+        };
 
-        const close = showDialog({
+        showDialog({
             title,
             width: 380,
             gap: 12,
             className: "__sax_alert_dlg",
-            onClose: () => finish(),
+            onClose: () => { cleanup(); finish(); },
             build(dlg, closeFn) {
                 const msg = h("div",
                     "white-space:pre-wrap;color:var(--input-text,#ddd);font-size:12px;line-height:1.5;",
@@ -829,21 +857,12 @@ export function showAlertDialog({ title, message, okLabel = "OK" }) {
                 foot.appendChild(okBtn);
                 dlg.appendChild(foot);
 
-                const onKey = (e) => {
+                onKey = (e) => {
                     if (e.key === "Enter" || e.key === "Escape") {
                         e.preventDefault(); finish(); closeFn();
                     }
                 };
                 document.addEventListener("keydown", onKey);
-                Promise.resolve().then(() => {
-                    const obs = new MutationObserver(() => {
-                        if (!document.body.contains(close.overlay)) {
-                            document.removeEventListener("keydown", onKey);
-                            obs.disconnect();
-                        }
-                    });
-                    obs.observe(document.body, { childList: true });
-                });
 
                 requestAnimationFrame(() => okBtn.focus());
             },
@@ -873,7 +892,6 @@ export function showAlertDialog({ title, message, okLabel = "OK" }) {
  *   ensureCoordinator:    (node, factory) => object,  // sax_dynamic_slot_coordinator.ensureCoordinator
  *   initialSize?:         [number, number],     // 初期サイズ [minW, h]。デフォルト [280, 1]
  *   clearOutputsOnCreate?: boolean,             // true ならノード作成時に outputs もクリア (NodeCollector)
- *   clearAllSlots:        (node, opts?) => void, // sax_ui_base.clearAllSlots (循環回避のため引数で受ける)
  * }} spec
  */
 export function applySourceListLifecycle(nodeType, spec) {
@@ -883,7 +901,6 @@ export function applySourceListLifecycle(nodeType, spec) {
         ensureCoordinator,
         initialSize = [280, 1],
         clearOutputsOnCreate = false,
-        clearAllSlots: clearAllSlotsFn,
     } = spec;
 
     if (typeof buildCoordinatorSpec !== "function") {
@@ -892,16 +909,13 @@ export function applySourceListLifecycle(nodeType, spec) {
     if (typeof ensureCoordinator !== "function") {
         throw new Error("applySourceListLifecycle: ensureCoordinator は必須です");
     }
-    if (typeof clearAllSlotsFn !== "function") {
-        throw new Error("applySourceListLifecycle: clearAllSlots は必須です");
-    }
 
     const [minW, initH] = initialSize;
 
     const origOnNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
         origOnNodeCreated?.apply(this, arguments);
-        clearAllSlotsFn(this, { outputs: clearOutputsOnCreate });
+        clearAllSlots(this, { outputs: clearOutputsOnCreate });
 
         const coordinator = ensureCoordinator(this, buildCoordinatorSpec);
         this._saxSourceWidget = makeSourceListWidget(sourceSpec, coordinator);
@@ -994,8 +1008,8 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
                     inp.value = ed[f.key] ?? "";
                     inp.addEventListener("input",   () => { ed[f.key] = inp.value; });
                     inp.addEventListener("keydown", (e) => {
-                        if (e.key === "Enter")  okBtn?.click();
-                        if (e.key === "Escape") close();
+                        if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); okBtn?.click(); }
+                        if (e.key === "Escape") { e.preventDefault(); close(); }
                     });
                     row.appendChild(inp);
                     if (!firstInput) firstInput = inp;
@@ -1048,6 +1062,10 @@ export function showItemEditDialog({ title, width = 380, className, fields, data
                     inp.addEventListener("change", () => {
                         const v = parseFloat(inp.value);
                         set(isNaN(v) ? (ed[f.key] ?? 0) : v);
+                    });
+                    inp.addEventListener("keydown", (e) => {
+                        if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); okBtn?.click(); }
+                        if (e.key === "Escape") { e.preventDefault(); close(); }
                     });
 
                     let _ht = null, _hi = null;
@@ -1606,14 +1624,6 @@ export function makeSourceListWidget(spec, coordinator) {
             .map(o => `${o.label ?? o.name ?? ""}:${o.type ?? ""}`).join(",");
     }
 
-    function _autoResize(node) {
-        const sz = node.computeSize?.();
-        if (sz && node.size[1] !== sz[1]) {
-            node.size[1] = sz[1];
-            app.canvas?.setDirty(true, true);
-        }
-    }
-
 // ---------------------------------------------------------------------------
 // autoResize — ノード高さを computeSize に合わせて更新するユーティリティ
 // ---------------------------------------------------------------------------
@@ -1849,7 +1859,7 @@ export async function loadWildcardList({
         });
 
         applyLinkVisibility(collectorNode);
-        _autoResize(collectorNode);
+        autoResize(collectorNode);
     }
 
     function removeSourceAt(node, idx) {
@@ -1881,7 +1891,7 @@ export async function loadWildcardList({
         });
 
         applyLinkVisibility(node);
-        _autoResize(node);
+        autoResize(node);
         app.canvas?.setDirty(true, false);
     }
 
@@ -1954,13 +1964,14 @@ export async function loadWildcardList({
         });
 
         applyLinkVisibility(node);
-        _autoResize(node);
+        autoResize(node);
         app.canvas?.setDirty(true, false);
     }
 
-    // NOTE(Phase 1.2.B): resetAllSources は Coordinator.mutate を経由していない。
-    // 現状利用は hasOutputSlots=true 経路では発生しないが、TODO 4 で NodeCollector が
-    // hasOutputSlots=true で Coordinator 移行する際に再評価し、必要なら mutate ラップ化する。
+    // WARNING(Phase 1.2.B): resetAllSources は Coordinator.mutate を経由していない。
+    // 現状 hasOutputSlots=true パスで未呼出のため動作影響なし。将来 NodeCollector 等
+    // hasOutputSlots=true ノードがこの関数を呼ぶと R9 (capture/restore 違反) になる。
+    // 詳細は `docs/knowledge/20260608-reset-sources-coordinator-warning.md` 参照。
     function resetAllSources(node) {
         for (const [id] of _hiddenLinkIds) {
             if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
@@ -1975,7 +1986,7 @@ export async function loadWildcardList({
             for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
         }
         node._remoteSources = [];
-        _autoResize(node);
+        autoResize(node);
         app.canvas?.setDirty(true, false);
     }
 
@@ -2263,7 +2274,7 @@ export async function loadWildcardList({
                 }
             }
             applyLinkVisibility(node);
-            _autoResize(node);
+            autoResize(node);
         }, 0);
     }
 

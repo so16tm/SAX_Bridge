@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
-import { ensureRenderLinkPatch, showDialog, h, clearAllSlots, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
+import { ensureRenderLinkPatch, showDialog, h, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.NodeCollector";
@@ -183,10 +183,11 @@ function buildNodeCollectorSpec(node) {
         getEntities: () => node._remoteSources ?? [],
         setEntities: (newSources) => { node._remoteSources = newSources; },
         // hints (entityHints) は sourceId をキーとする Map。framework
-        // (sax_ui_base.js:1408,1445) の rebuildAllSources auto-hints も
+        // (sax_ui_base.js) の rebuildAllSources auto-hints も
         // node._rebuildHints に同形式で設定する。entityHints が未指定経路
         // (rebuildAllSources 直接呼出) では node._rebuildHints をフォールバック参照する。
-        // framework auto-hints の例外時 cleanup 不足は別 Issue で対応予定。
+        // framework auto-hints の例外時 cleanup 不足は別 Issue で対応予定
+        // (docs/knowledge/20260608-node-collector-hints-cleanup.md 参照)。
         entityToSlots: (src, hints) => {
             const hint = hints?.get?.(src?.sourceId)
                 ?? node._rebuildHints?.get?.(src?.sourceId);
@@ -355,7 +356,6 @@ app.registerExtension({
             sourceSpec:           SOURCE_SPEC,
             buildCoordinatorSpec: buildNodeCollectorSpec,
             ensureCoordinator,
-            clearAllSlots,
             initialSize:          [320, 1],
             // NodeCollector は出力・入力の両方を JS で動的管理
             clearOutputsOnCreate: true,

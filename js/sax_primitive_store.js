@@ -488,7 +488,7 @@ app.registerExtension({
 
             // 出力スロット・items_json 同期は同期フェーズで実行
             // （setTimeout 内で Node Collector 側の connect 補完より後回しになる競合を回避）
-            syncOutputSlots(this, items);
+            syncOutputSlots(this, this._primitiveItems);
 
             // LiteGraph のリンク復元完了後に Coordinator 経由で snapshot を記録
             const coordinator = ensureCoordinator(this, buildPrimitiveStoreSpec);

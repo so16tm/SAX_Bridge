@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
-import { ensureRenderLinkPatch, clearAllSlots, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
+import { ensureRenderLinkPatch, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.ImageCollector";
@@ -104,7 +104,6 @@ app.registerExtension({
             sourceSpec:           SOURCE_SPEC,
             buildCoordinatorSpec: buildImageCollectorSpec,
             ensureCoordinator,
-            clearAllSlots,
             initialSize:          [280, 1],
             // Image_Collector は outputs を保持する (Python 定義 IMAGE 出力)
             clearOutputsOnCreate: false,

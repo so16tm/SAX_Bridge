@@ -522,7 +522,10 @@ function makeSceneWidget(node) {
             }
             if (inX(pos_, p.gearX, 24)) { showSceneManager(node); return true; }
             if (inX(pos_, p.addX,  52)) { runAdd(node);    return true; }
-            if (inX(pos_, p.rescanX, 58)) { runRescan(node); return true; }
+            if (inX(pos_, p.rescanX, 58)) {
+                runRescan(node).catch(e => console.warn("[SAX Toggle] runRescan error:", e));
+                return true;
+            }
             return false;
         },
     };
