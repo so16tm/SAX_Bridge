@@ -1321,6 +1321,149 @@ export function autoResize(node, { minH = 0 } = {}) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// replaceComboWithFilePicker — COMBO ウィジェットを showFilePicker に差し替え
+// ---------------------------------------------------------------------------
+
+/**
+ * COMBO ウィジェットの mouse をフックして、pointerup 時に standard menu を抑止し
+ * showFilePicker を開く共通ヘルパー。
+ *
+ * @param {object} widget - 差し替え対象の COMBO ウィジェット
+ * @param {{
+ *   title:        string,
+ *   placeholder?: string,
+ *   className?:   string,
+ *   displayName?: (name: string) => string,
+ *   onSelect?:    (name: string) => void,
+ *   placeholderMode?: "noop" | "insert" | "replace",
+ *     // "replace": this.value = name; this.callback?.(name); (デフォルト)
+ *     // "insert":  onSelect 内でテキスト挿入する想定。combo 自体の value は不変
+ *     //           (呼び出し側で Object.defineProperty(widget, "value") 済みのケース)
+ *     // "noop":    何もしない
+ *   filterValues?: (values: string[]) => string[],
+ *     // options.values の絞り込み (例: プレースホルダ除去)
+ * }} opts
+ */
+export function replaceComboWithFilePicker(widget, opts) {
+    const {
+        title,
+        placeholder,
+        className,
+        displayName,
+        onSelect,
+        placeholderMode = "replace",
+        filterValues = null,
+    } = opts;
+
+    const origMouse = widget.mouse;
+    widget.mouse = function (event, pos, node) {
+        if (event.type === "pointerup") {
+            requestAnimationFrame(() => {
+                dismissComboMenu();
+                const rawValues = this.options?.values || [];
+                const items = filterValues ? filterValues(rawValues) : rawValues;
+                showFilePicker({
+                    items,
+                    currentValue: placeholderMode === "replace" ? this.value : "",
+                    title,
+                    placeholder,
+                    mode: "single",
+                    className,
+                    displayName,
+                    onSelect: (name) => {
+                        if (placeholderMode === "replace") {
+                            this.value = name;
+                            this.callback?.(name);
+                            app.graph.setDirtyCanvas(true, false);
+                        }
+                        onSelect?.(name);
+                    },
+                });
+            });
+        }
+        return origMouse?.call(this, event, pos, node) ?? false;
+    };
+}
+
+// ---------------------------------------------------------------------------
+// makeJsonWidgetAccessor — JSON 文字列ウィジェットの読み書きアクセサ
+// ---------------------------------------------------------------------------
+
+/**
+ * 指定名の JSON 文字列ウィジェットに対する読み書きアクセサを生成する。
+ *
+ * @param {string} widgetName - 対象ウィジェット名
+ * @param {*} [fallback=[]]   - パース失敗時に返す値（ディープコピーされないため呼び出し側でクローン管理）
+ * @param {{ fireCallback?: boolean }} [opts]
+ *   fireCallback: true なら saveEntries 時に widget.callback?.(widget.value) を呼ぶ
+ * @returns {{
+ *   getEntries: (node: object) => any,
+ *   saveEntries: (node: object, value: any) => void,
+ * }}
+ */
+export function makeJsonWidgetAccessor(widgetName, fallback = [], { fireCallback = false } = {}) {
+    return {
+        getEntries(node) {
+            const w = node.widgets?.find(w => w.name === widgetName);
+            try { return JSON.parse(w?.value ?? "null") ?? fallback; }
+            catch { return fallback; }
+        },
+        saveEntries(node, value) {
+            const w = node.widgets?.find(w => w.name === widgetName);
+            if (!w) return;
+            w.value = JSON.stringify(value);
+            if (fireCallback) w.callback?.(w.value);
+        },
+    };
+}
+
+// ---------------------------------------------------------------------------
+// loadWildcardList — Impact-Pack の Wildcard 一覧をモジュールスコープでキャッシュ取得
+// ---------------------------------------------------------------------------
+
+let _wildcardListCache = null;
+
+/** Wildcard 名の最大長 (DoS / プロトタイプ汚染防止の上限) */
+const WILDCARD_NAME_MAX_LENGTH_DEFAULT = 200;
+/** Wildcard リストの最大件数 */
+const WILDCARD_LIST_MAX_ITEMS_DEFAULT  = 1000;
+
+/**
+ * Impact-Pack の `/impact/wildcards/list` から Wildcard 名一覧を取得する。
+ * 成功時にモジュールスコープでメモ化する。Impact-Pack 未導入時は空配列を返す。
+ *
+ * 信頼境界外の応答に対して、文字列要素のみ採用し長さ・件数の上限を適用する。
+ *
+ * @param {{
+ *   maxNameLength?: number,
+ *   maxItems?:      number,
+ *   forceRefresh?:  boolean,
+ * }} [opts]
+ * @returns {Promise<string[]>}
+ */
+export async function loadWildcardList({
+    maxNameLength = WILDCARD_NAME_MAX_LENGTH_DEFAULT,
+    maxItems      = WILDCARD_LIST_MAX_ITEMS_DEFAULT,
+    forceRefresh  = false,
+} = {}) {
+    if (!forceRefresh && _wildcardListCache != null) return _wildcardListCache;
+    try {
+        const { api } = await import("../../scripts/api.js");
+        const res = await api.fetchApi("/impact/wildcards/list");
+        if (!res.ok) return [];
+        const data = await res.json();
+        const raw  = Array.isArray(data?.data) ? data.data : [];
+        const list = raw
+            .filter(v => typeof v === "string" && v.length > 0 && v.length <= maxNameLength)
+            .slice(0, maxItems);
+        _wildcardListCache = list;
+        return list;
+    } catch {
+        return [];
+    }
+}
+
     function _defaultSyncSlotLabels(node) {
         const sources = _getSources(node);
         let absIdx = 0;
@@ -1657,19 +1800,14 @@ export function autoResize(node, { minH = 0 } = {}) {
                     const srcNode = app.graph.getNodeById(sources[si].sourceId);
                     if (srcNode) {
                         const savedOffset = [...app.canvas.ds.offset];
-                        import("./sax_picker.js").then(({ panCanvasTo, showReturnButton, clearPickerHighlight }) => {
+                        import("./sax_picker.js").then(({ panCanvasTo, showReturnButton, clearPickerHighlight, highlightNode }) => {
                             panCanvasTo(
                                 srcNode.pos[0] + (srcNode.size?.[0] ?? 0) / 2,
                                 srcNode.pos[1] + (srcNode.size?.[1] ?? 0) / 2
                             );
                             const jumpTimer = setTimeout(() => {
                                 for (const n of app.graph._nodes) n.is_selected = false;
-                                if (typeof app.canvas.selectNode === "function") {
-                                    app.canvas.selectNode(srcNode, false);
-                                } else {
-                                    app.canvas.selected_nodes = { [srcNode.id]: srcNode };
-                                    srcNode.is_selected = true;
-                                }
+                                highlightNode(srcNode);
                                 app.canvas.setDirty(true, true);
                             }, 100);
                             showReturnButton(() => {
@@ -1681,12 +1819,7 @@ export function autoResize(node, { minH = 0 } = {}) {
                                 setTimeout(() => {
                                     if (!app.graph.getNodeById(mouseNode.id)) return;
                                     for (const n of app.graph._nodes) n.is_selected = false;
-                                    if (typeof app.canvas.selectNode === "function") {
-                                        app.canvas.selectNode(mouseNode, false);
-                                    } else {
-                                        app.canvas.selected_nodes = { [mouseNode.id]: mouseNode };
-                                        mouseNode.is_selected = true;
-                                    }
+                                    highlightNode(mouseNode);
                                     app.canvas.setDirty(true, true);
                                 }, 100);
                             });

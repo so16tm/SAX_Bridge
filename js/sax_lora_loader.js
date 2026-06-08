@@ -16,6 +16,8 @@ import {
     showFilePicker,
     fileBasenameWithoutExt,
     hideWidget,
+    autoResize,
+    makeJsonWidgetAccessor,
 } from "./sax_ui_base.js";
 
 // LoRA 表示名（パス・拡張子なし）— モジュールスコープで共有
@@ -74,15 +76,9 @@ function showLoraPicker(currentName, onSelect, { mode = "single", onConfirm = nu
 // JSON ヘルパー
 // ---------------------------------------------------------------------------
 
-function getEntries(node) {
-    const w = node.widgets?.find(w => w.name === WIDGET_JSON);
-    try { return JSON.parse(w?.value ?? "[]"); } catch { return []; }
-}
-
-function saveEntries(node, entries) {
-    const w = node.widgets?.find(w => w.name === WIDGET_JSON);
-    if (w) w.value = JSON.stringify(entries);
-}
+const _jsonAccessor = makeJsonWidgetAccessor(WIDGET_JSON, []);
+const getEntries  = (node) => _jsonAccessor.getEntries(node);
+const saveEntries = (node, entries) => _jsonAccessor.saveEntries(node, entries);
 
 // ---------------------------------------------------------------------------
 // 統合編集ダイアログ
@@ -217,9 +213,8 @@ function buildUI(node) {
 
     node.addCustomWidget(widget);
 
-    const [, newH] = node.computeSize();
     node.size[0] = Math.max(node.size[0], 280);
-    node.size[1] = Math.max(newH, 80);
+    autoResize(node, { minH: 80 });
     app.graph.setDirtyCanvas(true, false);
 }
 

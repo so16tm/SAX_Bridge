@@ -3,33 +3,7 @@
  */
 
 import { app } from "../../scripts/app.js";
-import { showFilePicker, fileBasenameWithoutExt, dismissComboMenu } from "./sax_ui_base.js";
-
-function replaceComboWithPicker(widget, { title, placeholder, className, displayName: displayFn }) {
-    const origMouse = widget.mouse;
-    widget.mouse = function (event, pos, node) {
-        if (event.type === "pointerup") {
-            requestAnimationFrame(() => {
-                dismissComboMenu();
-                showFilePicker({
-                    items:        this.options.values || [],
-                    currentValue: this.value,
-                    title,
-                    placeholder,
-                    mode:         "single",
-                    className,
-                    displayName:  displayFn,
-                    onSelect: (name) => {
-                        this.value = name;
-                        this.callback?.(name);
-                        app.graph.setDirtyCanvas(true, false);
-                    },
-                });
-            });
-        }
-        return origMouse?.call(this, event, pos, node) ?? false;
-    };
-}
+import { replaceComboWithFilePicker, fileBasenameWithoutExt } from "./sax_ui_base.js";
 
 app.registerExtension({
     name: "SAX.Loader",
@@ -39,7 +13,7 @@ app.registerExtension({
 
         const ckptCombo = node.widgets?.find(w => w.name === "ckpt_name");
         if (ckptCombo) {
-            replaceComboWithPicker(ckptCombo, {
+            replaceComboWithFilePicker(ckptCombo, {
                 title:       "Select Checkpoint",
                 placeholder: "Search checkpoint…",
                 className:   "__sax_ckpt_picker",
@@ -49,7 +23,7 @@ app.registerExtension({
 
         const loraCombo = node.widgets?.find(w => w.name === "lora_name");
         if (loraCombo) {
-            replaceComboWithPicker(loraCombo, {
+            replaceComboWithFilePicker(loraCombo, {
                 title:       "Select LoRA",
                 placeholder: "Search LoRA name…",
                 className:   "__sax_lora_picker",

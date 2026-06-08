@@ -1,22 +1,9 @@
 import { app } from "../../scripts/app.js";
-import { showFilePicker, fileBasenameWithoutExt, dismissComboMenu } from "./sax_ui_base.js";
-
-let _wildcards_list_cache = null;
-
-async function loadWildcardsFromAPI() {
-    try {
-        const { api } = await import("../../scripts/api.js");
-        const res = await api.fetchApi("/impact/wildcards/list");
-        if (res.ok) {
-            const data = await res.json();
-            _wildcards_list_cache = Array.isArray(data.data) ? data.data : [];
-            return _wildcards_list_cache;
-        }
-    } catch (e) {
-        // Impact Pack のサーバーAPIが無い場合は空リスト
-    }
-    return [];
-}
+import {
+    fileBasenameWithoutExt,
+    replaceComboWithFilePicker,
+    loadWildcardList,
+} from "./sax_ui_base.js";
 
 app.registerExtension({
     name: "SAX.Prompt",
@@ -36,30 +23,20 @@ app.registerExtension({
             });
             loraCombo.serializeValue = () => LORA_PLACEHOLDER;
 
-            const origLoraMouse = loraCombo.mouse;
-            loraCombo.mouse = function(event, pos, node) {
-                if (event.type === "pointerup") {
-                    requestAnimationFrame(() => {
-                        dismissComboMenu();
-                        const values = (this.options?.values || []).filter(v => v !== LORA_PLACEHOLDER);
-                        showFilePicker({
-                            items: values,
-                            title: "Select LoRA to Insert",
-                            placeholder: "Search LoRA name…",
-                            mode: "single",
-                            className: "__sax_prompt_lora_picker",
-                            displayName: fileBasenameWithoutExt,
-                            onSelect(name) {
-                                if (!tbox) return;
-                                let lora_name = name;
-                                if (lora_name.endsWith(".safetensors")) lora_name = lora_name.slice(0, -12);
-                                tbox.value += `<lora:${lora_name}>`;
-                            },
-                        });
-                    });
-                }
-                return origLoraMouse?.call(this, event, pos, node) ?? false;
-            };
+            replaceComboWithFilePicker(loraCombo, {
+                title:       "Select LoRA to Insert",
+                placeholder: "Search LoRA name…",
+                className:   "__sax_prompt_lora_picker",
+                displayName: fileBasenameWithoutExt,
+                placeholderMode: "insert",
+                filterValues: (values) => values.filter(v => v !== LORA_PLACEHOLDER),
+                onSelect: (name) => {
+                    if (!tbox) return;
+                    let lora_name = name;
+                    if (lora_name.endsWith(".safetensors")) lora_name = lora_name.slice(0, -12);
+                    tbox.value += `<lora:${lora_name}>`;
+                },
+            });
         }
 
         if (wcCombo) {
@@ -70,7 +47,7 @@ app.registerExtension({
             });
             wcCombo.serializeValue = () => WC_PLACEHOLDER;
 
-            const wcList = await loadWildcardsFromAPI();
+            const wcList = await loadWildcardList();
             if (wcList && wcList.length > 0) {
                 let _wcValues = wcList;
                 Object.defineProperty(wcCombo.options, "values", {
@@ -80,28 +57,18 @@ app.registerExtension({
                 });
             }
 
-            const origWcMouse = wcCombo.mouse;
-            wcCombo.mouse = function(event, pos, node) {
-                if (event.type === "pointerup") {
-                    requestAnimationFrame(() => {
-                        dismissComboMenu();
-                        const values = (this.options?.values || []).filter(v => v !== WC_PLACEHOLDER);
-                        showFilePicker({
-                            items: values,
-                            title: "Select Wildcard to Insert",
-                            placeholder: "Search wildcard…",
-                            mode: "single",
-                            className: "__sax_prompt_wc_picker",
-                            onSelect(name) {
-                                if (!tbox) return;
-                                if (tbox.value !== "") tbox.value += ", ";
-                                tbox.value += name;
-                            },
-                        });
-                    });
-                }
-                return origWcMouse?.call(this, event, pos, node) ?? false;
-            };
+            replaceComboWithFilePicker(wcCombo, {
+                title:       "Select Wildcard to Insert",
+                placeholder: "Search wildcard…",
+                className:   "__sax_prompt_wc_picker",
+                placeholderMode: "insert",
+                filterValues: (values) => values.filter(v => v !== WC_PLACEHOLDER),
+                onSelect: (name) => {
+                    if (!tbox) return;
+                    if (tbox.value !== "") tbox.value += ", ";
+                    tbox.value += name;
+                },
+            });
         }
 
         if (tbox && tbox.inputEl) {

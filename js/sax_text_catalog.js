@@ -7,6 +7,7 @@ import {
     fileBasenameWithoutExt,
     hideWidget as _hideWidgetCommon,
     clearAllSlots,
+    loadWildcardList,
 } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
@@ -205,23 +206,16 @@ async function ensureWildcardList(node) {
         node._textCatalogWildcardLoaded = true;
         return;
     }
-    try {
-        const { api } = await import("../../scripts/api.js");
-        const res = await api.fetchApi("/impact/wildcards/list");
-        if (!res.ok) return;
-        const data = await res.json();
-        // 信頼境界外: 文字列要素のみ採用、長さ・件数の上限で DoS / プロトタイプ汚染を防ぐ
-        const raw = Array.isArray(data?.data) ? data.data : [];
-        const list = raw
-            .filter(v => typeof v === "string" && v.length > 0 && v.length <= WILDCARD_NAME_MAX_LENGTH)
-            .slice(0, WILDCARD_LIST_MAX_ITEMS);
-        if (list.length > 0) {
-            combo.options.values = [WILDCARD_PLACEHOLDER, ...list];
-        }
+    // sax_ui_base.js の loadWildcardList を利用 (モジュールスコープでキャッシュ済み)。
+    // 失敗時は空配列が返るので例外は発生しない。ノードフラグはネットワーク取得が
+    // 成功 (空応答含む) した場合にのみ立てるため、ここでは list.length > 0 のみで判定する。
+    const list = await loadWildcardList({
+        maxNameLength: WILDCARD_NAME_MAX_LENGTH,
+        maxItems:      WILDCARD_LIST_MAX_ITEMS,
+    });
+    if (list.length > 0) {
+        combo.options.values = [WILDCARD_PLACEHOLDER, ...list];
         node._textCatalogWildcardLoaded = true;
-    } catch {
-        // Impact-Pack 未導入時はピッカーが空リストになる（ボタン無効化で対応）。
-        // フラグは立てないため、Impact-Pack を後からロードした場合に再試行できる。
     }
 }
 

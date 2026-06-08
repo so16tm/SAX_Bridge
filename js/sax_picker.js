@@ -50,6 +50,23 @@ export function panCanvasTo(cx, cy) {
     app.canvas.setDirty(true, true);
 }
 
+/**
+ * 単一ノードを Canvas 上で選択状態にする共通ヘルパー。
+ * `app.canvas.selectNode` が存在すればそれを優先し、無ければ `selected_nodes` への
+ * 直接代入にフォールバックする。
+ *
+ * @param {object} target - LiteGraph ノード
+ */
+export function highlightNode(target) {
+    if (!target) return;
+    if (typeof app.canvas.selectNode === "function") {
+        app.canvas.selectNode(target, false);
+    } else {
+        app.canvas.selected_nodes = { [target.id]: target };
+        target.is_selected = true;
+    }
+}
+
 export function clearPickerHighlight() {
     if (typeof app.canvas.deselectAllNodes === "function") {
         app.canvas.deselectAllNodes();
@@ -199,11 +216,7 @@ export function showPicker({
                 n.pos[0] + (n.size?.[0] ?? 0) / 2,
                 n.pos[1] + (n.size?.[1] ?? 0) / 2
             );
-            if (typeof app.canvas.selectNode === "function") {
-                app.canvas.selectNode(n, false);
-            } else {
-                app.canvas.selected_nodes = { [n.id]: n };
-            }
+            highlightNode(n);
             app.canvas.setDirty(true, true);
             showReturnButton(() => {
                 overlay.style.display = "flex";

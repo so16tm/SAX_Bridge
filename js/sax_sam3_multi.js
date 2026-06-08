@@ -21,6 +21,8 @@ import {
     rrect,
     txt,
     hideWidget,
+    autoResize,
+    makeJsonWidgetAccessor,
 } from "./sax_ui_base.js";
 
 const EXT_NAME    = "SAX.SAM3Multi";
@@ -38,16 +40,9 @@ function makeEntry() {
 // JSON ウィジェットアクセサ
 // ---------------------------------------------------------------------------
 
-function getItems(node) {
-    const w = node.widgets?.find(w => w.name === JSON_WIDGET);
-    if (!w) return [];
-    try { return JSON.parse(w.value) || []; } catch { return []; }
-}
-
-function saveItems(node, items) {
-    const w = node.widgets?.find(w => w.name === JSON_WIDGET);
-    if (w) { w.value = JSON.stringify(items); w.callback?.(w.value); }
-}
+const _jsonAccessor = makeJsonWidgetAccessor(JSON_WIDGET, [], { fireCallback: true });
+const getItems  = (node) => _jsonAccessor.getEntries(node);
+const saveItems = (node, items) => _jsonAccessor.saveEntries(node, items);
 
 // ---------------------------------------------------------------------------
 // 描画ヘルパー
@@ -182,9 +177,8 @@ function buildUI(node) {
         },
     }));
 
-    const [, newH] = node.computeSize();
     node.size[0] = Math.max(node.size[0], MIN_W);
-    node.size[1] = Math.max(newH, 80);
+    autoResize(node, { minH: 80 });
     app.graph.setDirtyCanvas(true, false);
 }
 

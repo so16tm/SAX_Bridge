@@ -8,6 +8,7 @@ import {
     hideWidget as _hideWidgetCommon,
     stripInternal,
     clearAllSlots,
+    makeJsonWidgetAccessor,
 } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
@@ -29,6 +30,10 @@ function hideWidget(widget) {
 const TYPE_META = PRIMITIVE_TYPE_META;
 /** SEED → INT 変換（下流ノードとの接続互換） */
 const OUTPUT_TYPE_MAP = { SEED: "INT" };
+
+// items_json の読み取り専用アクセサ。
+// 書き込みは stripInternal を介する独自処理のため共通化していない。
+const _itemsJsonAccessor = makeJsonWidgetAccessor("items_json", []);
 
 // ---------------------------------------------------------------------------
 // アイテムファクトリ・ストア
@@ -471,13 +476,7 @@ app.registerExtension({
             const hw = this.widgets?.find(w => w.name === "items_json");
             if (hw) hideWidget(hw);
 
-            let items = [];
-            try {
-                const raw = hw?.value ?? "[]";
-                items = JSON.parse(raw);
-            } catch { items = []; }
-
-            this._primitiveItems = items;
+            this._primitiveItems = _itemsJsonAccessor.getEntries(this);
 
             // ウィジェット再生成（クロージャが新しい _primitiveItems を参照するようにする）
             if (this.widgets) {

@@ -20,6 +20,8 @@ import {
     drawRowBg,
     rowLayout,
     hideWidget,
+    autoResize,
+    makeJsonWidgetAccessor,
 } from "./sax_ui_base.js";
 import {
     getNodesInGroup,
@@ -42,15 +44,15 @@ function defaultConfig() {
     return { managed: [], scenes: { "Default": {} }, currentScene: "Default", backKey: "m" };
 }
 
+const _cfgAccessor = makeJsonWidgetAccessor(WIDGET_CFG, null);
+
 function getConfig(node) {
-    const w = node.widgets?.find(w => w.name === WIDGET_CFG);
-    try { return Object.assign(defaultConfig(), JSON.parse(w?.value ?? "{}")); }
-    catch { return defaultConfig(); }
+    const parsed = _cfgAccessor.getEntries(node);
+    return Object.assign(defaultConfig(), parsed && typeof parsed === "object" ? parsed : {});
 }
 
 function saveConfig(node, config) {
-    const w = node.widgets?.find(w => w.name === WIDGET_CFG);
-    if (w) w.value = JSON.stringify(config);
+    _cfgAccessor.saveEntries(node, config);
 }
 
 // ---------------------------------------------------------------------------
@@ -876,9 +878,8 @@ function rebuildUI(node) {
             return s;
         };
     }
-    const [, newH] = node.computeSize();
     node.size[0] = Math.max(node.size[0], 320);
-    node.size[1] = newH;
+    autoResize(node);
     app.graph.setDirtyCanvas(true, false);
 }
 
