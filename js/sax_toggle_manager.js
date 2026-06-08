@@ -6,6 +6,8 @@ import {
     hideReturnButton,
     itemKey,
     showPicker,
+    createFloatingButton,
+    highlightNode,
 } from "./sax_picker.js";
 import {
     PAD, ROW_H,
@@ -185,13 +187,14 @@ function scheduleGroupSync(node) {
 
 const LS_BACK_POS = "sax_tm_back_pos";
 
-const BACK_POS_STYLES = {
-    "top-left":      "top:60px;left:72px;",
-    "top-middle":    "top:60px;left:50%;transform:translateX(-50%);",
-    "top-right":     "top:60px;right:20px;",
-    "bottom-left":   "bottom:60px;left:72px;",
-    "bottom-middle": "bottom:60px;left:50%;transform:translateX(-50%);",
-    "bottom-right":  "bottom:60px;right:20px;",
+// createFloatingButton 用の position オブジェクトへ変換するマップ。
+const BACK_POS_OPTS = {
+    "top-left":      { top: "60px",    left: "72px" },
+    "top-middle":    { top: "60px",    left: "50%", transform: "translateX(-50%)" },
+    "top-right":     { top: "60px",    right: "20px" },
+    "bottom-left":   { bottom: "60px", left: "72px" },
+    "bottom-middle": { bottom: "60px", left: "50%", transform: "translateX(-50%)" },
+    "bottom-right":  { bottom: "60px", right: "20px" },
 };
 
 let _backBtn          = null;
@@ -243,34 +246,27 @@ function showBackButton() {
     hideBackButton();
     const pos = localStorage.getItem(LS_BACK_POS) ?? "bottom-left";
     if (pos === "hidden") return;
-    const posStyle = BACK_POS_STYLES[pos] ?? BACK_POS_STYLES["bottom-left"];
-
-    const btn = document.createElement("button");
+    const position = BACK_POS_OPTS[pos] ?? BACK_POS_OPTS["bottom-left"];
     const name = _managerNode?.title || _managerNode?.type || "Toggle Manager";
-    btn.textContent = `↩ ${name}`;
-    btn.style.cssText =
-        `position:fixed;${posStyle}z-index:9999;padding:9px 22px;` +
-        `background:var(--comfy-menu-bg,#171718);border:1px solid rgba(74,153,153,.6);border-radius:6px;` +
-        `color:var(--input-text,#ddd);cursor:pointer;font-size:13px;font-family:sans-serif;font-weight:bold;` +
-        `box-shadow:0 0 12px rgba(74,153,153,.4),0 2px 16px rgba(0,0,0,.5);`;
-    btn.addEventListener("mouseenter", () => { btn.style.background = "var(--comfy-menu-secondary-bg,#303030)"; });
-    btn.addEventListener("mouseleave", () => { btn.style.background = "var(--comfy-menu-bg,#171718)"; });
-    btn.addEventListener("click", goBack);
-    document.body.appendChild(btn);
-    _backBtn = btn;
+
+    _backBtn = createFloatingButton({
+        label:   `↩ ${name}`,
+        onClick: goBack,
+        position,
+        zIndex:  9999,
+        id:      "_saxToggleManagerBackBtn",
+    });
 }
 
-function _highlightTarget(target) {
+// 旧 _highlightTarget は sax_picker.js の highlightNode に統合済。
+// navigateToItem 内では生存確認 + 全 deselect + setTimeout の文脈が必要なため、
+// highlightNode をラップする小さなヘルパーとして残す (関数本体は集約済)。
+function _highlightAfterFrame(target) {
     if (!target) return;
     setTimeout(() => {
         if (!app.graph.getNodeById(target.id)) return;
         for (const n of app.graph._nodes) n.is_selected = false;
-        if (typeof app.canvas.selectNode === "function") {
-            app.canvas.selectNode(target, false);
-        } else {
-            app.canvas.selected_nodes = { [target.id]: target };
-            target.is_selected = true;
-        }
+        highlightNode(target);
         app.canvas.setDirty(true, true);
     }, 100);
 }
@@ -288,7 +284,7 @@ function navigateToItem(item, sourceNode = null) {
                     n.pos[0] + (n.size?.[0] ?? 0) / 2,
                     n.pos[1] + (n.size?.[1] ?? 0) / 2
                 );
-                _highlightTarget(n);
+                _highlightAfterFrame(n);
                 jumpNode = n;
                 jumped = true;
             }
@@ -305,7 +301,7 @@ function navigateToItem(item, sourceNode = null) {
                 clearPickerHighlight();
                 app.canvas.ds.offset[0] = savedOffset[0];
                 app.canvas.ds.offset[1] = savedOffset[1];
-                if (sourceNode) _highlightTarget(sourceNode);
+                if (sourceNode) _highlightAfterFrame(sourceNode);
                 else app.canvas.setDirty(true, true);
             });
         }

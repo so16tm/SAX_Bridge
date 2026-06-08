@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
-import { makeSourceListWidget, ensureRenderLinkPatch, clearAllSlots } from "./sax_ui_base.js";
+import { ensureRenderLinkPatch, clearAllSlots, applySourceListLifecycle } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
 const EXT_NAME  = "SAX.PipeCollector";
@@ -92,30 +92,13 @@ app.registerExtension({
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_TYPE) return;
-
-        const origOnNodeCreated = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function () {
-            origOnNodeCreated?.apply(this, arguments);
-            clearAllSlots(this, { outputs: false });
-
-            const coordinator = ensureCoordinator(this, buildPipeCollectorSpec);
-            this._saxSourceWidget = makeSourceListWidget(SOURCE_SPEC, coordinator);
-            this._saxSourceWidget.onNodeCreated.call(this);
-
-            this.size[0] = Math.max(this.size[0], 280);
-            this.size[1] = 1;
-        };
-
-        const origOnSerialize = nodeType.prototype.onSerialize;
-        nodeType.prototype.onSerialize = function (data) {
-            origOnSerialize?.apply(this, arguments);
-            this._saxSourceWidget?.onSerialize.call(this, data);
-        };
-
-        const origOnConfigure = nodeType.prototype.onConfigure;
-        nodeType.prototype.onConfigure = function (data) {
-            origOnConfigure?.apply(this, arguments);
-            this._saxSourceWidget?.onConfigure.call(this, data);
-        };
+        applySourceListLifecycle(nodeType, {
+            sourceSpec:           SOURCE_SPEC,
+            buildCoordinatorSpec: buildPipeCollectorSpec,
+            ensureCoordinator,
+            clearAllSlots,
+            initialSize:          [280, 1],
+            clearOutputsOnCreate: false,
+        });
     },
 });

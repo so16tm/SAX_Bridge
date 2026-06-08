@@ -608,7 +608,300 @@ export function showDialog({ title, width = 480, maxHeight = "76vh", gap = 8, cl
     overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
     document.body.appendChild(overlay);
 
+    // close を関数として返しつつ、overlay 制御メソッドをプロパティで付与する。
+    // 既存呼出 (`const close = showDialog({...}); close();`) は不変。
+    // showPicker など overlay の一時非表示 (peek-and-return) を要するケースは
+    // `close.hide()` / `close.show()` を使う。
+    close.overlay = overlay;
+    close.hide    = () => { overlay.style.display = "none"; };
+    close.show    = () => { overlay.style.display = "flex"; };
     return close;
+}
+
+// ---------------------------------------------------------------------------
+// showConfirmDialog / showPromptDialog / showAlertDialog
+//
+// ネイティブ confirm/prompt/alert の置き換え用 Promise ベース API。
+// showDialog をベースに OK/Cancel/Enter/Esc ハンドリングを統一する。
+// 呼出箇所の移行は Phase E で実施。
+// ---------------------------------------------------------------------------
+
+/**
+ * 確認ダイアログを表示する。
+ *
+ * @param {{
+ *   title:    string,
+ *   message:  string,
+ *   danger?:  boolean,   // true の場合 OK ボタンを警告色 (#d77) で表示
+ *   okLabel?: string,
+ *   cancelLabel?: string,
+ * }} opts
+ * @returns {Promise<boolean>}
+ */
+export function showConfirmDialog({ title, message, danger = false, okLabel = "OK", cancelLabel = "Cancel" }) {
+    return new Promise((resolve) => {
+        let answered = false;
+        const finish = (v) => { if (answered) return; answered = true; resolve(v); };
+
+        const close = showDialog({
+            title,
+            width: 380,
+            gap: 12,
+            className: "__sax_confirm_dlg",
+            onClose: () => finish(false),
+            build(dlg, closeFn) {
+                const msg = h("div",
+                    "white-space:pre-wrap;color:var(--input-text,#ddd);font-size:12px;line-height:1.5;",
+                    message ?? "");
+                dlg.appendChild(msg);
+
+                const foot = h("div", "display:flex;gap:8px;justify-content:flex-end;margin-top:4px;");
+                const cancelBtn = h("button",
+                    "padding:7px 18px;border-radius:4px;border:1px solid var(--border-color,#4e4e4e);" +
+                    "background:var(--comfy-input-bg,#222);color:var(--input-text,#ddd);cursor:pointer;",
+                    cancelLabel);
+                const okBg = danger ? "#a33" : "var(--primary-background,#0b8ce9)";
+                const okBtn = h("button",
+                    `padding:7px 18px;border-radius:4px;border:none;` +
+                    `background:${okBg};color:#fff;cursor:pointer;font-weight:bold;`,
+                    okLabel);
+
+                cancelBtn.addEventListener("click", () => { finish(false); closeFn(); });
+                okBtn.addEventListener("click",     () => { finish(true);  closeFn(); });
+
+                foot.appendChild(cancelBtn);
+                foot.appendChild(okBtn);
+                dlg.appendChild(foot);
+
+                const onKey = (e) => {
+                    if (e.key === "Enter")  { e.preventDefault(); finish(true);  closeFn(); }
+                    if (e.key === "Escape") { e.preventDefault(); finish(false); closeFn(); }
+                };
+                document.addEventListener("keydown", onKey);
+                // close 時に keydown を外す
+                const origOnClose = close;
+                // showDialog の onClose は外側でハンドリング済みのため
+                // overlay.remove で removeEventListener が確実に走るよう、ここでも close 時にクリーンアップする。
+                const cleanup = () => document.removeEventListener("keydown", onKey);
+                // closeFn は build 引数で受け取った close — 上書きせずに wrap する代わりに、
+                // overlay の remove を観測する Promise で cleanup を保証。
+                Promise.resolve().then(() => {
+                    const obs = new MutationObserver(() => {
+                        if (!document.body.contains(close.overlay)) {
+                            cleanup();
+                            obs.disconnect();
+                        }
+                    });
+                    obs.observe(document.body, { childList: true });
+                });
+
+                requestAnimationFrame(() => okBtn.focus());
+            },
+        });
+    });
+}
+
+/**
+ * プロンプトダイアログ (テキスト入力) を表示する。
+ *
+ * @param {{
+ *   title:        string,
+ *   defaultValue?: string,
+ *   placeholder?: string,
+ *   validate?:    (value: string) => string | null,  // null/undefined で OK、文字列で error メッセージ
+ *   okLabel?:     string,
+ *   cancelLabel?: string,
+ * }} opts
+ * @returns {Promise<string|null>}  cancel 時は null
+ */
+export function showPromptDialog({ title, defaultValue = "", placeholder = "", validate = null, okLabel = "OK", cancelLabel = "Cancel" }) {
+    return new Promise((resolve) => {
+        let answered = false;
+        const finish = (v) => { if (answered) return; answered = true; resolve(v); };
+
+        const close = showDialog({
+            title,
+            width: 400,
+            gap: 10,
+            className: "__sax_prompt_dlg",
+            onClose: () => finish(null),
+            build(dlg, closeFn) {
+                const inp = h("input",
+                    "background:var(--comfy-input-bg,#222);border:1px solid var(--content-bg,#4e4e4e);" +
+                    "border-radius:4px;color:var(--input-text,#ddd);padding:7px 9px;font-size:13px;" +
+                    "outline:none;");
+                inp.type        = "text";
+                inp.value       = defaultValue;
+                inp.placeholder = placeholder;
+                dlg.appendChild(inp);
+
+                const errEl = h("div", "color:#d77;font-size:11px;min-height:14px;", "");
+                dlg.appendChild(errEl);
+
+                const foot = h("div", "display:flex;gap:8px;justify-content:flex-end;");
+                const cancelBtn = h("button",
+                    "padding:7px 18px;border-radius:4px;border:1px solid var(--border-color,#4e4e4e);" +
+                    "background:var(--comfy-input-bg,#222);color:var(--input-text,#ddd);cursor:pointer;",
+                    cancelLabel);
+                const okBtn = h("button",
+                    "padding:7px 18px;border-radius:4px;border:none;" +
+                    "background:var(--primary-background,#0b8ce9);color:#fff;cursor:pointer;font-weight:bold;",
+                    okLabel);
+
+                const tryCommit = () => {
+                    const v = inp.value;
+                    if (validate) {
+                        const err = validate(v);
+                        if (err) { errEl.textContent = err; return; }
+                    }
+                    finish(v);
+                    closeFn();
+                };
+
+                cancelBtn.addEventListener("click", () => { finish(null); closeFn(); });
+                okBtn.addEventListener("click", tryCommit);
+
+                inp.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter")  { e.preventDefault(); tryCommit(); }
+                    if (e.key === "Escape") { e.preventDefault(); finish(null); closeFn(); }
+                });
+
+                foot.appendChild(cancelBtn);
+                foot.appendChild(okBtn);
+                dlg.appendChild(foot);
+
+                requestAnimationFrame(() => { inp.focus(); inp.select(); });
+            },
+        });
+    });
+}
+
+/**
+ * 通知ダイアログを表示する (OK のみ)。
+ *
+ * @param {{ title: string, message: string, okLabel?: string }} opts
+ * @returns {Promise<void>}
+ */
+export function showAlertDialog({ title, message, okLabel = "OK" }) {
+    return new Promise((resolve) => {
+        let answered = false;
+        const finish = () => { if (answered) return; answered = true; resolve(); };
+
+        const close = showDialog({
+            title,
+            width: 380,
+            gap: 12,
+            className: "__sax_alert_dlg",
+            onClose: () => finish(),
+            build(dlg, closeFn) {
+                const msg = h("div",
+                    "white-space:pre-wrap;color:var(--input-text,#ddd);font-size:12px;line-height:1.5;",
+                    message ?? "");
+                dlg.appendChild(msg);
+
+                const foot = h("div", "display:flex;gap:8px;justify-content:flex-end;");
+                const okBtn = h("button",
+                    "padding:7px 18px;border-radius:4px;border:none;" +
+                    "background:var(--primary-background,#0b8ce9);color:#fff;cursor:pointer;font-weight:bold;",
+                    okLabel);
+                okBtn.addEventListener("click", () => { finish(); closeFn(); });
+
+                foot.appendChild(okBtn);
+                dlg.appendChild(foot);
+
+                const onKey = (e) => {
+                    if (e.key === "Enter" || e.key === "Escape") {
+                        e.preventDefault(); finish(); closeFn();
+                    }
+                };
+                document.addEventListener("keydown", onKey);
+                Promise.resolve().then(() => {
+                    const obs = new MutationObserver(() => {
+                        if (!document.body.contains(close.overlay)) {
+                            document.removeEventListener("keydown", onKey);
+                            obs.disconnect();
+                        }
+                    });
+                    obs.observe(document.body, { childList: true });
+                });
+
+                requestAnimationFrame(() => okBtn.focus());
+            },
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
+// applySourceListLifecycle — Collector ノード boilerplate を集約するテンプレート関数
+//
+// Image / Pipe / Node Collector の beforeRegisterNodeDef 内で重複していた
+// onNodeCreated / onSerialize / onConfigure のフック設定を一元化する。
+//
+// 注意: ensureCoordinator (sax_dynamic_slot_coordinator.js) と
+//       makeSourceListWidget (本ファイル) を呼び出すが、循環 import を避けるため
+//       ensureCoordinator は呼出側 (spec.buildCoordinatorSpec) 経由で間接的に注入する。
+// ---------------------------------------------------------------------------
+
+/**
+ * Collector ノードの onNodeCreated / onSerialize / onConfigure boilerplate を
+ * nodeType.prototype に設定する。
+ *
+ * @param {object} nodeType - LiteGraph nodeType (beforeRegisterNodeDef 引数)
+ * @param {{
+ *   sourceSpec:           object,                // makeSourceListWidget に渡す spec
+ *   buildCoordinatorSpec: (node: object) => object,   // ensureCoordinator に渡す factory
+ *   ensureCoordinator:    (node, factory) => object,  // sax_dynamic_slot_coordinator.ensureCoordinator
+ *   initialSize?:         [number, number],     // 初期サイズ [minW, h]。デフォルト [280, 1]
+ *   clearOutputsOnCreate?: boolean,             // true ならノード作成時に outputs もクリア (NodeCollector)
+ *   clearAllSlots:        (node, opts?) => void, // sax_ui_base.clearAllSlots (循環回避のため引数で受ける)
+ * }} spec
+ */
+export function applySourceListLifecycle(nodeType, spec) {
+    const {
+        sourceSpec,
+        buildCoordinatorSpec,
+        ensureCoordinator,
+        initialSize = [280, 1],
+        clearOutputsOnCreate = false,
+        clearAllSlots: clearAllSlotsFn,
+    } = spec;
+
+    if (typeof buildCoordinatorSpec !== "function") {
+        throw new Error("applySourceListLifecycle: buildCoordinatorSpec は必須です");
+    }
+    if (typeof ensureCoordinator !== "function") {
+        throw new Error("applySourceListLifecycle: ensureCoordinator は必須です");
+    }
+    if (typeof clearAllSlotsFn !== "function") {
+        throw new Error("applySourceListLifecycle: clearAllSlots は必須です");
+    }
+
+    const [minW, initH] = initialSize;
+
+    const origOnNodeCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+        origOnNodeCreated?.apply(this, arguments);
+        clearAllSlotsFn(this, { outputs: clearOutputsOnCreate });
+
+        const coordinator = ensureCoordinator(this, buildCoordinatorSpec);
+        this._saxSourceWidget = makeSourceListWidget(sourceSpec, coordinator);
+        this._saxSourceWidget.onNodeCreated.call(this);
+
+        this.size[0] = Math.max(this.size[0], minW);
+        this.size[1] = initH;
+    };
+
+    const origOnSerialize = nodeType.prototype.onSerialize;
+    nodeType.prototype.onSerialize = function (data) {
+        origOnSerialize?.apply(this, arguments);
+        this._saxSourceWidget?.onSerialize.call(this, data);
+    };
+
+    const origOnConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function (data) {
+        origOnConfigure?.apply(this, arguments);
+        this._saxSourceWidget?.onConfigure.call(this, data);
+    };
 }
 
 // ---------------------------------------------------------------------------

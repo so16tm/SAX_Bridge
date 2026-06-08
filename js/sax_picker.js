@@ -35,6 +35,7 @@ import {
     buildPickerContent,
     makePickerSection,
     AUTO_EXPAND_THRESHOLD,
+    showDialog,
 } from "./sax_ui_base.js";
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,72 @@ export function clearPickerHighlight() {
 }
 
 // ---------------------------------------------------------------------------
+// createFloatingButton — フローティングボタン共通基盤
+//
+// showReturnButton (Return to picker) と showBackButton (Toggle Manager Back) の
+// DOM 生成パターンを統合した共通実装。各呼出側は position オプションで配置位置を
+// 制御する。本関数は singleton 管理しないため、複数同時表示や id 指定は呼出側の責務。
+// ---------------------------------------------------------------------------
+
+const FLOATING_BTN_BASE_CSS =
+    "position:fixed;padding:9px 22px;background:var(--comfy-menu-bg,#171718);" +
+    "border-radius:6px;color:var(--input-text,#ddd);cursor:pointer;font-size:13px;" +
+    "font-family:sans-serif;font-weight:bold;" +
+    "box-shadow:0 0 12px rgba(74,153,153,.4),0 2px 16px rgba(0,0,0,.5);";
+
+/**
+ * 共通フローティングボタンを生成して body に追加する。
+ *
+ * @param {{
+ *   label:    string,
+ *   onClick:  () => void,
+ *   position?: { top?: string, bottom?: string, left?: string, right?: string, transform?: string },
+ *   borderColor?: string,
+ *   hoverBg?:     string,
+ *   normalBg?:    string,
+ *   zIndex?:      number,
+ *   id?:          string,    // 指定時、同 id の既存ボタンを除去
+ * }} opts
+ * @returns {HTMLButtonElement}
+ */
+export function createFloatingButton({
+    label,
+    onClick,
+    position    = { top: "60px", left: "50%", transform: "translateX(-50%)" },
+    borderColor = "rgba(74,153,153,.6)",
+    hoverBg     = "var(--comfy-menu-secondary-bg,#303030)",
+    normalBg    = "var(--comfy-menu-bg,#171718)",
+    zIndex      = 10001,
+    id          = null,
+}) {
+    if (id) {
+        const prev = document.getElementById(id);
+        if (prev) prev.remove();
+    }
+    const btn = document.createElement("button");
+    if (id) btn.id = id;
+    btn.textContent = label;
+
+    const posCss = [
+        position.top    != null ? `top:${position.top};`       : "",
+        position.bottom != null ? `bottom:${position.bottom};` : "",
+        position.left   != null ? `left:${position.left};`     : "",
+        position.right  != null ? `right:${position.right};`   : "",
+        position.transform != null ? `transform:${position.transform};` : "",
+    ].join("");
+
+    btn.style.cssText = FLOATING_BTN_BASE_CSS +
+        `z-index:${zIndex};border:1px solid ${borderColor};${posCss}`;
+
+    btn.addEventListener("mouseenter", () => { btn.style.background = hoverBg; });
+    btn.addEventListener("mouseleave", () => { btn.style.background = normalBg; });
+    btn.addEventListener("click", onClick);
+
+    document.body.appendChild(btn);
+    return btn;
+}
+
+// ---------------------------------------------------------------------------
 // Return to picker ボタン
 // ---------------------------------------------------------------------------
 
@@ -85,24 +152,16 @@ let _returnBtn = null;
 
 export function showReturnButton(restoreOverlay, label = "↩ Return") {
     if (_returnBtn) _returnBtn.remove();
-    const btn = document.createElement("button");
-    btn.textContent = label;
-    btn.style.cssText =
-        "position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;" +
-        "padding:9px 22px;background:var(--comfy-menu-bg,#171718);" +
-        "border:1px solid rgba(74,153,153,.6);border-radius:6px;" +
-        "color:var(--input-text,#ddd);cursor:pointer;font-size:13px;" +
-        "font-family:sans-serif;font-weight:bold;" +
-        "box-shadow:0 0 12px rgba(74,153,153,.4),0 2px 16px rgba(0,0,0,.5);";
-    btn.addEventListener("mouseenter", () => { btn.style.background = "var(--comfy-menu-secondary-bg,#303030)"; });
-    btn.addEventListener("mouseleave", () => { btn.style.background = "var(--comfy-menu-bg,#171718)"; });
-    btn.addEventListener("click", () => {
-        btn.remove();
-        _returnBtn = null;
-        restoreOverlay();
+    _returnBtn = createFloatingButton({
+        label,
+        onClick: () => {
+            _returnBtn?.remove();
+            _returnBtn = null;
+            restoreOverlay();
+        },
+        position: { top: "60px", left: "50%", transform: "translateX(-50%)" },
+        zIndex: 10001,
     });
-    document.body.appendChild(btn);
-    _returnBtn = btn;
 }
 
 export function hideReturnButton() {
@@ -211,7 +270,7 @@ export function showPicker({
     function makeNodePeek(n) {
         return () => {
             const savedOffset = [...app.canvas.ds.offset];
-            overlay.style.display = "none";
+            pickerClose.hide();
             panCanvasTo(
                 n.pos[0] + (n.size?.[0] ?? 0) / 2,
                 n.pos[1] + (n.size?.[1] ?? 0) / 2
@@ -219,7 +278,7 @@ export function showPicker({
             highlightNode(n);
             app.canvas.setDirty(true, true);
             showReturnButton(() => {
-                overlay.style.display = "flex";
+                pickerClose.show();
                 clearPickerHighlight();
                 app.canvas.ds.offset[0] = savedOffset[0];
                 app.canvas.ds.offset[1] = savedOffset[1];
@@ -284,14 +343,9 @@ export function showPicker({
         }
     }
 
-    const overlay = h("div",
-        "position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:10000;" +
-        "display:flex;align-items:center;justify-content:center;");
-    const dlg = h("div",
-        "background:var(--comfy-menu-bg,#171718);border:1px solid var(--border-color,#4e4e4e);" +
-        "border-radius:8px;padding:16px;width:440px;max-height:76vh;display:flex;flex-direction:column;" +
-        "color:var(--input-text,#ddd);font:13px/1.5 sans-serif;gap:8px;");
-    dlg.appendChild(h("div", "font:bold 14px sans-serif;color:var(--fg-color,#fff);flex-shrink:0;", title));
+    // showDialog の close 関数 (overlay 制御 .hide()/.show() を含む) を closeAll 内で使用する。
+    // 旧実装の overlay 生成 + dlg 生成 + title 表示はすべて showDialog に委譲する。
+    let pickerClose = null;
 
     // 全アイテム中で x+y が最小の座標を基準点（左上アンカー）として返す
     function computeAnchor(posArr) {
@@ -376,13 +430,13 @@ export function showPicker({
                     const tooltip = `pos: (${Math.round(gPos[0])}, ${Math.round(gPos[1])})  size: ${Math.round(g.size[0])}×${Math.round(g.size[1])}`;
                     const onPeek  = () => {
                         const savedOffset = [...app.canvas.ds.offset];
-                        overlay.style.display = "none";
+                        pickerClose.hide();
                         panCanvasTo(g.pos[0] + g.size[0] / 2, g.pos[1] + g.size[1] / 2);
                         g.selected = true;
                         app.canvas.selected_group = g;
                         app.canvas.setDirty(true, true);
                         showReturnButton(() => {
-                            overlay.style.display = "flex";
+                            pickerClose.show();
                             g.selected = false;
                             app.canvas.selected_group = null;
                             app.canvas.ds.offset[0] = savedOffset[0];
@@ -456,24 +510,37 @@ export function showPicker({
         }
     };
 
+    let pickerCleanup = null;
     function closeAll() {
         clearPickerHighlight();
         hideReturnButton();
-        pickerCleanup();
-        overlay.remove();
+        pickerCleanup?.();
+        pickerClose?.();
     }
 
-    const { element, focusSearch, cleanup: pickerCleanup } = buildPickerContent({
-        mode,
-        placeholder: mode === "single" ? "Search node name…" : "Search by group or node name…",
-        renderContent: renderContentFn,
-        onApply: mode === "multi" ? () => { closeAll(); onConfirm?.([...selection.values()]); } : null,
-        onCancel: closeAll,
+    pickerClose = showDialog({
+        title,
+        width:     440,
+        maxHeight: "76vh",
+        gap:       8,
+        className: "__sax_picker",
+        onClose:   () => {
+            // overlay クリック / Esc 経路でも cleanup を確実に呼ぶ
+            clearPickerHighlight();
+            hideReturnButton();
+            pickerCleanup?.();
+        },
+        build(dlg, _close) {
+            const { element, focusSearch, cleanup } = buildPickerContent({
+                mode,
+                placeholder: mode === "single" ? "Search node name…" : "Search by group or node name…",
+                renderContent: renderContentFn,
+                onApply: mode === "multi" ? () => { closeAll(); onConfirm?.([...selection.values()]); } : null,
+                onCancel: closeAll,
+            });
+            pickerCleanup = cleanup;
+            dlg.appendChild(element);
+            focusSearch();
+        },
     });
-
-    dlg.appendChild(element);
-    overlay.appendChild(dlg);
-    overlay.addEventListener("click", e => { if (e.target === overlay) closeAll(); });
-    document.body.appendChild(overlay);
-    focusSearch();
 }
