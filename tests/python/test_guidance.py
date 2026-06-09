@@ -1,5 +1,6 @@
 """SAX_Bridge_Guidance ノードのテスト。"""
 
+import torch
 from unittest.mock import MagicMock
 from nodes.guidance import (
     SAX_Bridge_Guidance,
@@ -7,6 +8,7 @@ from nodes.guidance import (
     _strength_to_params,
     _apply_agc,
     _apply_fdg,
+    _gaussian_blur_latent,
     _ALL_MODES,
 )
 
@@ -35,7 +37,6 @@ class TestStrengthToParams:
 
 class TestApplyAgc:
     def test_soft_clip(self):
-        import torch
         delta = torch.tensor([10.0, -10.0])
         result = _apply_agc(delta, tau=2.0)
         assert result[0].item() < 2.0
@@ -44,10 +45,34 @@ class TestApplyAgc:
 
 class TestApplyFdg:
     def test_identity_when_gains_are_one(self):
-        import torch
         delta = torch.randn(1, 4, 8, 8)
         result = _apply_fdg(delta, low_gain=1.0, high_gain=1.0)
         assert torch.allclose(result, delta, atol=1e-6)
+
+
+class TestFdgVideo5D:
+    """動画 latent (B, C, T, H, W) での FDG / ガウシアンブラー。"""
+
+    def test_gaussian_blur_5d_shape_preserved(self):
+        x = torch.randn(1, 4, 3, 8, 8)
+        out = _gaussian_blur_latent(x, sigma=1.0, radius=1)
+        assert out.shape == x.shape
+
+    def test_gaussian_blur_5d_matches_per_frame(self):
+        x = torch.randn(2, 4, 3, 8, 8)
+        out = _gaussian_blur_latent(x, sigma=1.0, radius=1)
+        # 各フレームを 4D ブラーした結果と一致（fold-T の正しさを検証）
+        for b in range(x.shape[0]):
+            for t in range(x.shape[2]):
+                frame = x[b, :, t].unsqueeze(0)
+                expected = _gaussian_blur_latent(frame, sigma=1.0, radius=1).squeeze(0)
+                assert torch.allclose(out[b, :, t], expected, atol=1e-5)
+
+    def test_fdg_5d_identity_when_gains_one(self):
+        delta = torch.randn(1, 4, 3, 8, 8)
+        result = _apply_fdg(delta, low_gain=1.0, high_gain=1.0)
+        assert result.shape == delta.shape
+        assert torch.allclose(result, delta, atol=1e-5)
 
 
 class TestApplyGuidanceToModel:

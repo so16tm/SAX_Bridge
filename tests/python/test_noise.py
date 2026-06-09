@@ -189,6 +189,43 @@ class TestNoiseLatentWithMask:
         assert not torch.allclose(out_tensor[:, :, center[0], center[1]], orig[:, :, center[0], center[1]], atol=1e-6)
 
 
+class TestNoiseLatentVideo5D:
+    """動画 latent (B, C, T, H, W) の5次元対応。"""
+
+    def _make_video_latent(self, b=1, c=4, t=3, h=8, w=8, seed=0):
+        g = torch.Generator()
+        g.manual_seed(seed)
+        return {"samples": torch.randn((b, c, t, h, w), generator=g)}
+
+    def test_no_mask_5d_shape_preserved_and_noised(self):
+        samples = self._make_video_latent(seed=1)
+        orig = samples["samples"].clone()
+        result = SAX_Bridge_Noise_Latent.execute(
+            samples=samples, intensity=0.5, noise_type="gaussian",
+            seed=42, mask_shrink=0, mask_blur=0.0, mask=None,
+        )
+        out = result.args[0]["samples"]
+        assert out.shape == orig.shape
+        assert not torch.allclose(out, orig, atol=1e-6)
+
+    def test_mask_5d_black_region_unchanged_white_noised(self):
+        b, c, t, h, w = 1, 4, 3, 16, 16
+        g = torch.Generator()
+        g.manual_seed(10)
+        samples = {"samples": torch.randn((b, c, t, h, w), generator=g)}
+        orig = samples["samples"].clone()
+        mask = _make_mask(b, h, w, white_region=True)
+        result = SAX_Bridge_Noise_Latent.execute(
+            samples=samples, intensity=0.5, noise_type="gaussian",
+            seed=42, mask_shrink=0, mask_blur=0.0, mask=mask,
+        )
+        out = result.args[0]["samples"]
+        # 全フレームでマスク黒領域（四隅）は不変、白領域（中央）はノイズが乗る
+        assert torch.allclose(out[:, :, :, 0, 0], orig[:, :, :, 0, 0], atol=1e-6)
+        cy, cx = h // 2, w // 2
+        assert not torch.allclose(out[:, :, :, cy, cx], orig[:, :, :, cy, cx], atol=1e-6)
+
+
 class TestNoiseLatentNoClamp:
     """latent は値域クランプなし。"""
 

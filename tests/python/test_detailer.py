@@ -8,11 +8,41 @@ from nodes.detailer import (
     SAX_Bridge_Detailer_Enhanced,
     _extract_pipe,
     _ensure_negative,
+    _add_latent_noise,
     get_bbox_from_mask,
     expand_bbox_by_factor,
     crop_bbox,
     uncrop_and_blend,
 )
+
+
+class TestAddLatentNoiseVideo5D:
+    """_add_latent_noise の動画 latent (B, C, T, H, W) 対応。"""
+
+    def test_5d_shape_preserved_and_noised(self):
+        b, c, t, h, w = 1, 4, 3, 8, 8
+        latent = torch.zeros(b, c, t, h, w)
+        noise_mask = torch.ones(b, h, w)
+        out = _add_latent_noise(latent, 0.5, "gaussian", noise_mask, seed=42)
+        assert out.shape == latent.shape
+        assert not torch.allclose(out, latent, atol=1e-6)
+
+    def test_5d_zero_mask_region_unchanged(self):
+        b, c, t, h, w = 1, 4, 3, 8, 8
+        latent = torch.zeros(b, c, t, h, w)
+        noise_mask = torch.zeros(b, h, w)
+        noise_mask[:, h // 4:3 * h // 4, w // 4:3 * w // 4] = 1.0
+        out = _add_latent_noise(latent, 0.5, "gaussian", noise_mask, seed=42)
+        # マスク 0 の四隅は全フレームで不変、中央はノイズが乗る
+        assert torch.allclose(out[:, :, :, 0, 0], latent[:, :, :, 0, 0], atol=1e-6)
+        assert not torch.allclose(out[:, :, :, h // 2, w // 2], latent[:, :, :, h // 2, w // 2], atol=1e-6)
+
+    def test_4d_still_works(self):
+        b, c, h, w = 1, 4, 8, 8
+        latent = torch.zeros(b, c, h, w)
+        noise_mask = torch.ones(b, h, w)
+        out = _add_latent_noise(latent, 0.5, "gaussian", noise_mask, seed=42)
+        assert out.shape == latent.shape
 
 
 class TestExtractPipe:

@@ -17,6 +17,7 @@ import comfy.samplers
 
 from comfy_api.latest import io
 from .io_types import PipeLine
+from .latent_utils import apply_spatial_4d
 
 
 def _make_gaussian_kernel(radius: int, sigma: float, device, dtype) -> torch.Tensor:
@@ -29,18 +30,26 @@ def _make_gaussian_kernel(radius: int, sigma: float, device, dtype) -> torch.Ten
 
 
 def _gaussian_blur_latent(x: torch.Tensor, sigma: float, radius: int = 1) -> torch.Tensor:
-    """(B, C, H, W) latent テンソルに depthwise ガウシアンぼかしを適用する。"""
+    """latent テンソルに depthwise 空間ガウシアンぼかしを適用する。
+
+    (B, C, H, W) に加え、動画モデルの (B, C, T, H, W) 5次元 latent も
+    フレーム単位の空間ぼかしとして処理する。
+    """
     if radius <= 0 or sigma <= 0:
         return x
-    kernel = _make_gaussian_kernel(radius, sigma, x.device, x.dtype)
     c = x.shape[1]
+    kernel = _make_gaussian_kernel(radius, sigma, x.device, x.dtype)
     weight = kernel.unsqueeze(0).unsqueeze(0).expand(c, 1, -1, -1)
-    return F.conv2d(
-        F.pad(x, (radius, radius, radius, radius), mode="reflect"),
-        weight,
-        padding=0,
-        groups=c,
-    )
+
+    def _blur_4d(t4: torch.Tensor) -> torch.Tensor:
+        return F.conv2d(
+            F.pad(t4, (radius, radius, radius, radius), mode="reflect"),
+            weight,
+            padding=0,
+            groups=c,
+        )
+
+    return apply_spatial_4d(x, _blur_4d)
 
 
 def _apply_agc(delta: torch.Tensor, tau: float) -> torch.Tensor:

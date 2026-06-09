@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from comfy_api.latest import io
+from .latent_utils import insert_temporal_if_5d
 
 
 class SAXNoiseEngine:
@@ -13,7 +14,8 @@ class SAXNoiseEngine:
     def gaussian_blur(tensor: torch.Tensor, sigma: float) -> torch.Tensor:
         """
         2Dテンソルに対してガウスぼかしを適用する。
-        tensor: (B, C, H, W)
+        tensor: (B, C, H, W)。4次元専用（マスク/画像用）。動画 latent の5次元には
+        latent_utils.apply_spatial_4d を介して使うこと。
         """
         if sigma <= 0:
             return tensor
@@ -81,13 +83,16 @@ class SAXNoiseEngine:
         """
         指定された形状と形式でノイズを生成する。
         color_mode: "rgb"（チャンネルごと独立）/ "grayscale"（全チャンネル同一）
+        shape は CHW 系（dim1=チャンネル）であれば任意次元を許容し、image (B,C,H,W)
+        と動画 latent (B,C,T,H,W) の双方に対応する。
         """
-        b, c, h, w = shape
+        c = shape[1]
         generator = torch.Generator(device='cpu')
         generator.manual_seed(seed)
 
         noise_channels = 1 if color_mode == "grayscale" else c
-        noise_shape = (b, noise_channels, h, w)
+        noise_shape = list(shape)
+        noise_shape[1] = noise_channels
 
         if noise_type in ["gaussian", "grain"]:
             noise = torch.randn(noise_shape, generator=generator, dtype=torch.float32, device='cpu')
@@ -98,7 +103,10 @@ class SAXNoiseEngine:
 
         noise = noise.to(device=device, dtype=dtype)
         if noise_channels == 1 and c > 1:
-            noise = noise.expand(-1, c, -1, -1)
+            # 全チャンネル同一ノイズ。expand のビューのまま返す（読み取り専用利用）
+            expand_dims = [-1] * noise.ndim
+            expand_dims[1] = c
+            noise = noise.expand(*expand_dims)
 
         return noise
 
@@ -238,7 +246,9 @@ class SAX_Bridge_Noise_Latent(io.ComfyNode):
     @classmethod
     def execute(cls, samples, intensity, noise_type, seed, mask_shrink, mask_blur, mask=None) -> io.NodeOutput:
         latent_tensor = samples["samples"].clone()
-        b, c, h, w = latent_tensor.shape
+        # 動画系 latent (B, C, T, H, W) では空間次元を末尾2軸で扱う
+        b = latent_tensor.shape[0]
+        h, w = latent_tensor.shape[-2], latent_tensor.shape[-1]
         device = latent_tensor.device
         dtype = latent_tensor.dtype
 
@@ -251,6 +261,9 @@ class SAX_Bridge_Noise_Latent(io.ComfyNode):
             processed_mask = processed_mask.to(device=device, dtype=dtype)
         else:
             processed_mask = torch.ones((b, 1, h, w), device=device, dtype=dtype)
+
+        # 5次元 latent には時間軸 singleton を挿入してブロードキャストさせる
+        processed_mask = insert_temporal_if_5d(processed_mask, latent_tensor)
 
         noise = SAXNoiseEngine.generate_noise(latent_tensor.shape, noise_type, seed, device, dtype)
         result_tensor = latent_tensor + (noise * intensity * processed_mask)

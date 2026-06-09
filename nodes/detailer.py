@@ -1,3 +1,5 @@
+import logging
+
 import torch
 import torch.nn.functional as F
 import nodes
@@ -7,6 +9,9 @@ from .io_types import PipeLine
 from .noise import SAXNoiseEngine
 from .guidance import apply_guidance_to_model, _ALL_MODES
 from .vae_utils import decode_image
+from .latent_utils import broadcast_mask_to_latent
+
+logger = logging.getLogger("SAX_Bridge")
 
 try:
     import comfy_extras.nodes_differential_diffusion as _diff_diffusion
@@ -262,7 +267,9 @@ def _add_latent_noise(
         lat_noise = torch.randn(t.shape, generator=generator, dtype=t.dtype, device='cpu')
     else:
         lat_noise = torch.rand(t.shape, generator=generator, dtype=t.dtype, device='cpu') * 2.0 - 1.0
-    return t + lat_noise.to(t.device) * latent_noise_intensity * noise_mask.unsqueeze(1)
+    # ノイズは T 次元も独立乱数。mask は全フレーム共通の空間マスクとして broadcast される
+    mask = broadcast_mask_to_latent(noise_mask, t)
+    return t + lat_noise.to(t.device) * latent_noise_intensity * mask
 
 
 def _run_detail_loop(
@@ -335,8 +342,17 @@ def _run_detail_loop(
     )
 
     t = vae.encode(cropped_images[:, :, :, :3])
+    # 動画系 VAE は latent が (B, C, T, H, W) になるため空間次元は末尾2軸で取得する
+    if t.ndim == 5 and t.shape[0] > 1:
+        # ComfyUI の reshape_mask が noise_mask の batch を time として再解釈するため、
+        # バッチ動画 (B>1) では noise_mask が全フレームへ正しく展開されない（B=1 前提）
+        logger.warning(
+            "[SAX_Bridge] Detailer: batch video latent (B=%d) is not fully supported; "
+            "noise_mask is applied assuming B=1",
+            t.shape[0],
+        )
     noise_mask = _build_noise_mask(
-        mask_in_bbox, (t.shape[2], t.shape[3]), t.device, noise_mask_feather
+        mask_in_bbox, (t.shape[-2], t.shape[-1]), t.device, noise_mask_feather
     )
 
     for i in range(cycle):
