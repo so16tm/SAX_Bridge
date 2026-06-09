@@ -1,5 +1,6 @@
 """SAX_Bridge_KSampler ノードのテスト。"""
 
+import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
 from nodes.sampler import SAX_Bridge_KSampler
@@ -99,13 +100,69 @@ class TestKSamplerDecodeVae:
     def test_decode_vae_true_calls_vae_decode(self):
         pipe = _make_pipe()
         fake_image = MagicMock(name="image")
+        # ndim が 5 と等価比較されないよう非数値属性のままにし、reshape 分岐を回避
         pipe["vae"].decode = MagicMock(return_value=fake_image)
-        fake_latent = {"samples": MagicMock(name="new_samples")}
+        samples = MagicMock(name="new_samples")
+        samples.is_nested = False
+        fake_latent = {"samples": samples}
         with patch("nodes.sampler.nodes.common_ksampler", return_value=(fake_latent,)):
             result = SAX_Bridge_KSampler.execute(pipe=pipe, decode_vae=True)
-        pipe["vae"].decode.assert_called_once_with(fake_latent["samples"])
+        pipe["vae"].decode.assert_called_once_with(samples)
         assert result.args[0]["images"] is fake_image
         assert result.args[1] is fake_image
+
+    def test_decode_vae_5d_reshaped_to_4d(self):
+        # 動画系 VAE は (B, T, H, W, C) を返すため (B*T, H, W, C) に畳み込む
+        B, T, H, W, C = 1, 5, 64, 48, 3
+        pipe = _make_pipe()
+        video = np.zeros((B, T, H, W, C), dtype=np.float32)
+        pipe["vae"].decode = MagicMock(return_value=video)
+        samples = MagicMock(name="new_samples")
+        samples.is_nested = False
+        with patch("nodes.sampler.nodes.common_ksampler", return_value=({"samples": samples},)):
+            result = SAX_Bridge_KSampler.execute(pipe=pipe, decode_vae=True)
+        assert result.args[1].shape == (B * T, H, W, C)
+        assert result.args[0]["images"].shape == (B * T, H, W, C)
+
+    def test_decode_vae_5d_batched_reshaped(self):
+        # B>1 の動画出力も (B*T, H, W, C) へ正しく畳み込まれる
+        B, T, H, W, C = 2, 3, 32, 32, 3
+        pipe = _make_pipe()
+        video = np.zeros((B, T, H, W, C), dtype=np.float32)
+        pipe["vae"].decode = MagicMock(return_value=video)
+        samples = MagicMock(name="new_samples")
+        samples.is_nested = False
+        with patch("nodes.sampler.nodes.common_ksampler", return_value=({"samples": samples},)):
+            result = SAX_Bridge_KSampler.execute(pipe=pipe, decode_vae=True)
+        assert result.args[1].shape == (B * T, H, W, C)
+
+    def test_decode_vae_4d_left_unchanged(self):
+        # 通常の画像 VAE は (B, H, W, C) を返すため reshape しない
+        B, H, W, C = 2, 64, 48, 3
+        pipe = _make_pipe()
+        image = np.zeros((B, H, W, C), dtype=np.float32)
+        pipe["vae"].decode = MagicMock(return_value=image)
+        samples = MagicMock(name="new_samples")
+        samples.is_nested = False
+        with patch("nodes.sampler.nodes.common_ksampler", return_value=({"samples": samples},)):
+            result = SAX_Bridge_KSampler.execute(pipe=pipe, decode_vae=True)
+        assert result.args[1] is image
+        assert result.args[1].shape == (B, H, W, C)
+
+    def test_decode_vae_nested_latent_unbound(self):
+        # nested latent は unbind()[0] で展開してから decode する（標準 VAEDecode と同一）
+        B, H, W, C = 1, 64, 48, 3
+        pipe = _make_pipe()
+        image = np.zeros((B, H, W, C), dtype=np.float32)
+        pipe["vae"].decode = MagicMock(return_value=image)
+        unbound = MagicMock(name="unbound_latent")
+        nested = MagicMock(name="nested_latent")
+        nested.is_nested = True
+        nested.unbind = MagicMock(return_value=[unbound])
+        with patch("nodes.sampler.nodes.common_ksampler", return_value=({"samples": nested},)):
+            SAX_Bridge_KSampler.execute(pipe=pipe, decode_vae=True)
+        nested.unbind.assert_called_once()
+        pipe["vae"].decode.assert_called_once_with(unbound)
 
     def test_decode_vae_false_returns_none_image(self):
         pipe = _make_pipe()
