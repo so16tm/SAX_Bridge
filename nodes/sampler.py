@@ -1,11 +1,9 @@
-import logging
 from typing import Any
 
 import nodes
 from comfy_api.latest import io
 from .io_types import PipeLine
-
-logger = logging.getLogger("SAX_Bridge")
+from .vae_utils import decode_image
 
 
 def _empty_conditioning(clip: Any) -> Any:
@@ -82,19 +80,7 @@ class SAX_Bridge_KSampler(io.ComfyNode):
         if decode_vae:
             if vae is None:
                 raise ValueError("[SAX_Bridge] Pipe does not contain a VAE.")
-            latent_tensor = new_latent["samples"]
-            if latent_tensor.is_nested:
-                # nested tensor は先頭要素を取り出す（標準 VAEDecode と同一）
-                latent_tensor = latent_tensor.unbind()[0]
-            images = vae.decode(latent_tensor)
-            if images.ndim == 5:
-                # 動画系 VAE は (B, T, H, W, C) を返すため、標準 VAEDecode と同様に
-                # 時間軸をバッチへ畳み込み (B*T, H, W, C) の IMAGE に揃える
-                logger.debug(
-                    "[SAX_Bridge] 5D VAE output detected (shape=%s), reshaping to 4D",
-                    images.shape,
-                )
-                images = images.reshape(-1, *images.shape[-3:])
+            images = decode_image(vae, new_latent["samples"])
         else:
             images = None
 

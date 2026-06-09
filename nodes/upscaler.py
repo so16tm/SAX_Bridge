@@ -8,6 +8,7 @@ from comfy_api.latest import io
 
 from .detailer import _extract_pipe, _ensure_negative
 from .io_types import PipeLine
+from .vae_utils import decode_image
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -91,13 +92,13 @@ class SAX_Bridge_Upscaler(io.ComfyNode):
     @classmethod
     def execute(
         cls,
-        pipe,
-        upscale_model_name,
-        method,
-        scale_by,
-        denoise,
-        steps_override=0,
-        cfg_override=0.0,
+        pipe: dict,
+        upscale_model_name: str,
+        method: str,
+        scale_by: float,
+        denoise: float,
+        steps_override: int = 0,
+        cfg_override: float = 0.0,
     ) -> io.NodeOutput:
         images = pipe.get("images")
         if images is None:
@@ -111,16 +112,19 @@ class SAX_Bridge_Upscaler(io.ComfyNode):
         target_w = (target_w // 8) * 8
 
         if upscale_model_name != "None":
-            logger.info(f"[SAX_Bridge] Upscaler: ESRGAN mode / model={upscale_model_name} / {w}x{h} -> {target_w}x{target_h}")
+            logger.info("[SAX_Bridge] Upscaler: ESRGAN mode / model=%s / %dx%d -> %dx%d",
+                        upscale_model_name, w, h, target_w, target_h)
             from comfy_extras.nodes_upscale_model import UpscaleModelLoader
             upscale_model = UpscaleModelLoader().load_model(upscale_model_name)[0]
             upscaled = _esrgan_upscale(upscale_model, images, target_h, target_w, method)
-            logger.info(f"[SAX_Bridge] Upscaler: ESRGAN done / output size {upscaled.shape[2]}x{upscaled.shape[1]}")
+            logger.info("[SAX_Bridge] Upscaler: ESRGAN done / output size %dx%d",
+                        upscaled.shape[2], upscaled.shape[1])
         elif target_h == h and target_w == w:
             logger.info("[SAX_Bridge] Upscaler: no size change / skipping")
             upscaled = images
         else:
-            logger.info(f"[SAX_Bridge] Upscaler: pixel interpolation ({method}) / {w}x{h} -> {target_w}x{target_h}")
+            logger.info("[SAX_Bridge] Upscaler: pixel interpolation (%s) / %dx%d -> %dx%d",
+                        method, w, h, target_w, target_h)
             upscaled = _pixel_upscale(images, target_h, target_w, method)
 
         upscaled = torch.clamp(upscaled, 0.0, 1.0)
@@ -152,14 +156,13 @@ class SAX_Bridge_Upscaler(io.ComfyNode):
                     samples_dict,
                     denoise=denoise,
                 )
-                upscaled = p["vae"].decode(sampler_result[0]["samples"])
+                upscaled = decode_image(p["vae"], sampler_result[0]["samples"])
                 upscaled = torch.clamp(upscaled, 0.0, 1.0)
 
                 logger.info(
-                    f"[SAX_Bridge] Upscaler i2i: {w}x{h} -> {target_w}x{target_h}, "
-                    f"steps={steps_eff}, cfg={cfg_eff}, denoise={denoise}"
+                    "[SAX_Bridge] Upscaler i2i: %dx%d -> %dx%d, steps=%d, cfg=%s, denoise=%s",
+                    w, h, target_w, target_h, steps_eff, cfg_eff, denoise,
                 )
 
-        new_pipe = pipe.copy()
-        new_pipe["images"] = upscaled
+        new_pipe = {**pipe, "images": upscaled}
         return io.NodeOutput(new_pipe, upscaled)

@@ -6,6 +6,7 @@ from comfy_api.latest import io
 from .io_types import PipeLine
 from .noise import SAXNoiseEngine
 from .guidance import apply_guidance_to_model, _ALL_MODES
+from .vae_utils import decode_image
 
 try:
     import comfy_extras.nodes_differential_diffusion as _diff_diffusion
@@ -353,11 +354,11 @@ def _run_detail_loop(
         )
         t = sampler[0]["samples"]
 
-    decoded_images = vae.decode(t)
+    decoded_images = decode_image(vae, t)
     return uncrop_and_blend(images, decoded_images, mask, bbox, feather=blend_feather)
 
 
-def _extract_pipe(pipe):
+def _extract_pipe(pipe: dict) -> dict:
     """パイプから共通フィールドを取り出すヘルパー"""
     loader_settings = pipe.get("loader_settings", {})
     return {
@@ -375,8 +376,12 @@ def _extract_pipe(pipe):
     }
 
 
-def _ensure_negative(p):
-    """negative が None の場合、CLIP で空文字列をエンコードして補完する。"""
+def _ensure_negative(p: dict) -> None:
+    """negative が None の場合、CLIP で空文字列をエンコードして補完する。
+
+    p は _extract_pipe の戻り値（ローカル dict）を想定し、in-place で書き換える。
+    呼び出し元の pipe を直接渡さないこと。
+    """
     if p["negative"] is None:
         if p["clip"] is None:
             raise ValueError(
@@ -449,9 +454,7 @@ class SAX_Bridge_Detailer(io.ComfyNode):
         if result_images is None:
             return io.NodeOutput(pipe, p["images"] if p["images"] is not None else pipe.get("images"))
 
-        new_pipe = pipe.copy()
-        new_pipe["images"] = result_images
-        new_pipe["positive"] = positive
+        new_pipe = {**pipe, "images": result_images, "positive": positive}
         return io.NodeOutput(new_pipe, result_images)
 
 
@@ -538,7 +541,5 @@ class SAX_Bridge_Detailer_Enhanced(io.ComfyNode):
         if result_images is None:
             return io.NodeOutput(pipe, p["images"] if p["images"] is not None else pipe.get("images"))
 
-        new_pipe = pipe.copy()
-        new_pipe["images"] = result_images
-        new_pipe["positive"] = positive
+        new_pipe = {**pipe, "images": result_images, "positive": positive}
         return io.NodeOutput(new_pipe, result_images)
