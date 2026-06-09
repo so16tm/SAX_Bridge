@@ -120,14 +120,16 @@
 
 > **Workflow**: `workflows/07_toggle_manager.json`
 > **構成**: Toggle Manager ×2 + Group A / Group B
+> **前提**: 複数 Manager は **異なる管理対象** を扱う前提 (同一管理対象を複数 Manager で共有すると scene 独立性が成立しない、運用注意)
 
-手動操作が必要:
-
-1. [ ] 両方の Manager で Group A / B を管理対象に追加
-2. [ ] グループを移動 → 両方の Manager に変更が同期される
-3. [ ] シーンを追加 → トグル状態が保存される
-4. [ ] シーン切替 → グループの bypass が切り替わる
-5. [ ] Manager を1つ削除 → エラーなし、残った Manager が正常動作
+- [ ] [+ Add] で Manager A に Group A、Manager B に Group B を追加できる
+- [ ] pill クリックで bypass 切替、グラフの実 bypass 状態が pill 表示に反映される (外部 bypass 変更にも追従)
+- [ ] グループ移動・名称変更 → Manager のラベルに同期される
+- [ ] Scene の追加・切替・リネーム・削除が動作する
+- [ ] Rescan で未管理 Group を自動追加できる (確認ダイアログ)
+- [ ] 行ラベルクリックで Jump → Back ボタンで戻る (位置は記憶される)
+- [ ] Manager A / B が独立 (異なる管理対象) に動作する
+- [ ] Manager を1つ削除 → エラーなし、残った Manager が正常動作
 
 ---
 

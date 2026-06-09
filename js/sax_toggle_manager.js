@@ -773,8 +773,11 @@ function makeToggleWidget(node, item, index) {
             this._y = y;
             const t      = getComfyTheme();
             const config = getConfig(node);
-            const scene  = config.scenes[config.currentScene] ?? {};
-            const on     = scene[itemKey(item)] ?? true;
+            // pill 表示はグラフ上の実 bypass 状態を直接反映する。
+            // (config.scenes[currentScene][key] は scene 切替時の適用値であり、
+            //  他 Manager の操作でグラフが変化した際に古い値を表示する問題があるため、
+            //  描画時は getItemCurrentValue でグラフから直接取得する。)
+            const on     = getItemCurrentValue(item);
             const midY   = y + H / 2;
             const total  = config.managed.length;
             const layout = rowLayout(W, { hasToggle: true, hasMoveUpDown: true, hasDelete: true });
