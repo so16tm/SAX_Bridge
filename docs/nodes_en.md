@@ -10,7 +10,7 @@
 
 | Category | Description | Nodes |
 |---------|------|-------|
-| [Loader](#loader) | Model and LoRA loading | [SAX Loader](#sax-loader) / [SAX Lora Loader](#sax-lora-loader) |
+| [Loader](#loader) | Model and LoRA loading | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX Lora Loader](#sax-lora-loader) |
 | [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
 | [Pipe](#pipe) | Pipe construction and switching | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | Prompt encoding and concatenation | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
@@ -61,6 +61,43 @@
   - `loader_settings`: dict holding `steps` / `cfg` / `sampler_name` / `scheduler` / `denoise`
 - `clip_skip` sets the model's clip_skip
 - `lora_model_strength` applies the same value to both the LoRA model strength and clip strength (single slider control)
+
+[↑ Back to top](#top)
+
+---
+
+### SAX Diffusion Loader
+
+`SAX_Bridge_Loader_Diffusion` — Loads a UNET (diffusion model), CLIP (text encoder), and VAE from separate folders and initializes the `PIPE_LINE` context. Intended for split-distribution models (such as Anima) where model/clip/vae are not baked into a checkpoint. The output pipe shares the same structure as SAX Loader, so downstream nodes work unchanged.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `unet_name` | Combo | Diffusion model file selection (`diffusion_models` folder) |
+| `weight_dtype` | Combo | UNET weight dtype (`default` / `fp8_e4m3fn` / `fp8_e4m3fn_fast` / `fp8_e5m2`) |
+| `clip_name` | Combo | Text encoder file selection (`text_encoders` folder) |
+| `vae_name` | Combo | VAE file selection (`vae` folder; always an external VAE) |
+| `lora_name` | Combo | LoRA selection (`None` to skip) |
+| `lora_model_strength` | Float (-10.0 to 10.0) | LoRA model strength |
+| `seed` | Int | Initial seed value |
+| `steps` | Int | Sampling steps |
+| `cfg` | Float | CFG scale |
+| `sampler_name` | Combo | Sampler selection |
+| `scheduler_name` | Combo | Scheduler selection |
+| `denoise` | Float (0.0 to 1.0) | Denoise strength |
+| `width` / `height` | Int | Generation resolution (multiples of 8) |
+| `batch_size` | Int | Batch size |
+
+**Outputs**: `PIPE`, `SEED`
+
+**Behavior**:
+- `model` is loaded from `diffusion_models` via `load_diffusion_model`, `clip` from `text_encoders` via `load_clip`, and `vae` from the `vae` folder, each independently
+- The CLIP type is auto-detected from the state_dict (e.g. Anima's Qwen3 0.6B)
+- The empty latent is created with 4 channels; KSampler's `fix_empty_latent_channels` adapts it to the model's latent_channels / latent_dimensions automatically (16-channel / 3-dimensional models need no extra setup)
+- The `weight_dtype` fp8 options apply the same dtype mapping as ComfyUI's built-in UNETLoader
+- `lora_model_strength` applies the same value to both the LoRA model strength and clip strength
+- Unlike SAX Loader, it has no `clip_skip` / `v_pred` (not applicable to diffusion models' flow-based sampling and non-CLIP text encoders)
 
 [↑ Back to top](#top)
 

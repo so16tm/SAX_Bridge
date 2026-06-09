@@ -397,6 +397,16 @@
 - [ ] **load**: 再読込で managed/scenes/currentScene 完全復元 (P2-14)
 - [ ] **legacy**: `legacy-fixture/18_toggle_manager.json` 読込 → エラーなし (P2-14)
 
+### L-4. Diffusion Loader (workflows/19_diffusion_loader.json)
+
+事前準備: Anima 等の分割配布モデルを配置（`diffusion_models/` に UNET、`text_encoders/` に CLIP、`vae/` に VAE）。ワークフロー内の `CHANGE_ME_*` を実ファイル名へ差し替える。
+
+- [ ] **load**: `workflows/19_diffusion_loader.json` 読込でエラーなくノードが表示される
+- [ ] **picker**: `unet_name` / `clip_name` / `lora_name` のラベルクリックでファイルピッカーが開く
+- [ ] **generate**: Anima モデルで実行 → 空 latent (4ch) が KSampler 側で 16ch/5D へ自動適応され、エラーなく画像生成される
+- [ ] **fp8**: `weight_dtype` を `fp8_e4m3fn` に設定 → エラーなくロード・生成される
+- [ ] **lora**: `lora_name` を実 LoRA に設定 → model/clip に適用され生成結果に反映される
+
 ## M. UI Phase 1.2.A 検証 (TextCatalog Coordinator 移行)
 
 ### M-1. TextCatalog clone smoke (workflows/text_catalog_clone_smoke.json)

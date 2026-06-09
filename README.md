@@ -5,7 +5,7 @@
 **Build advanced workflows with fewer nodes. Smart trial-and-error with management nodes.**
 
 SAX_Bridge is a collection of custom nodes that fills the missing pieces in ComfyUI workflows.
-From loading checkpoints, CLIP, and LoRA to prompt processing, sampling, detailing, and output — all in a minimal set of nodes, enabling high-quality generation without complex configurations.
+From loading checkpoints (or split-distribution diffusion models such as Anima: UNET + text encoder + VAE), CLIP, and LoRA to prompt processing, sampling, detailing, and output — all in a minimal set of nodes, enabling high-quality generation without complex configurations.
 A unique scene-based control system lets you batch-manage nodes and groups, quickly switch between configurations, and shorten your iteration cycle.
 
 ---

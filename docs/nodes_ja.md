@@ -10,7 +10,7 @@
 
 | カテゴリ | 概要 | ノード |
 |---------|------|--------|
-| [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Lora Loader](#sax-lora-loader) |
+| [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX Lora Loader](#sax-lora-loader) |
 | [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
 | [Pipe](#pipe) | Pipe の構築・切替 | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
@@ -61,6 +61,43 @@
   - `loader_settings`: `steps` / `cfg` / `sampler_name` / `scheduler` / `denoise` を格納する dict
 - `clip_skip` は model の clip_skip を設定する
 - `lora_model_strength` は LoRA の model strength と clip strength の両方に同じ値を適用する（1スライダー制御）
+
+[↑ トップへ](#top)
+
+---
+
+### SAX Diffusion Loader
+
+`SAX_Bridge_Loader_Diffusion` — UNET（diffusion model）単体・CLIP（text encoder）単体・VAE を個別フォルダから読み込み、`PIPE_LINE` コンテキストを初期化します。Checkpoint に model/clip/vae が baked されていない分割配布モデル（Anima など）向けです。出力 pipe は SAX Loader と同一構造のため、下流ノードは無改修で利用できます。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `unet_name` | Combo | diffusion model ファイル選択（`diffusion_models` フォルダ） |
+| `weight_dtype` | Combo | UNET 重み dtype（`default` / `fp8_e4m3fn` / `fp8_e4m3fn_fast` / `fp8_e5m2`） |
+| `clip_name` | Combo | text encoder ファイル選択（`text_encoders` フォルダ） |
+| `vae_name` | Combo | VAE ファイル選択（`vae` フォルダ。常に外部 VAE） |
+| `lora_name` | Combo | LoRA 選択（`None` でスキップ） |
+| `lora_model_strength` | Float (-10.0〜10.0) | LoRA のモデル適用強度 |
+| `seed` | Int | 初期シード値 |
+| `steps` | Int | サンプリングステップ数 |
+| `cfg` | Float | CFG スケール |
+| `sampler_name` | Combo | サンプラー選択 |
+| `scheduler_name` | Combo | スケジューラー選択 |
+| `denoise` | Float (0.0〜1.0) | デノイズ強度 |
+| `width` / `height` | Int | 生成解像度（8px 単位） |
+| `batch_size` | Int | バッチサイズ |
+
+**出力**: `PIPE`, `SEED`
+
+**動作**:
+- `model` は `load_diffusion_model` で `diffusion_models` から、`clip` は `load_clip` で `text_encoders` から、`vae` は `vae` フォルダからそれぞれ個別にロードする
+- CLIP の種別は state_dict から自動判別される（Anima の Qwen3 0.6B 等）
+- 空 latent は 4ch で生成し、KSampler 側の `fix_empty_latent_channels` がモデルの latent_channels / latent_dimensions へ自動適応する（16ch・3次元モデルも追加設定不要）
+- `weight_dtype` の fp8 指定は ComfyUI 本体 UNETLoader と同一の dtype マッピングを適用する
+- `lora_model_strength` は LoRA の model strength と clip strength の両方に同じ値を適用する
+- SAX Loader と異なり `clip_skip` / `v_pred` は持たない（diffusion model の flow 系サンプリング・非 CLIP テキストエンコーダに非該当のため）
 
 [↑ トップへ](#top)
 
