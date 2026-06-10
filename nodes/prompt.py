@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Any
 
 import folder_paths
 import nodes
@@ -47,7 +48,7 @@ def _get_lora_folders_mtime() -> float:
         return 0.0
 
 
-def _encode_with_break(clip, text):
+def _encode_with_break(clip: Any, text: str) -> list:
     """
     BREAK 構文をサポートした CLIP エンコード。
 
@@ -85,11 +86,20 @@ def _encode_with_break(clip, text):
             del d["_v"]
 
     try:
-        result = None
+        # 空リストは falsy のため初回チャンクは concat を経由しない (None と同義)。
+        result: list = []
         for chunk in chunks:
             o = cond_model.encode_token_weights(clip.tokenize(chunk))
             cond, pooled = o[:2]
-            conditioning = [[cond, {"pooled_output": pooled}]]
+            cond_dict = {"pooled_output": pooled}
+            # encode_token_weights は一部のテキストエンコーダ (Anima 等の
+            # マルチエンコーダ) で第3要素に追加 conditioning キー
+            # (attention_mask / t5xxl_ids 等) を返す。これらは拡散モデルが
+            # 必須とするため、ComfyUI 公式 encode_from_tokens と同様にマージする。
+            # CLIP (SD1.5/SDXL) は len(o)==2 のため挙動不変。
+            if len(o) > 2:
+                cond_dict.update(o[2])
+            conditioning = [[cond, cond_dict]]
             result = concat_node.concat(result, conditioning)[0] if result else conditioning
 
         return result

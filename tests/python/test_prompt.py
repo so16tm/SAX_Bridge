@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from nodes.prompt import SAX_Bridge_Prompt
+from nodes.prompt import SAX_Bridge_Prompt, _encode_with_break
 from nodes.io_types import filter_new_loras, record_applied_loras
 
 
@@ -101,3 +101,45 @@ class TestPromptExecute:
         pipe["clip"] = None
         with pytest.raises(ValueError, match="CLIP"):
             SAX_Bridge_Prompt.execute(pipe, "test")
+
+
+class TestEncodeWithBreak:
+    """_encode_with_break の conditioning 構築を検証する。"""
+
+    def _make_clip(self, encode_return):
+        clip = MagicMock()
+        clip.layer_idx = None
+        cond_model = MagicMock()
+        # named_modules を空にして vbar 回避ループをスキップ
+        cond_model.named_modules.return_value = []
+        cond_model.encode_token_weights.return_value = encode_return
+        clip.cond_stage_model = cond_model
+        return clip
+
+    def test_two_tuple_only_pooled(self):
+        """CLIP (SD1.5/SDXL) の 2-tuple では pooled_output のみ。"""
+        cond, pooled = MagicMock(), MagicMock()
+        clip = self._make_clip((cond, pooled))
+
+        result = _encode_with_break(clip, "hello")
+
+        assert result[0][0] is cond
+        assert result[0][1] == {"pooled_output": pooled}
+
+    def test_three_tuple_merges_extra_keys(self):
+        """マルチエンコーダ (Anima 等) の第3要素キーを欠落なくマージする。"""
+        cond, pooled = MagicMock(), MagicMock()
+        extra = {
+            "attention_mask": MagicMock(),
+            "t5xxl_ids": MagicMock(),
+            "t5xxl_weights": MagicMock(),
+        }
+        clip = self._make_clip((cond, pooled, extra))
+
+        result = _encode_with_break(clip, "hello")
+
+        cond_dict = result[0][1]
+        assert cond_dict["pooled_output"] is pooled
+        assert cond_dict["attention_mask"] is extra["attention_mask"]
+        assert cond_dict["t5xxl_ids"] is extra["t5xxl_ids"]
+        assert cond_dict["t5xxl_weights"] is extra["t5xxl_weights"]
