@@ -16,7 +16,7 @@ const EXT_NAME      = "SAX.TextCatalog";
 const NODE_TYPE     = "SAX_Bridge_Text_Catalog";
 const SCHEMA_VERSION = 1;
 const MAX_RELATIONS = 32;
-const MAX_ITEMS     = 32;
+const MAX_ITEMS     = 256;
 const MAX_TAGS      = 8;
 
 const UNSET_LABEL  = "(unset)";

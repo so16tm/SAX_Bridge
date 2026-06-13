@@ -899,7 +899,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 | 項目 | 値 |
 |------|-----|
-| 最大 Item 数 | 32 |
+| 最大 Item 数 | 256 |
 | 最大 Relation 数 | 32 |
 | Item あたりタグ数 | 8 |
 | Item id 最大長 | 128 文字（DoS 対策） |

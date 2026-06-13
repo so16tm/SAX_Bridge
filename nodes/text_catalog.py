@@ -37,7 +37,7 @@ logger = logging.getLogger("SAX_Bridge")
 
 
 MAX_RELATIONS = 32
-MAX_ITEMS = 32
+MAX_ITEMS = 256
 MAX_TAGS_PER_ITEM = 8
 MAX_ID_LENGTH = 128  # 信頼できないワークフローからの DoS 防止
 SCHEMA_VERSION = 1

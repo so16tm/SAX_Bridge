@@ -899,7 +899,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 | Item | Value |
 |------|-------|
-| Max Items | 32 |
+| Max Items | 256 |
 | Max Relations | 32 |
 | Tags per Item | 8 |
 | Max Item id length | 128 chars (DoS protection) |
