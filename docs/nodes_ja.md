@@ -852,6 +852,7 @@ applied_loras: {'lora_a'} (1 entries)
 **ノード本体ウィジェット**
 - `📖 Manage Texts...` ボタン / 右クリックメニューで Manager Dialog を起動
 - `[+ Add Relation]` で Relation を追加すると同時に出力 Slot も増える
+- Relation を追加 / 削除 / 並べ替えしても、後続ノード（`SAX Prompt Concat` 等の動的入力ノードを含む）への接続は維持される
 - 各 Relation 行に行頭トグル（pill）/ `[✎]`（Item 選択）/ `[↑↓]`（並び替え）/ `[×]`（削除）
 - 行頭トグルを OFF にすると、Item 割当を残したまま Slot 出力を空文字にできる（一時的に出力を止める用途）
 - OFF 状態の Relation はテキストが半透明表示になる

@@ -271,6 +271,11 @@ function drawTypeBadge(ctx, item, x, midY, w, h) {
 function buildPrimitiveStoreSpec(node) {
     return {
         direction:         "output",
+        // link-preserving 再構築の明示 opt-in。item 1 件 → 出力ピン 1 件 (1:1) かつ
+        // 出力ピンが Coordinator 管理対象 (syncOutputSlots が add/remove する) のため、
+        // 下流端を切らずに上流ピンだけ付け替える経路を有効化する。
+        // Image/Pipe Collector は固定出力でこのフラグを持たないため従来 reconnect 経路に入る。
+        linkPreserving:    true,
         getEntities:       () => node._primitiveItems ?? [],
         entityToSlots:     (item, _hints) => [{
             name: item.name,

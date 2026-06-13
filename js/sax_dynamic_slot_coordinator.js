@@ -31,6 +31,16 @@
  * @property {"input" | "output"} direction
  *           動的スロットの方向。"output" は PrimitiveStore / TextCatalog のような出力スロット可変ノード、
  *           "input" は Collector 系の入力スロット可変ノード。
+ * @property {boolean} [linkPreserving]
+ *           link-preserving 再構築 (#restoreLinkPreserving) を主経路とするかの明示 opt-in。
+ *           true は「entity 1 件 → 出力ピン 1 件 (1:1) かつ出力ピンが Coordinator 管理対象
+ *           (syncSlotStructure が add/remove で増減させる)」ノード (PrimitiveStore / TextCatalog) のみ指定する。
+ *           この経路は entity 数に合わせて出力ピンを addOutput/removeOutput し、生存 link の上流端
+ *           (origin_slot) のみ in-place で付け替えて下流端を保つ。
+ *           固定出力を持つ Image/Pipe Collector (direction="output" だが出力ピンが Python 定義で
+ *           Coordinator 非管理・syncSlotStructure が no-op) では **指定してはならない** (固定出力ピンが
+ *           addOutput/removeOutput で破壊される)。未指定 (falsy) のノードは従来の remove-all + connect
+ *           再接続経路 (#restoreByReconnect) に入る。
  * @property {() => object[]} getEntities
  *           現状の entity 配列を返すコールバック。entity は items / sources など各ノードの最小単位。
  *           identity 維持が前提 (WeakMap ベース ID 採番のため、毎回新しい配列を返してはならず、
@@ -202,24 +212,7 @@ export class DynamicSlotCoordinator {
                 throw actionError;
             }
 
-            this.#spec.syncSlotStructure();
-            const slotCountAfter = this.#getSlotCount();
-            const slotCountChanged = slotCountAfter !== slotCountBefore;
-
-            if (slotCountChanged) {
-                asyncScheduled = true;
-                setTimeout(() => {
-                    this.#hints = hintsForAsync;
-                    try {
-                        this.#restoreFromSnapshots();
-                    } finally {
-                        for (const id of capturedEntityIds) this.#cleanupSnapshot(id);
-                        this.#hints = null;
-                    }
-                }, 0);
-            } else {
-                this.#restoreFromSnapshots();
-            }
+            asyncScheduled = this.#syncAndRestore(slotCountBefore, capturedEntityIds, hintsForAsync);
         } finally {
             // 同期 restore 経路 / 例外経路ではこの finally で cleanup する。
             // 非同期 restore 経路では setTimeout コールバック側で行う。
@@ -273,22 +266,7 @@ export class DynamicSlotCoordinator {
 
         try {
             this.#spec.setEntities(newEntities);
-            this.#spec.syncSlotStructure();
-            const slotCountAfter = this.#getSlotCount();
-            if (slotCountAfter !== slotCountBefore) {
-                didScheduleAsync = true;
-                setTimeout(() => {
-                    this.#hints = hintsForAsync;
-                    try {
-                        this.#restoreFromSnapshots();
-                    } finally {
-                        for (const id of capturedEntityIds) this.#cleanupSnapshot(id);
-                        this.#hints = null;
-                    }
-                }, 0);
-            } else {
-                this.#restoreFromSnapshots();
-            }
+            didScheduleAsync = this.#syncAndRestore(slotCountBefore, capturedEntityIds, hintsForAsync);
         } finally {
             // 同期 restore 経路ではこの finally で #hints をクリアし snapshot cleanup する。
             // 非同期 restore 経路 (didScheduleAsync=true) では setTimeout コールバック側で行う。
@@ -357,22 +335,7 @@ export class DynamicSlotCoordinator {
         const hintsForAsync = this.#hints;
         try {
             this.#spec.setEntities(newEntities);
-            this.#spec.syncSlotStructure();
-            const slotCountAfter = this.#getSlotCount();
-            if (slotCountAfter !== slotCountBefore) {
-                didScheduleAsync = true;
-                setTimeout(() => {
-                    this.#hints = hintsForAsync;
-                    try {
-                        this.#restoreFromSnapshots();
-                    } finally {
-                        for (const id of capturedEntityIds) this.#cleanupSnapshot(id);
-                        this.#hints = null;
-                    }
-                }, 0);
-            } else {
-                this.#restoreFromSnapshots();
-            }
+            didScheduleAsync = this.#syncAndRestore(slotCountBefore, capturedEntityIds, hintsForAsync);
         } finally {
             if (!didScheduleAsync) {
                 this.#hints = null;
@@ -407,6 +370,70 @@ export class DynamicSlotCoordinator {
      */
     #cleanupSnapshot(entityId) {
         this.#linkSnapshots.delete(entityId);
+    }
+
+    /**
+     * 1:1 link-preserving 再構築を主経路とするか。
+     * true の場合、ピンの add/remove と link 再ポイントは #restoreLinkPreserving が一括制御する
+     * ため、restore 前の破壊的 syncSlotStructure 呼出 (removeOutput で下流を切る) を抑止する。
+     *
+     * 判定は **spec.linkPreserving === true の明示 opt-in** に限定する。direction="output" かつ
+     * resolver 両未定義という条件は Image/Pipe Collector (固定出力・syncSlotStructure no-op) も満たすため、
+     * !hasResolvers での暗黙判定では固定出力ピンが addOutput/removeOutput で破壊される回帰となる。
+     * 明示フラグにより link-preserving 経路を PrimitiveStore / TextCatalog のみに限定する。
+     * @returns {boolean}
+     */
+    #isLinkPreserving() {
+        if (this.#spec.direction !== "output") return false;
+        if (this.#spec.linkPreserving !== true) return false;
+        const hasResolvers
+            = typeof this.#spec.resolveLocalSlotBySlotName === "function"
+            || typeof this.#spec.resolveLocalSlotByGlobalIdx === "function";
+        return !hasResolvers;
+    }
+
+    /**
+     * action / setEntities 完了後の「構造同期 + restore」フェーズを実行する。
+     * mutate / applyAfterCapture / commitState の 3 経路で共通利用する。
+     *
+     * - link-preserving 経路 (1:1): 破壊的 syncSlotStructure を経由せず、
+     *   #restoreLinkPreserving が「ピン add/remove + link in-place 再ポイント + name/type 更新」を
+     *   **同期で** 一括実行する。in-place 再ポイントは既存 link を直接操作するため、
+     *   従来の connect ベース restore が必要とした setTimeout(0) link 確定待ちが不要。
+     *   ピン構造も同期で確定するため UX 上の遅延も生じない。常に false (同期) を返す。
+     * - 従来経路 (1:N / input): syncSlotStructure を同期実行し、slot 数が変動した場合のみ
+     *   setTimeout(0) で connect ベース restore を遅延する (LiteGraph link 確定待ち)。
+     *
+     * @param {number} slotCountBefore     action 前の slot 数 (従来経路の変動判定に使用)
+     * @param {number[]} capturedEntityIds  cleanup 対象 ID (非同期経路の setTimeout で消費)
+     * @param {Map<object, object> | null} hintsForAsync  非同期 restore 用に退避した hints
+     * @returns {boolean} 非同期 restore をスケジュールしたか (true なら呼出側 finally は cleanup しない)
+     */
+    #syncAndRestore(slotCountBefore, capturedEntityIds, hintsForAsync) {
+        if (this.#isLinkPreserving()) {
+            // 1:1: 構造確定 + link 再ポイントを同期で完結する (#restoreFromSnapshots →
+            // #restoreLinkPreserving 内で syncSlotStructure を 1 回だけ呼ぶ)。
+            this.#restoreFromSnapshots();
+            return false;
+        }
+
+        // 従来経路 (1:N): syncSlotStructure を同期実行し、slot 数変動時のみ非同期 restore。
+        this.#spec.syncSlotStructure();
+        const slotCountAfter = this.#getSlotCount();
+        if (slotCountAfter === slotCountBefore) {
+            this.#restoreFromSnapshots();
+            return false;
+        }
+        setTimeout(() => {
+            this.#hints = hintsForAsync;
+            try {
+                this.#restoreFromSnapshots();
+            } finally {
+                for (const id of capturedEntityIds) this.#cleanupSnapshot(id);
+                this.#hints = null;
+            }
+        }, 0);
+        return true;
     }
 
     /**
@@ -489,6 +516,10 @@ export class DynamicSlotCoordinator {
                         const link = graphLinks?.[linkId];
                         if (!link) continue;
                         conns.push({
+                            // linkId: 1:1 link-preserving 再構築 (#restoreLinkPreserving) で
+                            // graph.links[linkId].origin_slot を in-place 付け替えするために保持する。
+                            // 1:N (resolver 定義済) 経路では参照されない (従来 connect ベース)。
+                            linkId,
                             targetId: link.target_id,
                             targetSlot: link.target_slot,
                             globalSlotIdx,
@@ -530,16 +561,34 @@ export class DynamicSlotCoordinator {
         const graph = this.#node.graph ?? globalThis.app?.graph ?? null;
         if (!graph) return;
 
-        // G1: positional fallback の適用可否。1:1 output (resolver 両未定義) かつ slot 数不変の時のみ、
-        // entity identity 解決失敗スロットを同一物理位置の snapshot で復元する。
-        // 1:N (NodeCollector: resolver 定義済) は enabledSlots 編集で slot 数が変動し、positional は
-        // 隣接スロットへの誤接続を招くため適用しない (段階1/2 resolver に委ねる)。
-        // move は entity identity が維持され id 解決に成功するため、この fallback 経路には落ちない。
-        const hasResolvers
-            = typeof this.#spec.resolveLocalSlotBySlotName === "function"
-            || typeof this.#spec.resolveLocalSlotByGlobalIdx === "function";
-        const positionalEligible
-            = !hasResolvers && (this.#node.outputs?.length ?? 0) === this.#capturedSlotCount;
+        // 適用範囲判定は #isLinkPreserving() に一元化する (#syncAndRestore と同一判定)。
+        // link-preserving 経路 (PrimitiveStore / TextCatalog: spec.linkPreserving === true) は
+        // 下流端 (target_*) を一切触らず、動的入力下流 (Autogrow 等) を縮小・再採番させずに
+        // リンクを維持する。それ以外 (Image/Pipe/Node Collector) は従来の remove-all + connect
+        // 再接続経路 (#restoreByReconnect) を維持する。
+        if (this.#isLinkPreserving()) {
+            this.#restoreLinkPreserving(entities, graph);
+            return;
+        }
+        this.#restoreByReconnect(entities, graph);
+    }
+
+    /**
+     * 従来の remove-all + connect 再接続による復元 (link-preserving 非対象ノード専用)。
+     *
+     * 到達するのは spec.linkPreserving !== true のノード:
+     * - NodeCollector (1:N, resolver 定義済): snapshot 1 件ごとに段階1/2/3 で localSlotIdx を解決する
+     *   (旧 `_restoreDownstream` のロジック準拠)。
+     * - Image/Pipe Collector (固定出力, resolver 未定義): 段階3 (ds.localSlotIdx をそのまま採用) で
+     *   従来通り全出力 slot を remove-all → connect 再接続する (固定出力ピンは破壊しない)。
+     * 1:1 link-preserving 経路は #restoreLinkPreserving に分離済。
+     *
+     * @param {object[]} entities
+     * @param {object} graph
+     */
+    #restoreByReconnect(entities, graph) {
+        // 本経路は spec.linkPreserving !== true のノードのみ到達する。positional fallback (G1) は
+        // 1:1 link-preserving 専用のため #restoreLinkPreserving 側で処理し、本経路では使わない。
 
         // 既存リンクをクリアしてから再接続 (capture 前の link は action 内で
         // syncSlotStructure 経由 removeOutput により graph.links からも除去済の想定だが、
@@ -565,16 +614,17 @@ export class DynamicSlotCoordinator {
 
             const conns = id !== undefined ? this.#linkSnapshots.get(id) : null;
             if (!conns?.length) {
-                // G1: entity が「新オブジェクト (id 未採番 = identity 破壊)」の時のみ、
-                // 同一物理位置の positional snapshot で復元し切断を非致命化する。
-                // id が採番済 (move 等で identity 維持された既存 entity) で link を持たない場合は
-                // positional を発火させない (別 entity の旧位置 link を誤って引き継がないため)。
-                if (positionalEligible && id === undefined) {
-                    this.#restorePositional(baseOffset, slots.length, graph);
-                }
                 baseOffset += slots.length;
                 continue;
             }
+
+            // resolver の有無で段階3 (ds.localSlotIdx 直接採用) の扱いが変わる。
+            // NodeCollector (resolver 定義済) は段階1/2 で解決し、失敗時は skip (誤接続防止)。
+            // Image/Pipe Collector (resolver 未定義) は段階3 で ds.localSlotIdx をそのまま採用する
+            // (固定出力に対し localSlotIdx は capture 時点の物理位置と一致、旧 _restoreDownstream 互換)。
+            const hasResolvers
+                = typeof this.#spec.resolveLocalSlotBySlotName === "function"
+                || typeof this.#spec.resolveLocalSlotByGlobalIdx === "function";
 
             for (const ds of conns) {
                 let localSlotIdx = -1;
@@ -590,21 +640,14 @@ export class DynamicSlotCoordinator {
                     const resolved = this.#spec.resolveLocalSlotByGlobalIdx(entity, ds.globalSlotIdx);
                     if (typeof resolved === "number" && resolved >= 0) localSlotIdx = resolved;
                 }
-                // 段階 3 fallback: 両 spec 未定義 (1:1 ノード / Image・Pipe Collector) の場合、
-                // capture 時の localSlotIdx をそのまま採用する。spec が定義されているのに
-                // resolve に失敗したケース (NodeCollector で enabledSlots 編集により globalIdx が消失)
-                // は restore skip。
-                // 段階3 fallback 判定: spec の resolver が両方とも function でない場合
-                // (null / undefined / 未定義) のみ ds.localSlotIdx をそのまま採用。
-                // 1:1 ノード (PrimitiveStore / TextCatalog)・enabledSlots 編集機能なし Collector
-                // (Image / Pipe) は両 resolver を null/未定義のままにすることでこの経路に倒れる。
+                // 段階 3: resolver 未定義 (Image/Pipe Collector) は ds.localSlotIdx を直接採用する。
+                // resolver 定義済 (NodeCollector) で段階1/2 が両方失敗した場合は skip し誤接続を防ぐ
+                // (enabledSlots 編集で globalIdx が消失したケース)。
                 if (localSlotIdx < 0) {
-                    const hasResolvers
-                        = typeof this.#spec.resolveLocalSlotBySlotName === "function"
-                        || typeof this.#spec.resolveLocalSlotByGlobalIdx === "function";
                     if (hasResolvers) continue;
                     localSlotIdx = ds.localSlotIdx;
                 }
+                if (localSlotIdx < 0) continue;
 
                 const absIdx = baseOffset + localSlotIdx;
                 const targetNode = graph.getNodeById?.(ds.targetId);
@@ -613,6 +656,131 @@ export class DynamicSlotCoordinator {
                 }
             }
             baseOffset += slots.length;
+        }
+    }
+
+    /**
+     * 1:1 output 専用の link-preserving 再構築 (恒久対策の中核)。
+     *
+     * 生存 entity の下流リンクは「上流端 (出力ピン = origin_slot) だけ in-place 付け替え」し、
+     * 下流端 (target_id / target_slot / 下流 inputs[].link) を一切触らない。これにより
+     * 下流の動的入力 (Autogrow 等) は onConnectionsChange を受けず縮小・再採番しない。
+     * LiteGraph 自身が decrementSlots で行う native パターンであり、asSerialisable は live
+     * フィールド直読みのため保存にも反映される。
+     *
+     * 手順 (D11 純粋関数 computeLinkRepointPlan で写像を計算 → 本メソッドが副作用適用):
+     *   1. 削除 entity の下流リンクのみ graph.removeLink (切れてよい唯一の対象)
+     *   2. 生存 entity 数までピン成長 (末尾 addOutput、既存ピン/リンク不変)
+     *   3. 各生存 link の graph.links[linkId].origin_slot を新ピン index へ in-place 代入
+     *   4. 各 outputs[i].links を graph.links から再構築 (順序非依存・reorder 交差に対応)
+     *   5. 縮小は必ず末尾 (最高 index) から removeOutput (native origin_slot-- 再採番が
+     *      発火しない位置のため二重補正を回避)
+     *   6. syncSlotStructure で name/type/widget value/size を更新 (ピン数は一致済で while no-op)
+     *   7. identity 破壊 entity (id 未採番) は G1 positional fallback で救済
+     *
+     * @param {object[]} entities  mutation 後の entity 配列 (新順序)
+     * @param {object} graph       LiteGraph グラフ
+     */
+    #restoreLinkPreserving(entities, graph) {
+        const node = this.#node;
+        const links = graph.links ?? {};
+
+        // 写像計算 (app 非依存の純粋関数)。capture と restore の間に link が外部で
+        // 変化した場合に備え、生存確認は副作用適用フェーズで再度行う。
+        // computeLinkRepointPlan は invariant として「同一 linkId が repoints と
+        // linksToRemove の両方に入らない」ことを保証する (削除 entity と生存 entity は
+        // entity identity で排他のため。詳細は computeLinkRepointPlan のコメント参照)。
+        const plan = computeLinkRepointPlan({
+            entities,
+            entityIds: this.#entityIds,
+            linkSnapshots: this.#linkSnapshots,
+            graphLinks: links,
+            nodeId: node.id,
+        });
+
+        // 主要手順を try/catch で包み、例外時に診断ログを出してから re-throw する
+        // (呼出側の atomic rollback / cleanup を妨げない)。
+        try {
+            // 手順1: 削除 entity の下流リンクを除去 (切れてよい唯一の対象)。
+            // ゴーストリンク防御: graph.removeLink が未定義/非関数でも、除去対象 linkId は
+            // 手順4 の linksByPin 再構築から確実に除外する (removedLinkIds)。これにより
+            // 「graph.links から消えないのに outputs[].links から外れる/その逆」の不整合を防ぐ。
+            const removedLinkIds = new Set();
+            for (const linkId of plan.linksToRemove) {
+                removedLinkIds.add(linkId);
+                if (typeof graph.removeLink === "function") {
+                    graph.removeLink(linkId);
+                }
+            }
+
+            // 手順2: 生存 entity 数までピンを末尾成長 (既存ピン/リンク不変・下流影響ゼロ)。
+            while ((node.outputs?.length ?? 0) < entities.length) {
+                node.addOutput?.("", "*");
+            }
+
+            // 手順3: 生存 link の origin_slot を新ピン index へ in-place 付け替え。
+            // 生存確認 (links[linkId] が依然存在) を維持する。
+            for (const rp of plan.repoints) {
+                const link = links[rp.linkId];
+                if (!link) continue;
+                link.origin_slot = rp.newOriginSlot;
+            }
+
+            // 手順4: 各 outputs[i].links を graph.links から再構築する。
+            // 「このノードが origin かつ origin_slot===i の生存 linkId」を集約する。
+            // 旧/新ピンが交差する reorder でも順序非依存に整合する。
+            // 重要: 現存する**全**ピン (縮小予定の末尾ピンを含む) を対象に再構築する。
+            // 生存 link は手順3 で newPin (< newPinCount) へ origin_slot を移動済みのため、
+            // 縮小予定の末尾ピンには生存 link が割り当たらず .links が空になる。これにより
+            // 手順5 の removeOutput が生存 link を誤って removeLink する事故を防ぐ
+            // (末尾ピンに stale な旧 .links 配列が残ると removeOutput がそれを切ってしまう)。
+            // removedLinkIds の linkId は (removeLink 不発でも) ここで除外しゴーストを防ぐ。
+            const newPinCount = entities.length;
+            const linksByPin = new Map();
+            for (const link of Object.values(links)) {
+                if (link?.origin_id !== node.id) continue;
+                if (removedLinkIds.has(link.id)) continue;
+                const slot = link.origin_slot;
+                const arr = linksByPin.get(slot) ?? [];
+                arr.push(link.id);
+                linksByPin.set(slot, arr);
+            }
+            const currentPinCount = node.outputs?.length ?? 0;
+            for (let i = 0; i < currentPinCount; i++) {
+                if (!node.outputs?.[i]) continue;
+                // in-place 代入: outputs[].links を新配列に置換する (LiteGraph も
+                // decrementSlots 等で配列を作り直す)。当ノード外参照は保持されない。
+                node.outputs[i].links = linksByPin.get(i) ?? [];
+            }
+
+            // 手順5: 縮小は必ず末尾 (最高 index) から行う。
+            // 末尾ピンは手順4 で生存リンクを移動済みのため links は空 →
+            // removeOutput の disconnectOutput は空振り、native origin_slot-- 再採番も
+            // 「除去 index より後ろ」が無いため発火しない (二重補正回避の要)。
+            while ((node.outputs?.length ?? 0) > newPinCount) {
+                node.removeOutput?.(node.outputs.length - 1);
+            }
+
+            // 手順6: name/type/widget value/size を更新 (ピン数一致済で while は no-op)。
+            this.#spec.syncSlotStructure();
+
+            // 手順7: identity 破壊 entity (id 未採番) かつ slot 数不変時のみ、
+            // 同一物理位置の positional snapshot で救済する (G1 階層化・下位 fallback)。
+            // identity 生存 entity は手順3/4 の in-place 再ポイントで既に処理済のため
+            // ここでは positional を発火させない。
+            if ((node.outputs?.length ?? 0) === this.#capturedSlotCount) {
+                let baseOffset = 0;
+                for (const entity of entities) {
+                    const id = this.#entityIds.get(entity);
+                    if (id === undefined) {
+                        this.#restorePositional(baseOffset, 1, graph);
+                    }
+                    baseOffset += 1;
+                }
+            }
+        } catch (e) {
+            console.warn("[SAX_Bridge] #restoreLinkPreserving failed:", e);
+            throw e;
         }
     }
 
@@ -735,6 +903,97 @@ export class DynamicSlotCoordinator {
         if (this.#spec.direction === "output") return this.#node.outputs?.length ?? 0;
         return this.#node.inputs?.length ?? 0;
     }
+}
+
+/**
+ * @typedef {object} LinkRepointPlanInput
+ * @property {object[]} entities
+ *           mutation 後の entity 配列 (新順序)。各 entity の新ピン index = 配列内 index (1:1)。
+ * @property {WeakMap<object, number>} entityIds
+ *           entity → 内部 ID。identity 生存判定に使う (id 未取得 = identity 破壊)。
+ * @property {Map<number, Array<{ linkId: number }>>} linkSnapshots
+ *           capture 済み snapshot。id → 接続情報 (linkId を含む)。
+ * @property {object} graphLinks
+ *           graph.links (id → link)。生存 link 判定に使う。
+ * @property {number} nodeId
+ *           当ノードの id。
+ */
+
+/**
+ * @typedef {object} LinkRepointPlan
+ * @property {Array<{ linkId: number, newOriginSlot: number }>} repoints
+ *           生存 entity の生存 link を新ピン index へ付け替える指示。
+ * @property {number[]} linksToRemove
+ *           削除 entity (capture 時に存在し新配列に無い) の下流リンク id。
+ */
+
+/**
+ * 1:1 link-preserving 再構築の写像を計算する純粋関数 (app 非依存・D11)。
+ *
+ * 副作用を持たず、入力から「どの link をどの新ピンへ再ポイントするか」「どの link を
+ * 削除するか」を算出する。LiteGraph や app への依存はないため単体テスト可能。
+ *
+ * アルゴリズム:
+ *   1. 新 entity 配列を走査し、identity 解決成功 (entityIds.get(entity) 定義済) かつ
+ *      snapshot ありの entity を「生存」とみなし、その linkId 群を新ピン index へ repoint。
+ *   2. snapshot を持つが新配列に生存しない id (= 削除された entity の id) の linkId 群を
+ *      linksToRemove に集約する。
+ *   3. 生存判定・削除判定とも graphLinks に依然存在する linkId のみ対象とする
+ *      (capture と restore の間に外部で消えた link は無視)。
+ *
+ * Invariant: 同一 linkId が repoints と linksToRemove の両方に入らない。
+ *   - repoints は aliveId (生存 entity) の linkId のみ。
+ *   - linksToRemove は !aliveId の id の linkId のみ。
+ *   両者は entity id で排他のため通常は交差しないが、想定外の snapshot 重複に対する
+ *   防御として、linksToRemove に積む前に repoints の linkId を除外する。
+ *
+ * @param {LinkRepointPlanInput} input
+ * @returns {LinkRepointPlan}
+ */
+export function computeLinkRepointPlan(input) {
+    const { entities, entityIds, linkSnapshots, graphLinks, nodeId } = input;
+    const links = graphLinks ?? {};
+
+    const repoints = [];
+    const aliveIds = new Set();
+
+    for (let newPin = 0; newPin < entities.length; newPin++) {
+        const entity = entities[newPin];
+        const id = entityIds.get(entity);
+        if (id === undefined) continue; // identity 破壊 → G1 positional fallback に委譲
+        const conns = linkSnapshots.get(id);
+        if (!conns?.length) {
+            // snapshot ありで link なしの生存 entity も aliveId として記録する
+            // (id がある = 生存。下記の削除判定から除外する)。
+            if (linkSnapshots.has(id)) aliveIds.add(id);
+            continue;
+        }
+        aliveIds.add(id);
+        for (const ds of conns) {
+            const linkId = ds.linkId;
+            if (linkId == null) continue;
+            const link = links[linkId];
+            if (!link || link.origin_id !== nodeId) continue;
+            repoints.push({ linkId, newOriginSlot: newPin });
+        }
+    }
+
+    // 削除 entity の link を集約する: snapshot を持つが生存していない id。
+    // 防御: repoints に積んだ linkId は (invariant 上発生しないが) linksToRemove から除外し、
+    // 生存 link を誤って removeLink する事故を防ぐ。
+    const repointedLinkIds = new Set(repoints.map(rp => rp.linkId));
+    const linksToRemove = [];
+    for (const [id, conns] of linkSnapshots) {
+        if (aliveIds.has(id)) continue;
+        for (const ds of conns ?? []) {
+            const linkId = ds.linkId;
+            if (linkId == null) continue;
+            if (repointedLinkIds.has(linkId)) continue;
+            if (links[linkId]) linksToRemove.push(linkId);
+        }
+    }
+
+    return { repoints, linksToRemove };
 }
 
 /**

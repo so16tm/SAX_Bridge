@@ -9,7 +9,11 @@
 import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
 
-import { DynamicSlotCoordinator, ensureCoordinator } from "../../js/sax_dynamic_slot_coordinator.js";
+import {
+    DynamicSlotCoordinator,
+    ensureCoordinator,
+    computeLinkRepointPlan,
+} from "../../js/sax_dynamic_slot_coordinator.js";
 
 // ---------------------------------------------------------------------------
 // LiteGraph / app モック
@@ -34,7 +38,14 @@ function makeGraphMock() {
             const origin = nodes.get(link.origin_id);
             const slot = origin?.outputs?.[link.origin_slot];
             if (slot?.links) slot.links = slot.links.filter(id => id !== linkId);
+            // 本物の LiteGraph と同様、下流 (target) の disconnectInput を発火する。
+            // Autogrow 下流はこれを受けてスロットを縮小・再採番する。
+            const target = nodes.get(link.target_id);
+            const targetSlot = link.target_slot;
+            const targetInput = target?.inputs?.[targetSlot];
+            if (targetInput && targetInput.link === linkId) targetInput.link = null;
             delete links[linkId];
+            target?.disconnectInput?.(targetSlot);
         },
         setDirtyCanvas() {},
     };
@@ -57,22 +68,106 @@ function makeNode({ id = 1, outputCount = 0 } = {}) {
                 target_slot: targetSlot,
             });
             this.outputs[slotIndex].links.push(linkId);
+            // 下流が動的入力 (Autogrow) を持つ場合、connect 時の onConnectionsChange を発火する
+            targetNode.onConnectionsChange?.("input", targetSlot, true, this._graph.links[linkId]);
             this.connectCalls.push({ slotIndex, targetId: targetNode.id, targetSlot });
             return linkId;
         },
         addOutput(name, type) { this.outputs.push({ name, type, links: [] }); },
+        // 本物の LiteGraph removeOutput に倣う: 当該 slot の link を disconnect し、
+        // 除去 index より後ろの生存 link の origin_slot を 1 減算する (native decrementSlots)。
         removeOutput(idx) {
             const removed = this.outputs.splice(idx, 1)[0];
             if (removed?.links) {
                 for (const id of [...removed.links]) this._graph.removeLink(id);
+            }
+            // native 再採番: origin_id===this.id かつ origin_slot > idx の link を減算
+            const links = this._graph.links;
+            for (const link of Object.values(links)) {
+                if (link.origin_id === this.id && link.origin_slot > idx) {
+                    link.origin_slot -= 1;
+                }
             }
         },
     };
     return node;
 }
 
+// 静的入力下流ノード (固定スロット)。
 function makeTargetNode(id) {
     return { id, outputs: [], inputs: [{ name: "in", type: "*" }] };
+}
+
+// ---------------------------------------------------------------------------
+// Autogrow 模倣下流ノード
+//
+// ComfyUI の io.Autogrow 入力 (例: SAX Prompt Concat の texts) を模倣する。
+// disconnectInput(slot) を受けると該当入力スロットを削除し、以降のスロットを再採番する
+// (= スロット数自体が縮小する)。これにより「上流が link を切ると下流が縮小・再採番する」
+// 本バグの構造的トリガを再現する。
+//
+// 各 input は { name, type, link } を持ち、link は graph.links の id。
+// onConnectionsChange("input", slot, connected, linkInfo) で接続時に末尾入力を 1 つ生やし、
+// disconnectInput(slot) で該当入力を削除して再採番する。
+// ---------------------------------------------------------------------------
+function makeAutogrowTargetNode(id, graph, { initialInputs = 1 } = {}) {
+    const node = {
+        id,
+        outputs: [],
+        inputs: Array.from({ length: initialInputs }, (_, i) => ({
+            name: `text${i + 1}`, type: "*", link: null,
+        })),
+        _graph: graph,
+        // 接続イベント: 接続なら末尾に予備入力を 1 つ生やす (Autogrow 成長)。
+        onConnectionsChange(side, slot, connected, linkInfo) {
+            if (side !== "input") return;
+            if (connected) {
+                if (this.inputs[slot]) this.inputs[slot].link = linkInfo?.id ?? this.inputs[slot].link;
+                // Autogrow: 全入力が埋まったら末尾に空入力を追加する
+                const allFilled = this.inputs.every(inp => inp.link != null);
+                if (allFilled) {
+                    this.inputs.push({ name: `text${this.inputs.length + 1}`, type: "*", link: null });
+                }
+            }
+        },
+        // 上流の removeLink から呼ばれる。該当入力を削除し以降を再採番・link を更新する。
+        disconnectInput(slot) {
+            if (!this.inputs[slot]) return;
+            this.inputs.splice(slot, 1);
+            // 再採番: graph.links のうち target_id===this.id かつ target_slot > slot を減算
+            const links = this._graph.links;
+            for (const link of Object.values(links)) {
+                if (link.target_id === this.id && link.target_slot > slot) {
+                    link.target_slot -= 1;
+                }
+            }
+            // name も振り直す (実 Autogrow は text1..textN を連番化する)
+            this.inputs.forEach((inp, i) => { inp.name = `text${i + 1}`; });
+        },
+    };
+    return node;
+}
+
+// 整合不変条件 assert: 全 link について outputs[link.origin_slot].links が link.id を含み、
+// graph.links の origin と outputs の対応が一致することを検証する。
+function assertLinkIntegrity(node, graph, label = "") {
+    const prefix = label ? `[${label}] ` : "";
+    for (const link of Object.values(graph.links)) {
+        if (link.origin_id !== node.id) continue;
+        const out = node.outputs[link.origin_slot];
+        assert.ok(out, `${prefix}link ${link.id} の origin_slot=${link.origin_slot} に出力ピンが存在するべき`);
+        assert.ok(out.links?.includes(link.id),
+            `${prefix}outputs[${link.origin_slot}].links は link ${link.id} を含むべき`);
+    }
+    // 逆方向: outputs[i].links の各 id は graph.links に存在し origin_slot===i であるべき
+    for (let i = 0; i < node.outputs.length; i++) {
+        for (const id of node.outputs[i].links ?? []) {
+            const link = graph.links[id];
+            assert.ok(link, `${prefix}outputs[${i}].links の link ${id} は graph.links に存在するべき`);
+            assert.equal(link.origin_slot, i,
+                `${prefix}link ${id} の origin_slot は ${i} と一致するべき`);
+        }
+    }
 }
 
 // グローバル app の差し替え (afterEach で復元)
@@ -104,6 +199,9 @@ function makePrimitiveLikeSpec(node, items) {
     return {
         spec: {
             direction: "output",
+            // PrimitiveStore / TextCatalog を模倣: 1:1・出力ピン Coordinator 管理 →
+            // link-preserving 経路の明示 opt-in。
+            linkPreserving: true,
             getEntities: () => items,
             entityToSlots: (item) => [{ name: item.name, type: item.type }],
             syncSlotStructure,
@@ -162,22 +260,25 @@ describe("DynamicSlotCoordinator.captureFromExisting", () => {
         // node.outputs[0] → target node (target_slot=0) の link を実構築
         node.connect(0, target, 0);
         node.connect(1, target, 0);
+        const link0 = node.outputs[0].links[0];
+        const link1 = node.outputs[1].links[0];
 
         const items = [{ name: "a", type: "INT" }, { name: "b", type: "INT" }];
         const { spec } = makePrimitiveLikeSpec(node, items);
         const coord = new DynamicSlotCoordinator(node, spec);
         coord.captureFromExisting();
 
-        // restore 経路で同じ接続が再現できることで capture が機能していることを確認
+        // restore 経路で同じ接続が維持されることで capture が機能していることを確認
         node.connectCalls = [];
         // applyAfterCapture には items のコピーを渡す (setEntities が `items.length=0; push(...newEntities)` を行うため、
         // newEntities が items と同一参照だと意図しない empty 化が起こる)
         const sameItems = [...items];
         coord.applyAfterCapture(sameItems);
-        // 内蔵 restore (restoreLinksRaw 未指定) は: 既存 link 全消去 → setEntities → sync → 再接続
-        // slot 数不変なので同期 restore。再接続 2 回が期待される。
-        assert.equal(node.connectCalls.length, 2,
-            "capture したスナップショットから 2 link が再接続されるべき");
+        // 新方式: slot 数不変・位置不変なので link は origin_slot 不変で in-place 維持される。
+        assert.equal(node.connectCalls.length, 0, "link-preserving 経路では connect を使わない");
+        assert.ok(graph.links[link0] && graph.links[link0].origin_slot === 0, "link0 はピン 0 に維持");
+        assert.ok(graph.links[link1] && graph.links[link1].origin_slot === 1, "link1 はピン 1 に維持");
+        assertLinkIntegrity(node, graph, "captureFromExisting");
     });
 });
 
@@ -201,22 +302,30 @@ describe("DynamicSlotCoordinator.mutate (1:1 capture/restore)", () => {
 
         node.connectCalls = []; // capture 後の connect 呼出のみ計測する
 
+        const linkId = node.outputs[0].links[0];
+
         coord.mutate((entities) => {
             // 入れ替え (in-place、entity identity は維持)
             const tmp = entities[0]; entities[0] = entities[1]; entities[1] = tmp;
         });
 
-        // syncSlotStructure が呼ばれること
+        // syncSlotStructure が呼ばれること (link-preserving 経路では restore 内で 1 回)
         assert.equal(syncSlotStructure.mock.calls.length, 1);
-        // slot 数不変なので同期 restore: 入れ替え後 entity[1] (元 a) が outputs[1] にいるが、
-        // a の snapshot は元の outputs[0] にあった link → 新しい outputs[1] に再接続される
-        assert.equal(node.connectCalls.length, 1,
-            "1 link が再接続されるべき");
-        assert.equal(node.connectCalls[0].slotIndex, 1,
-            "入れ替え後の新しい slot index に接続されるべき");
+        // 新方式 (in-place 再ポイント): a の link は同一 linkId のまま origin_slot 0→1 へ
+        // 付け替えられる (connect は呼ばれない・下流端不変)。
+        assert.equal(node.connectCalls.length, 0,
+            "link-preserving 経路では connect ではなく in-place 再ポイントを使う");
+        const link = graph.links[linkId];
+        assert.ok(link, "link は同一 id のまま生存するべき (下流端不変)");
+        assert.equal(link.origin_slot, 1,
+            "入れ替え後の新しいピン index (1) に origin_slot が in-place 付け替えされるべき");
+        assert.equal(link.target_id, target.id, "下流端 (target_id) は不変");
+        assert.equal(link.target_slot, 0, "下流端 (target_slot) は不変");
+        assert.ok(node.outputs[1].links.includes(linkId), "新ピン outputs[1].links に link が含まれるべき");
+        assertLinkIntegrity(node, graph, "move");
     });
 
-    it("slot 数変動の mutation: setTimeout(0) で非同期 restore される (add 相当)", async () => {
+    it("slot 数変動の mutation (add): link-preserving で同期復元され既存 link が維持される", () => {
         const node = makeNode({ outputCount: 1 });
         node._graph = graph;
         graph.registerNode(node);
@@ -226,6 +335,8 @@ describe("DynamicSlotCoordinator.mutate (1:1 capture/restore)", () => {
         node.outputs[0].name = "a";
         node.connect(0, target, 0);
 
+        const linkId = node.outputs[0].links[0];
+
         const { spec, syncSlotStructure } = makePrimitiveLikeSpec(node, items);
         const coord = new DynamicSlotCoordinator(node, spec);
         node.connectCalls = [];
@@ -234,17 +345,18 @@ describe("DynamicSlotCoordinator.mutate (1:1 capture/restore)", () => {
             entities.push({ name: "b", type: "INT" });
         });
 
-        // syncSlotStructure は同期で呼ばれる
-        assert.equal(syncSlotStructure.mock.calls.length, 1);
-        // setTimeout(0) restore のため、まだ再接続は発生していない
+        // link-preserving 経路はピン構造 + link 再ポイントを同期で確定する
+        // (connect ベース restore の setTimeout 待ちが不要)。syncSlotStructure は restore 内で 1 回。
+        assert.equal(syncSlotStructure.mock.calls.length, 1,
+            "link-preserving 経路では syncSlotStructure が restore 内で 1 回呼ばれる");
+        // add: 既存 entity a は新ピン index 0 (位置不変) のため link は origin_slot 不変。
         assert.equal(node.connectCalls.length, 0,
-            "setTimeout(0) 内 restore 前は connect 未発生");
-
-        await new Promise(resolve => setTimeout(resolve, 1));
-        assert.equal(node.connectCalls.length, 1,
-            "setTimeout コールバック後に再接続されるべき");
-        assert.equal(node.connectCalls[0].slotIndex, 0,
-            "items[0]=a は依然 slot 0 にあり、その link が復元される");
+            "link-preserving 経路では connect を使わない (a は位置不変で再ポイント不要)");
+        const link = graph.links[linkId];
+        assert.ok(link, "既存 link は同一 id のまま生存するべき");
+        assert.equal(link.origin_slot, 0, "items[0]=a は依然ピン 0、origin_slot 不変");
+        assert.equal(node.outputs.length, 2, "ピンが 2 本に成長するべき");
+        assertLinkIntegrity(node, graph, "add");
     });
 });
 
@@ -532,6 +644,8 @@ describe("DynamicSlotCoordinator: applyAfterCapture / applySaveOnly semantics (P
         node.outputs[1].name = "b";
         node.connect(0, target1, 0);
         node.connect(1, target2, 0);
+        const l0 = node.outputs[0].links[0];
+        const l1 = node.outputs[1].links[0];
 
         const { spec } = makePrimitiveLikeSpec(node, items);
         const coord = new DynamicSlotCoordinator(node, spec);
@@ -543,11 +657,13 @@ describe("DynamicSlotCoordinator: applyAfterCapture / applySaveOnly semantics (P
         // slot 数変動なし (items が同じ 2 つ) で applyAfterCapture
         coord.applyAfterCapture([...items]);
 
-        // 同期 restore: 2 link が再接続されるべき
-        assert.equal(node.connectCalls.length, 2,
-            "captureFromExisting 後の applyAfterCapture で 2 link が restore されるべき");
-        assert.equal(node.connectCalls[0].slotIndex, 0, "slot 0 の link が restore される");
-        assert.equal(node.connectCalls[1].slotIndex, 1, "slot 1 の link が restore される");
+        // 新方式: 位置不変なので両 link は origin_slot 不変で in-place 維持される (connect なし)。
+        assert.equal(node.connectCalls.length, 0, "link-preserving 経路では connect を使わない");
+        assert.equal(graph.links[l0].origin_slot, 0, "link0 はピン 0 に維持");
+        assert.equal(graph.links[l1].origin_slot, 1, "link1 はピン 1 に維持");
+        assert.equal(graph.links[l0].target_id, target1.id, "link0 の下流端不変");
+        assert.equal(graph.links[l1].target_id, target2.id, "link1 の下流端不変");
+        assertLinkIntegrity(node, graph, "applyAfterCapture");
     });
 
     it("applyAfterCapture: cleanup 後 #linkSnapshots エントリが消えること (間接確認)", async () => {
@@ -734,18 +850,23 @@ describe("DynamicSlotCoordinator: captureFromExisting 2 回連続呼び出し (P
         node.outputs[0].links = [];
         node.connect(0, target2, 0);
 
+        const link2 = node.outputs[0].links[0];
+
         // 2 回目の captureFromExisting (snapshot が上書きされるべき)
         coord.captureFromExisting();
 
-        // applyAfterCapture で 2 回目の snapshot (target2 への接続) が restore されること
+        // applyAfterCapture で 2 回目の snapshot (target2 への接続) が維持されること
         node.connectCalls = [];
         coord.applyAfterCapture([...items]);
 
-        // slot 数不変 (1→1) のため同期 restore
-        assert.equal(node.connectCalls.length, 1,
-            "2 回目の captureFromExisting snapshot から 1 link が restore されるべき");
-        assert.equal(node.connectCalls[0].targetId, target2.id,
-            "restore は 2 回目の snapshot (target2) を使うべき (target1 ではない)");
+        // 新方式: 位置不変なので link は in-place 維持 (connect なし)。
+        // 維持される link は 2 回目 capture 時点の target2 への link であるべき。
+        assert.equal(node.connectCalls.length, 0, "link-preserving 経路では connect を使わない");
+        assert.ok(graph.links[link2], "2 回目 capture 時の target2 link が維持されるべき");
+        assert.equal(graph.links[link2].target_id, target2.id,
+            "維持される link は target2 を指す (target1 ではない)");
+        assert.equal(graph.links[link2].origin_slot, 0, "ピン 0 に維持");
+        assertLinkIntegrity(node, graph, "2x-capture");
     });
 });
 
@@ -774,25 +895,24 @@ describe("DynamicSlotCoordinator: #linkSnapshots ライフサイクル (Phase 1.
         // 1 回目: capture → applyAfterCapture (slot 数不変、同期 restore でクリーンアップ)
         coord.captureFromExisting();
         coord.applyAfterCapture([...items]);
+        const linkId = node.outputs[0].links[0];
 
-        // cleanup 確認: 再度 capture して applyAfterCapture で slot 数変動ありの非同期 restore を行う
-        // zombie snapshot が残っていると restore が二重になる可能性があるが、cleanup 済みならそれがない
-        node.connect(0, target, 0);
+        // cleanup 確認: 再度 capture して applyAfterCapture で slot 数変動ありの復元を行う
+        // zombie snapshot が残っていると link が二重計上される可能性があるが、cleanup 済みならそれがない
         coord.captureFromExisting();
         node.connectCalls = [];
 
-        // slot 数変動 (1→2) で非同期 restore を発火
+        // slot 数変動 (1→2) で link-preserving 同期復元
         const newItems = [items[0], { name: "b", type: "INT" }];
         coord.applyAfterCapture(newItems);
 
-        await new Promise(resolve => setTimeout(resolve, 1));
-
-        // zombie エントリがなければ restore は期待通りに 1 link (items[0] の分) のみ再接続する
-        assert.ok(node.connectCalls.length >= 1,
-            "applyAfterCapture cleanup 後の restore で link が再接続されるべき");
-        // 余分な restore がないことを確認 (zombie で二重接続にならない)
-        assert.ok(node.connectCalls.length <= 2,
-            "zombie snapshot がなければ restore は期待数以内に収まるべき");
+        // entity 'a' は位置不変で in-place 維持 (connect なし)。link が二重化しないこと。
+        assert.equal(node.connectCalls.length, 0, "link-preserving 経路では connect を使わない");
+        assert.ok(graph.links[linkId], "items[0]=a の link が維持されるべき");
+        assert.equal(node.outputs[0].links.length, 1,
+            "zombie snapshot がなければ outputs[0].links は 1 本のまま (二重計上なし)");
+        assert.equal(node.outputs.length, 2, "ピンが 2 本に成長");
+        assertLinkIntegrity(node, graph, "cleanup");
     });
 
     it("applySaveOnly preserves linkSnapshots for subsequent applyAfterCapture", async () => {
@@ -818,29 +938,25 @@ describe("DynamicSlotCoordinator: #linkSnapshots ライフサイクル (Phase 1.
         // ステップ 1: onConfigure 相当 (既存接続を capture)
         coord.captureFromExisting();
 
+        const linkId = node.outputs[0].links[0];
+
         // ステップ 2: param drag 相当 (applySaveOnly — snapshot 保持、restore なし)
         const sameItems = [items[0]]; // 同 entity 参照
         coord.applySaveOnly(sameItems);
 
         // ステップ 3: add の beforeModify 相当 (captureFromExisting で snapshot 上書き)
-        node.connect(0, target, 0); // link を追加
         coord.captureFromExisting();
 
-        // ステップ 4: add の saveItems 相当 (applyAfterCapture で最新 snapshot から restore)
+        // ステップ 4: add の saveItems 相当 (applyAfterCapture で最新 snapshot から復元)
         node.connectCalls = [];
         const newItems = [items[0], { name: "b", type: "INT" }];
         coord.applyAfterCapture(newItems);
 
-        // slot 数変動 (1→2) のため非同期 restore
-        await new Promise(resolve => setTimeout(resolve, 1));
-
-        // applySaveOnly が snapshot を破壊していなければ、最新 capture の接続で restore される
-        assert.ok(node.connectCalls.length >= 1,
-            "applySaveOnly が snapshot を保持していれば applyAfterCapture で restore されるべき");
-        // items[0] (entity 'a') の link が restore される
-        const restoreToSlot0 = node.connectCalls.filter(c => c.slotIndex === 0);
-        assert.ok(restoreToSlot0.length >= 1,
-            "entity 'a' は slot 0 に restore されるべき");
+        // applySaveOnly が snapshot を破壊していなければ、entity 'a' の link が in-place 維持される。
+        assert.equal(node.connectCalls.length, 0, "link-preserving 経路では connect を使わない");
+        assert.ok(graph.links[linkId], "entity 'a' の link が維持されるべき (applySaveOnly が snapshot を破壊しない)");
+        assert.equal(graph.links[linkId].origin_slot, 0, "entity 'a' は依然ピン 0");
+        assertLinkIntegrity(node, graph, "applySaveOnly-preserve");
     });
 });
 
@@ -862,6 +978,7 @@ describe("DynamicSlotCoordinator.applyAfterCapture (内蔵パス)", () => {
         const items = [{ name: "a", type: "INT" }];
         node.outputs[0].name = "a";
         node.connect(0, target, 0);
+        const linkId = node.outputs[0].links[0];
 
         const { spec } = makePrimitiveLikeSpec(node, items);
         const coord = new DynamicSlotCoordinator(node, spec);
@@ -881,13 +998,12 @@ describe("DynamicSlotCoordinator.applyAfterCapture (内蔵パス)", () => {
         assert.equal(items[0].name, "a");
         assert.equal(items[1].name, "b");
 
-        // 内蔵 restore: slot 数変動あり (1→2) のため
-        // setTimeout(0) で非同期 restore される。コールバック完了後に link が復元されること。
-        await new Promise(resolve => setTimeout(resolve, 1));
-        assert.ok(node.connectCalls.length >= 1,
-            "applyAfterCapture が capture したスナップショットから link を復元すべき");
-        assert.equal(node.connectCalls[0].slotIndex, 0,
-            "items[0]=a は slot 0 に残るため、link も slot 0 に再接続される");
+        // link-preserving 同期復元: items[0]=a は slot 0 に残るため link は origin_slot 不変で維持。
+        assert.equal(node.connectCalls.length, 0, "link-preserving 経路では connect を使わない");
+        assert.ok(graph.links[linkId], "items[0]=a の link が維持されるべき");
+        assert.equal(graph.links[linkId].origin_slot, 0, "link は slot 0 に維持");
+        assert.equal(node.outputs.length, 2, "ピンが 2 本に成長");
+        assertLinkIntegrity(node, graph, "applyAfterCapture-add");
     });
 
     it("captureFromExisting なしで applyAfterCapture を呼んでも例外なく完了する (防御的動作確認)", () => {
@@ -1054,6 +1170,7 @@ describe("DynamicSlotCoordinator.applyAfterCapture (内蔵パス)", () => {
         const items = [{ name: "a", type: "INT" }];
         node.outputs[0].name = "a";
         node.connect(0, target, 0);
+        const linkId = node.outputs[0].links[0];
 
         const { spec, syncSlotStructure } = makePrimitiveLikeSpec(node, items);
         const coord = new DynamicSlotCoordinator(node, spec);
@@ -1066,12 +1183,14 @@ describe("DynamicSlotCoordinator.applyAfterCapture (内蔵パス)", () => {
         const sameItems = [...items]; // 同 entity 参照
         coord.applyAfterCapture(sameItems);
 
-        // syncSlotStructure が呼ばれる
+        // syncSlotStructure が呼ばれる (link-preserving 経路では restore 内で 1 回)
         assert.equal(syncSlotStructure.mock.calls.length, 1,
             "内蔵パスでは syncSlotStructure が呼ばれる");
-        // 同期 restore: 1 link が再接続される
-        assert.equal(node.connectCalls.length, 1,
-            "内蔵パスでは captureFromExisting の snapshot から link が restore される");
+        // link-preserving 経路: 位置不変なので link は in-place 維持される (connect なし)。
+        assert.equal(node.connectCalls.length, 0, "link-preserving 経路では connect を使わない");
+        assert.ok(graph.links[linkId], "capture した link が維持されるべき");
+        assert.equal(graph.links[linkId].origin_slot, 0, "link は slot 0 に維持");
+        assertLinkIntegrity(node, graph, "内蔵パス");
     });
 });
 
@@ -1489,6 +1608,7 @@ describe("DynamicSlotCoordinator: G1 positional fallback (1:1 output)", () => {
         const items = [{ name: "a", type: "STRING" }, { name: "b", type: "STRING" }];
         node.outputs[0].name = "a"; node.outputs[1].name = "b";
         node.connect(0, target, 0); // items[0]=a の link
+        const linkId = node.outputs[0].links[0];
 
         const { spec } = makePrimitiveLikeSpec(node, items);
         const coord = new DynamicSlotCoordinator(node, spec);
@@ -1498,10 +1618,13 @@ describe("DynamicSlotCoordinator: G1 positional fallback (1:1 output)", () => {
             const tmp = entities[0]; entities[0] = entities[1]; entities[1] = tmp;
         });
 
-        // identity 解決成功: a は新 slot 1 に再接続 (positional の固定 slot 0 ではない)
-        assert.equal(node.connectCalls.length, 1);
-        assert.equal(node.connectCalls[0].slotIndex, 1,
-            "move では identity 解決により entity の新位置 (slot 1) に再接続されるべき");
+        // identity 解決成功: a の link は in-place で新 slot 1 に origin_slot 付け替え
+        // (positional の固定 slot 0 ではない・connect も使わない)。
+        assert.equal(node.connectCalls.length, 0, "link-preserving 経路では connect を使わない");
+        assert.equal(graph.links[linkId].origin_slot, 1,
+            "move では identity 解決により entity の新位置 (slot 1) に link が追従するべき");
+        assert.ok(node.outputs[1].links.includes(linkId), "新ピン outputs[1].links に link が含まれる");
+        assertLinkIntegrity(node, graph, "G1-move");
     });
 
     it("1:N (resolver あり) では positional fallback を使わない (identity/resolver 両失敗時は skip)", () => {
@@ -1552,5 +1675,422 @@ describe("DynamicSlotCoordinator: G1 positional fallback (1:1 output)", () => {
         const slot0 = node.connectCalls.filter(c => c.slotIndex === 0);
         assert.equal(slot0.length, 0,
             "slot 数変動時は positional fallback で復元しない (不変時のみ救済する設計)");
+    });
+});
+
+// ===========================================================================
+// 恒久対策: 動的入力下流 (Autogrow) 接続時の link-preserving 再構築
+// ===========================================================================
+
+// Autogrow 下流の入力スロット数を返すヘルパ。
+function autogrowInputCount(node) { return node.inputs.length; }
+
+// 上流出力ピン i がどの下流入力スロットに繋がっているかを返す ({ pin → target_slot } map)。
+function pinToTargetSlot(node, graph, downstreamId) {
+    const map = new Map();
+    for (const link of Object.values(graph.links)) {
+        if (link.origin_id === node.id && link.target_id === downstreamId) {
+            map.set(link.origin_slot, link.target_slot);
+        }
+    }
+    return map;
+}
+
+describe("DynamicSlotCoordinator: Autogrow 下流 link-preserving (恒久対策)", () => {
+    let graph;
+    beforeEach(() => { graph = makeGraphMock(); installAppMock(graph); });
+    afterEach(() => { uninstallAppMock(); });
+
+    // 3 entity を Autogrow 下流に接続したセットアップを構築する共通ヘルパ。
+    // node の outputs[i] → downstream の inputs[i] (target_slot=i) を結ぶ。
+    function setup3(graph) {
+        const node = makeNode({ outputCount: 3 });
+        node._graph = graph;
+        graph.registerNode(node);
+        // Autogrow 下流: 初期入力 1。接続のたびに末尾入力を 1 つ生やす。
+        const down = makeAutogrowTargetNode(500, graph, { initialInputs: 1 });
+        graph.registerNode(down);
+
+        const items = [
+            { name: "a", type: "STRING" },
+            { name: "b", type: "STRING" },
+            { name: "c", type: "STRING" },
+        ];
+        node.outputs[0].name = "a"; node.outputs[1].name = "b"; node.outputs[2].name = "c";
+        // 各出力を順に Autogrow 入力に接続 (target_slot 0,1,2)。
+        node.connect(0, down, 0);
+        node.connect(1, down, 1);
+        node.connect(2, down, 2);
+        // 接続後 Autogrow は末尾に空入力を 1 つ持つ (合計 4)。
+        return { node, down, items };
+    }
+
+    it("del: 中央 entity 削除で下流 Autogrow が縮小せず、残存接続が identity 追従する", () => {
+        // link-preserving 経路は #syncAndRestore が同期で完結する (connect ベース restore の
+        // setTimeout(0) link 確定待ちが不要)。したがって await は不要で同期テストとして書く。
+        const { node, down, items } = setup3(graph);
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        const inputsBefore = autogrowInputCount(down);
+        // entity b (index 1) を削除
+        const linkA = node.outputs[0].links[0];
+        const linkC = node.outputs[2].links[0];
+
+        coord.mutate((entities) => { entities.splice(1, 1); });
+
+        // 削除された b の下流リンクのみ切れる (= Autogrow が「削除分だけ」ちょうど 1 縮小する)。
+        // 生存 a/c の下流端は Coordinator が一切触らないため、Autogrow がそれらを巻き込んで
+        // 余分に縮小することはない。下流の縮小は削除 1 件分に限定される。
+        assert.equal(autogrowInputCount(down), inputsBefore - 1,
+            "Autogrow 入力は削除された 1 entity 分だけ縮小する (生存接続を巻き込まない)");
+        // 生存 entity a, c の link が同一 id のまま維持される (切れない)。
+        assert.ok(graph.links[linkA], "a の link は維持されるべき");
+        assert.ok(graph.links[linkC], "c の link は維持されるべき");
+        // 上流端: a は新ピン 0、c は新ピン 1 へ identity 追従 (Coordinator が origin_slot を再ポイント)。
+        assert.equal(graph.links[linkA].origin_slot, 0, "a は新ピン 0 へ追従");
+        assert.equal(graph.links[linkC].origin_slot, 1, "c は新ピン 1 へ追従");
+        // 下流端 (target_slot): Coordinator は下流端を一切触らない。c の target_slot が 2→1 に
+        // 詰まるのは、削除された b スロットの除去に応じて **Autogrow 自身が** 入力スロットを
+        // 再採番した正当な応答であって、Coordinator による下流端の書き換えではない
+        // (Coordinator が触るのは上流端 origin_slot のみ)。c の接続は切れず維持される。
+        assert.equal(graph.links[linkA].target_slot, 0, "a の下流端は不変");
+        assert.equal(graph.links[linkC].target_slot, 1,
+            "c の target_slot 詰まりは Autogrow の自己再採番 (Coordinator は下流端を触らない)");
+        assert.equal(node.outputs.length, 2, "ピンは 2 本に縮小");
+        assertLinkIntegrity(node, graph, "autogrow-del");
+    });
+
+    it("add: 末尾 entity 追加で下流接続が不変、既存 link が全維持される", () => {
+        const { node, down, items } = setup3(graph);
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        const beforeMap = pinToTargetSlot(node, graph, down.id);
+        const linkIds = [node.outputs[0].links[0], node.outputs[1].links[0], node.outputs[2].links[0]];
+
+        coord.mutate((entities) => { entities.push({ name: "d", type: "STRING" }); });
+
+        // 既存 3 link すべて origin_slot 不変・同一 id で維持。
+        for (let i = 0; i < 3; i++) {
+            assert.ok(graph.links[linkIds[i]], `link ${i} が維持されるべき`);
+            assert.equal(graph.links[linkIds[i]].origin_slot, i, `link ${i} の origin_slot 不変`);
+        }
+        const afterMap = pinToTargetSlot(node, graph, down.id);
+        assert.deepEqual([...afterMap.entries()].sort(), [...beforeMap.entries()].sort(),
+            "add では既存ピン→下流 target_slot の対応が完全不変であるべき");
+        assert.equal(node.outputs.length, 4, "ピンは 4 本に成長");
+        assertLinkIntegrity(node, graph, "autogrow-add");
+    });
+
+    it("reorder: 並べ替えで下流 Autogrow が縮小せず、各 link が identity 追従する", () => {
+        const { node, down, items } = setup3(graph);
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        const inputsBefore = autogrowInputCount(down);
+        const linkA = node.outputs[0].links[0]; // entity a (down slot 0)
+        const linkB = node.outputs[1].links[0]; // entity b (down slot 1)
+        const linkC = node.outputs[2].links[0]; // entity c (down slot 2)
+
+        // reorder: [a, b, c] → [c, a, b] (回転)。ピン数不変・旧/新ピンが交差。
+        coord.mutate((entities) => {
+            const c = entities.pop();
+            entities.unshift(c);
+        });
+
+        // 下流 Autogrow の入力数は不変 (どの下流端も切られていない)。
+        assert.equal(autogrowInputCount(down), inputsBefore,
+            "reorder では下流 Autogrow 入力は縮小しないべき");
+        // identity 追従: c→pin0, a→pin1, b→pin2。
+        assert.equal(graph.links[linkC].origin_slot, 0, "c は新ピン 0 へ追従");
+        assert.equal(graph.links[linkA].origin_slot, 1, "a は新ピン 1 へ追従");
+        assert.equal(graph.links[linkB].origin_slot, 2, "b は新ピン 2 へ追従");
+        // 下流端 target_slot は全て不変。
+        assert.equal(graph.links[linkA].target_slot, 0, "a の下流端不変");
+        assert.equal(graph.links[linkB].target_slot, 1, "b の下流端不変");
+        assert.equal(graph.links[linkC].target_slot, 2, "c の下流端不変");
+        assertLinkIntegrity(node, graph, "autogrow-reorder");
+    });
+
+    it("del: 末尾削除でも二重補正が起きない (末尾ピンから removeOutput)", () => {
+        // 手順5 の「末尾から removeOutput」により native origin_slot-- 再採番が発火せず、
+        // 手動 in-place 再ポイントとの二重補正が起きないことを検証する。
+        // link-preserving 経路は同期で完結するため await は不要 (同期テスト)。
+        const { node, items } = setup3(graph);
+        const down = graph.getNodeById(500);
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        const linkA = node.outputs[0].links[0];
+        const linkB = node.outputs[1].links[0];
+
+        // 末尾 entity c を削除。
+        coord.mutate((entities) => { entities.pop(); });
+
+        // a, b は位置不変 (origin_slot 0,1)。二重補正があれば origin_slot がずれる。
+        assert.equal(graph.links[linkA].origin_slot, 0, "a の origin_slot は 0 のまま (二重補正なし)");
+        assert.equal(graph.links[linkB].origin_slot, 1, "b の origin_slot は 1 のまま (二重補正なし)");
+        assert.equal(node.outputs.length, 2, "ピンは 2 本に縮小");
+        // 下流端も不変。
+        assert.equal(graph.links[linkA].target_slot, 0);
+        assert.equal(graph.links[linkB].target_slot, 1);
+        assertLinkIntegrity(node, graph, "autogrow-del-tail");
+    });
+});
+
+// ===========================================================================
+// 回帰防止: link-preserving 経路は明示 opt-in (spec.linkPreserving) 限定
+//
+// Image/Pipe Collector は direction="output" + resolver 両 null だが、出力ピンは
+// 固定 (Python 定義 IMAGE/PIPE)・syncSlotStructure は出力を resize しない・entities は
+// 入力ソース。これらが暗黙判定 (!hasResolvers) で link-preserving 経路に入ると、
+// 「entity 数に合わせて出力ピンを addOutput/removeOutput」が固定出力を破壊する回帰になる。
+// 明示フラグ (spec.linkPreserving) で TextCatalog/PrimitiveStore のみに限定することを検証する。
+// ===========================================================================
+
+// Image/Pipe Collector 風の spec を作る。
+// - direction:"output" / resolver 両 null
+// - syncSlotStructure は出力ピンを resize しない (固定出力。Coordinator 非管理)
+// - entities = 入力ソース (固定出力ピン数とは無関係)
+// - linkPreserving フラグなし → 従来 reconnect 経路に入るべき
+function makeFixedOutputCollectorLikeSpec(node, sources) {
+    const syncSlotStructure = mock.fn(() => {
+        // 固定出力ノードは syncSlotStructure で出力を一切変更しない (Image/Pipe Collector と同等)。
+    });
+    return {
+        spec: {
+            direction: "output",
+            // linkPreserving フラグなし (= 明示 opt-in されていない)
+            getEntities: () => sources,
+            // 1 source → 複数の固定型 slot を返す形 (Image Collector の slotCount 相当)。
+            // ただし syncSlotStructure が出力を resize しないため、実出力ピン数とは独立。
+            entityToSlots: (src) => Array.from({ length: src.slotCount ?? 1 }, (_, i) => ({
+                name: `slot_${i}`, type: "IMAGE",
+            })),
+            syncSlotStructure,
+            setEntities: (newSources) => { sources.length = 0; sources.push(...newSources); },
+            resolveLocalSlotBySlotName: null,
+            resolveLocalSlotByGlobalIdx: null,
+        },
+        syncSlotStructure,
+    };
+}
+
+describe("DynamicSlotCoordinator: link-preserving 明示 opt-in 限定 (回帰防止)", () => {
+    let graph;
+    beforeEach(() => { graph = makeGraphMock(); installAppMock(graph); });
+    afterEach(() => { uninstallAppMock(); });
+
+    it("Image/Pipe Collector 風 spec (linkPreserving なし) は固定出力ピンを破壊せず従来 reconnect 経路に入る", () => {
+        // 固定出力 2 本 (Python 定義 IMAGE 相当)。下流に接続済。
+        const node = makeNode({ outputCount: 2 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(7001);
+        graph.registerNode(target);
+        node.outputs[0].name = "IMAGE0"; node.outputs[0].type = "IMAGE";
+        node.outputs[1].name = "IMAGE1"; node.outputs[1].type = "IMAGE";
+        node.connect(0, target, 0);
+        node.connect(1, target, 0);
+
+        // entities (入力ソース) は出力ピン数より少ない 1 件。link-preserving 経路に
+        // 誤って入ると「outputs を entities.length(=1) に縮小」して固定出力ピン 1 が破壊される。
+        const sources = [{ sourceId: "s1", slotCount: 2 }];
+        const { spec, syncSlotStructure } = makeFixedOutputCollectorLikeSpec(node, sources);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        coord.captureFromExisting();
+        node.connectCalls = [];
+        // slot 数不変 (固定出力) なので同期 restore。
+        coord.applyAfterCapture([sources[0]]);
+
+        // 回帰防止の核心: 固定出力ピンが addOutput/removeOutput で破壊されていない。
+        assert.equal(node.outputs.length, 2,
+            "固定出力ピン (2 本) は entities.length に縮小されず保たれるべき");
+        assert.equal(node.outputs[0].type, "IMAGE", "固定出力 0 の型が保たれる");
+        assert.equal(node.outputs[1].type, "IMAGE", "固定出力 1 の型が保たれる");
+        // 従来 reconnect 経路: 段階3 (ds.localSlotIdx 直接採用) で 2 link を connect 復元する。
+        assert.equal(node.connectCalls.length, 2,
+            "従来 reconnect 経路 (段階3) で固定出力 2 本の link が復元されるべき");
+        // syncSlotStructure は呼ばれるが出力を一切 resize しない (no-op)。
+        assert.ok(syncSlotStructure.mock.calls.length >= 1,
+            "syncSlotStructure は呼ばれる (出力は resize しない)");
+    });
+
+    it("Image/Pipe Collector 風 spec (linkPreserving なし) で source 1 件削除しても固定出力ピンは破壊されない", async () => {
+        // 2 source → 削除して 1 source。固定出力ピン数は不変であるべき
+        // (link-preserving 経路なら entities.length に追従して出力が壊れる)。
+        const node = makeNode({ outputCount: 2 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const t1 = makeTargetNode(7002);
+        const t2 = makeTargetNode(7003);
+        graph.registerNode(t1);
+        graph.registerNode(t2);
+        node.outputs[0].name = "IMAGE0"; node.outputs[0].type = "IMAGE";
+        node.outputs[1].name = "IMAGE1"; node.outputs[1].type = "IMAGE";
+        node.connect(0, t1, 0);
+        node.connect(1, t2, 0);
+
+        const sources = [{ sourceId: "s1", slotCount: 1 }, { sourceId: "s2", slotCount: 1 }];
+        const { spec } = makeFixedOutputCollectorLikeSpec(node, sources);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        node.connectCalls = [];
+        coord.mutate((entities) => { entities.splice(1, 1); });
+        await new Promise(resolve => setTimeout(resolve, 5));
+
+        // 固定出力ピンは syncSlotStructure no-op のため不変 (entities.length に追従しない)。
+        assert.equal(node.outputs.length, 2,
+            "source 削除でも固定出力ピン数は不変であるべき (link-preserving 経路に入らない)");
+        assert.equal(node.outputs[0].type, "IMAGE");
+        assert.equal(node.outputs[1].type, "IMAGE");
+    });
+
+    it("TextCatalog/PrimitiveStore 風 spec (linkPreserving:true) は link-preserving 経路に入る (connect 不使用・in-place 再ポイント)", () => {
+        // 明示フラグありの 1:1 ノードは link-preserving 経路に入り、reorder で
+        // connect を使わず origin_slot を in-place 付け替えする。
+        const node = makeNode({ outputCount: 2 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(7004);
+        graph.registerNode(target);
+        const items = [{ name: "a", type: "INT" }, { name: "b", type: "INT" }];
+        node.outputs[0].name = "a"; node.outputs[1].name = "b";
+        node.connect(0, target, 0); // a の link
+        const linkId = node.outputs[0].links[0];
+
+        // makePrimitiveLikeSpec に linkPreserving フラグを付与する。
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        spec.linkPreserving = true;
+        const coord = new DynamicSlotCoordinator(node, spec);
+        node.connectCalls = [];
+
+        coord.mutate((entities) => {
+            const tmp = entities[0]; entities[0] = entities[1]; entities[1] = tmp;
+        });
+
+        // link-preserving 経路: connect を使わず in-place 再ポイント。
+        assert.equal(node.connectCalls.length, 0,
+            "linkPreserving:true は link-preserving 経路 (connect 不使用) に入るべき");
+        assert.equal(graph.links[linkId].origin_slot, 1,
+            "a の link は新ピン 1 へ in-place 付け替えされるべき");
+        assert.equal(graph.links[linkId].target_id, target.id, "下流端不変");
+        assertLinkIntegrity(node, graph, "linkPreserving-optin");
+    });
+
+    it("makePrimitiveLikeSpec はデフォルトで linkPreserving フラグを持つ (既存テストの前提保証)", () => {
+        // makePrimitiveLikeSpec を使う既存の全テストが link-preserving 経路に入ることを保証する。
+        // (このヘルパに linkPreserving:true が付与されていることの明示確認)
+        const node = makeNode({ outputCount: 1 });
+        const items = [{ name: "a", type: "INT" }];
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        assert.equal(spec.linkPreserving, true,
+            "makePrimitiveLikeSpec は linkPreserving:true を返すべき (1:1 ノードを模倣)");
+    });
+});
+
+// ===========================================================================
+// computeLinkRepointPlan 純粋関数テスト (D11)
+// ===========================================================================
+
+describe("computeLinkRepointPlan (純粋関数)", () => {
+    // entityIds (WeakMap), linkSnapshots (Map), graphLinks (object) を直接組み立てて検証する。
+    it("reorder: 生存 entity の link を新ピン index へ repoint する", () => {
+        const a = { id: "a" };
+        const b = { id: "b" };
+        const entityIds = new WeakMap([[a, 1], [b, 2]]);
+        // capture 時: a→pin0(link10), b→pin1(link11)。
+        const linkSnapshots = new Map([
+            [1, [{ linkId: 10, targetId: 99, targetSlot: 0, localSlotIdx: 0 }]],
+            [2, [{ linkId: 11, targetId: 99, targetSlot: 1, localSlotIdx: 0 }]],
+        ]);
+        const graphLinks = {
+            10: { id: 10, origin_id: 1, origin_slot: 0, target_id: 99, target_slot: 0 },
+            11: { id: 11, origin_id: 1, origin_slot: 1, target_id: 99, target_slot: 1 },
+        };
+        // 新順序: [b, a] → b は pin0, a は pin1。
+        const plan = computeLinkRepointPlan({
+            entities: [b, a], entityIds, linkSnapshots, graphLinks, nodeId: 1,
+        });
+        // repoints: link11 (b) → newPin 0、link10 (a) → newPin 1。
+        const byLink = new Map(plan.repoints.map(r => [r.linkId, r.newOriginSlot]));
+        assert.equal(byLink.get(11), 0, "b の link は新ピン 0 へ");
+        assert.equal(byLink.get(10), 1, "a の link は新ピン 1 へ");
+        assert.equal(plan.linksToRemove.length, 0, "削除 entity なし → linksToRemove は空");
+    });
+
+    it("del: 削除 entity の link は linksToRemove に入り、生存 entity は repoint される", () => {
+        const a = { id: "a" };
+        const c = { id: "c" };
+        const entityIds = new WeakMap([[a, 1], [c, 3]]);
+        // capture 時 3 entity: a(id1,link10), b(id2,link11), c(id3,link12)。
+        const linkSnapshots = new Map([
+            [1, [{ linkId: 10, targetId: 99, targetSlot: 0, localSlotIdx: 0 }]],
+            [2, [{ linkId: 11, targetId: 99, targetSlot: 1, localSlotIdx: 0 }]],
+            [3, [{ linkId: 12, targetId: 99, targetSlot: 2, localSlotIdx: 0 }]],
+        ]);
+        const graphLinks = {
+            10: { id: 10, origin_id: 1, origin_slot: 0, target_id: 99, target_slot: 0 },
+            11: { id: 11, origin_id: 1, origin_slot: 1, target_id: 99, target_slot: 1 },
+            12: { id: 12, origin_id: 1, origin_slot: 2, target_id: 99, target_slot: 2 },
+        };
+        // 新順序: [a, c] (b 削除) → a は pin0, c は pin1。
+        const plan = computeLinkRepointPlan({
+            entities: [a, c], entityIds, linkSnapshots, graphLinks, nodeId: 1,
+        });
+        const byLink = new Map(plan.repoints.map(r => [r.linkId, r.newOriginSlot]));
+        assert.equal(byLink.get(10), 0, "a → pin0");
+        assert.equal(byLink.get(12), 1, "c → pin1");
+        assert.deepEqual(plan.linksToRemove, [11], "削除 entity b の link11 のみ remove");
+    });
+
+    it("identity 破壊 (id 未採番) entity は repoint されず、旧 link は linksToRemove に入る", () => {
+        const oldA = { id: "a" };
+        const newA = { id: "a-new" }; // 新オブジェクト (identity 破壊)
+        const entityIds = new WeakMap([[oldA, 1]]); // newA は未登録
+        const linkSnapshots = new Map([
+            [1, [{ linkId: 10, targetId: 99, targetSlot: 0, localSlotIdx: 0 }]],
+        ]);
+        const graphLinks = {
+            10: { id: 10, origin_id: 1, origin_slot: 0, target_id: 99, target_slot: 0 },
+        };
+        const plan = computeLinkRepointPlan({
+            entities: [newA], entityIds, linkSnapshots, graphLinks, nodeId: 1,
+        });
+        assert.equal(plan.repoints.length, 0, "identity 破壊 entity は repoint されない (G1 に委譲)");
+        assert.deepEqual(plan.linksToRemove, [10],
+            "生存していない旧 id の link は removeLink 対象 (G1 が positional 再接続する)");
+    });
+
+    it("graph.links から消えた link は repoint / remove 双方で無視される", () => {
+        const a = { id: "a" };
+        const entityIds = new WeakMap([[a, 1]]);
+        const linkSnapshots = new Map([
+            [1, [{ linkId: 10, targetId: 99, targetSlot: 0, localSlotIdx: 0 }]],
+        ]);
+        // graphLinks から link10 が外部で消えている。
+        const plan = computeLinkRepointPlan({
+            entities: [a], entityIds, linkSnapshots, graphLinks: {}, nodeId: 1,
+        });
+        assert.equal(plan.repoints.length, 0, "消えた link は repoint しない");
+        assert.equal(plan.linksToRemove.length, 0, "消えた link は remove もしない");
+    });
+
+    it("origin_id が当ノード以外の link は対象外", () => {
+        const a = { id: "a" };
+        const entityIds = new WeakMap([[a, 1]]);
+        const linkSnapshots = new Map([
+            [1, [{ linkId: 10, targetId: 99, targetSlot: 0, localSlotIdx: 0 }]],
+        ]);
+        const graphLinks = {
+            // origin_id が別ノード (7) の link → 当ノードの再構築対象外。
+            10: { id: 10, origin_id: 7, origin_slot: 0, target_id: 99, target_slot: 0 },
+        };
+        const plan = computeLinkRepointPlan({
+            entities: [a], entityIds, linkSnapshots, graphLinks, nodeId: 1,
+        });
+        assert.equal(plan.repoints.length, 0, "他ノード origin の link は repoint しない");
     });
 });

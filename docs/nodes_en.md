@@ -852,6 +852,7 @@ applied_loras: {'lora_a'} (1 entries)
 **Node Body Widget**
 - `📖 Manage Texts...` button / right-click menu opens the Manager Dialog
 - `[+ Add Relation]` adds a Relation and a corresponding output Slot
+- Adding, removing, or reordering Relations preserves connections to downstream nodes (including dynamic-input nodes such as `SAX Prompt Concat`)
 - Each Relation row has a leading toggle (pill) / `[✎]` (item picker) / `[↑↓]` (reorder) / `[×]` (delete)
 - Toggling OFF keeps the Item assignment but emits `""` from the Slot (use to silence outputs temporarily)
 - OFF rows render their text with reduced opacity
