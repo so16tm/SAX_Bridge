@@ -1438,3 +1438,119 @@ describe("DynamicSlotCoordinator: ensureCoordinator (Phase 1.2.B)", () => {
         assert.strictEqual(node._saxCoordinator, c1);
     });
 });
+
+// ===========================================================================
+// G1: positional fallback (1:1 output で identity 破壊を非致命化) — 再発防止網
+// ===========================================================================
+
+describe("DynamicSlotCoordinator: G1 positional fallback (1:1 output)", () => {
+    let graph;
+    beforeEach(() => { graph = makeGraphMock(); installAppMock(graph); });
+    afterEach(() => { uninstallAppMock(); });
+
+    it("entity を新オブジェクト化して identity を壊しても、slot 数不変なら positional で接続維持 (A1/A2 旧式回帰防止)", () => {
+        // TextCatalog onPopup の旧式バグ (新オブジェクト化 + applyAfterCapture) を再現し、
+        // G1 がそれでも切断しないことを保証する。
+        const node = makeNode({ outputCount: 1 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(900);
+        graph.registerNode(target);
+        const items = [{ name: "a", type: "STRING", item_id: "x" }];
+        node.outputs[0].name = "a";
+        node.connect(0, target, 0);
+
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        const coord = new DynamicSlotCoordinator(node, spec);
+
+        // capture (onPopup の beforeModify 相当)
+        coord.captureFromExisting();
+
+        // 旧式バグ再現: entity を新オブジェクトに差し替え (identity 破壊) + slot 数不変
+        node.connectCalls = [];
+        const newItems = [{ ...items[0], item_id: "y" }];
+        coord.applyAfterCapture(newItems);
+
+        // identity 解決は失敗するが positional fallback で 1 link 再接続される
+        assert.equal(node.connectCalls.length, 1,
+            "新オブジェクト化で identity が壊れても positional fallback で接続維持されるべき");
+        assert.equal(node.connectCalls[0].slotIndex, 0);
+        assert.equal(node.connectCalls[0].targetId, target.id);
+    });
+
+    it("move (identity 維持) は positional に頼らず identity 解決で正しい新 slot に再接続", () => {
+        // identity が維持される move では positional fallback 経路に落ちず、
+        // entity の新位置に link が追従する (G1 が move を誤って固定位置復元しないことの確認)。
+        const node = makeNode({ outputCount: 2 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(910);
+        graph.registerNode(target);
+        const items = [{ name: "a", type: "STRING" }, { name: "b", type: "STRING" }];
+        node.outputs[0].name = "a"; node.outputs[1].name = "b";
+        node.connect(0, target, 0); // items[0]=a の link
+
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        const coord = new DynamicSlotCoordinator(node, spec);
+        node.connectCalls = [];
+
+        coord.mutate((entities) => {
+            const tmp = entities[0]; entities[0] = entities[1]; entities[1] = tmp;
+        });
+
+        // identity 解決成功: a は新 slot 1 に再接続 (positional の固定 slot 0 ではない)
+        assert.equal(node.connectCalls.length, 1);
+        assert.equal(node.connectCalls[0].slotIndex, 1,
+            "move では identity 解決により entity の新位置 (slot 1) に再接続されるべき");
+    });
+
+    it("1:N (resolver あり) では positional fallback を使わない (identity/resolver 両失敗時は skip)", () => {
+        // resolver 定義済 spec では positionalEligible=false。identity も resolver も
+        // 解決できない新オブジェクトは従来通り restore skip (誤接続を防ぐ)。
+        const node = makeNode({ outputCount: 1 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(920);
+        graph.registerNode(target);
+        const sources = [{ sourceId: "s1", slotNames: ["A"], enabledSlots: [0] }];
+        node.outputs[0].name = "A";
+        node.connect(0, target, 0);
+
+        const { spec } = makeNodeCollectorLikeSpec(node, sources);
+        const coord = new DynamicSlotCoordinator(node, spec);
+        coord.captureFromExisting();
+
+        node.connectCalls = [];
+        // identity 破壊 (新オブジェクト) + slotName/globalIdx も解決不能に変更 → resolver 両失敗
+        const newSources = [{ sourceId: "s1", slotNames: ["Z"], enabledSlots: [9] }];
+        coord.applyAfterCapture(newSources);
+
+        assert.equal(node.connectCalls.length, 0,
+            "1:N で identity も resolver も失敗した場合は positional を使わず skip するべき");
+    });
+
+    it("slot 数変動 (add) では positional fallback は適用されない (slot 数不変ガード)", async () => {
+        const node = makeNode({ outputCount: 1 });
+        node._graph = graph;
+        graph.registerNode(node);
+        const target = makeTargetNode(930);
+        graph.registerNode(target);
+        const items = [{ name: "a", type: "STRING" }];
+        node.outputs[0].name = "a";
+        node.connect(0, target, 0);
+
+        const { spec } = makePrimitiveLikeSpec(node, items);
+        const coord = new DynamicSlotCoordinator(node, spec);
+        coord.captureFromExisting();
+
+        node.connectCalls = [];
+        // 新オブジェクト + slot 追加 (slot 数 1→2 変動) → positionalEligible=false
+        const newItems = [{ ...items[0] }, { name: "b", type: "STRING" }];
+        coord.applyAfterCapture(newItems);
+        await new Promise(resolve => setTimeout(resolve, 1));
+
+        const slot0 = node.connectCalls.filter(c => c.slotIndex === 0);
+        assert.equal(slot0.length, 0,
+            "slot 数変動時は positional fallback で復元しない (不変時のみ救済する設計)");
+    });
+});

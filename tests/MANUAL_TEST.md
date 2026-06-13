@@ -422,6 +422,48 @@
 
 事前登録済み: items 1 件 (`valid_id`) + relations 2 件 (`valid_id` + 削除済 `deleted_id`)。
 
-- [ ] **load**: ワークフロー読込 → onConfigure 内 validIds 再検証 fallback (`sax_text_catalog.js:1531-1536`) により `relations[1].item_id` が in-place で `null` 化される
-- [ ] **slot 表示**: 2 本目の出力スロット名が `(unset)` 表示 (slot 自体は削除されない仕様、`syncOutputSlots` の `relation.on === false` でも slot 保持と整合)
+- [ ] **load**: ワークフロー読込 → onConfigure 内 validIds 再検証 fallback により `relations[1].item_id` が in-place で `null` 化される
+- [ ] **slot 表示**: 2 本目の出力スロット名が `(unset)` 表示 (slot 自体は削除されない仕様)
 - [ ] **no error**: コンソールにエラー表示なし
+
+---
+
+## N. 動的スロット リンク切断 恒久対策 検証
+
+> 対策実装（G1 / A1A2 / B1 / B2B3 / C1C2）の手動検証シナリオ。ユニットテストで自動化困難な Canvas インタラクション部分のみ記載。
+
+### N-1. TextCatalog 出力接続維持
+
+任意のワークフローで TextCatalog の出力スロットを後続ノードに接続した状態で以下を確認する。
+
+- [ ] **onPopup（Item 再割当）**: Relation 行の `[✎]` で Item を別のものに変更 → 下流接続が維持される
+- [ ] **Manager Save（item 削除）**: Manager Dialog で参照中 Item を削除して `[Save]` → 当該 Relation が `(unset)` 表示になり、かつ下流接続が維持される
+- [ ] **孤立スロット表示**: `<orphan>` 表示の Relation も出力スロット自体は残存し、接続されていれば維持される
+
+### N-2. Collector 入力接続維持（上流スロット変化）
+
+Node Collector / Pipe Collector に上流ノードを追加した状態で以下を確認する。
+
+- [ ] **上流スロット改名**: 上流ノードの出力スロット名を変更 → Collector の入力接続が同一論理スロットへ再接続される（誤接続しない）
+- [ ] **上流スロット並べ替え**: 上流ノードで出力スロットを並べ替え → 接続が追従する
+- [ ] **Pipe 複数出力**: Pipe Collector の上流が複数 PIPE_LINE 出力を持つ場合、ユーザーが選択した出力スロットへ正しく再接続される（先頭固定にならない）
+
+### N-3. Collector 切断検知（過渡状態での非削除）
+
+Node Collector に上流ノードを追加した状態で以下を確認する。
+
+- [ ] **貼付け過渡**: 上流ノードを含む構成を Ctrl+C / Ctrl+V で貼付け → 貼付け直後に接続が一時的に見えなくなっても、過渡が終われば自動復元される（貼付け時の一時 null で source エントリが消えない）
+- [ ] **undo 後**: Ctrl+Z で直前の操作を取り消した直後 → Collector の接続が維持される（undo による一時的な id 変化で source が消えない）
+- [ ] **サブグラフ折畳**: 上流ノードをサブグラフに折畳 → Collector の接続が維持される（折畳過渡で source が消えない）
+- [ ] **上流ノード座標変更**: 上流ノードをドラッグで移動 → Collector の接続に変化なし
+
+### N-4. Collector 切断検知（上流実削除）
+
+- [ ] **上流ノード削除**: 上流ノードを Delete キーで実削除 → 該当 source エントリが自動クリーンアップされ、Collector のスロットが整理される（意図的削除のみクリーンアップされる）
+
+### N-5. サブグラフ / undo の onNodeRemoved 誤発火確認（未確証・実機検証必須）
+
+LiteGraph / ComfyUI がサブグラフ折畳 / undo / redo 時に `onNodeRemoved` を発火させるかは実挙動として確証がない。
+
+- [ ] サブグラフ折畳時に `onNodeRemoved` が発火しても、遅延再確認により source が削除されないことを DevTools console で確認
+- [ ] undo 時に `onNodeRemoved` が発火しても、遅延再確認により source が削除されないことを確認

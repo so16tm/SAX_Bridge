@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
 import { ensureRenderLinkPatch, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
+import { buildInputAnchors, resolveAnchorsToOutputSlots } from "./sax_collector_link.js";
 
 const EXT_NAME  = "SAX.ImageCollector";
 const NODE_TYPE = "SAX_Bridge_Image_Collector";
@@ -28,19 +29,38 @@ const SOURCE_SPEC = {
         if (imageOutputs.length === 0) return null;
         const slotsTaken       = Math.min(imageOutputs.length, remaining);
         const imageSlotIndices = imageOutputs.slice(0, slotsTaken).map(({ gi }) => gi);
+        // B2: identity アンカー (name, type, originalSlotIndex) を常に現在の srcNode から
+        // fresh 生成する。初回 identity の保持は rebuild 経路 (sax_ui_base.js の
+        // mergeSourceAnchors 引継ぎ) が担い、buildSource では作り直す
+        // (H-1: buildSource 内で旧 source を参照しない)。
+        const inputAnchors = buildInputAnchors(srcNode, imageSlotIndices);
         return {
             ...initSourceBase(srcNode),
             imageSlotIndices,
+            inputAnchors,
             slotCount:       imageSlotIndices.length,
         };
     },
 
     connectSource(srcNode, src, collectorNode, offset) {
+        // B2: 保存アンカーで上流出力を段階解決し、位置 index 依存の誤接続を防ぐ。
+        // アンカー欠落 (旧データ) は console.warn + imageSlotIndices フォールバック。
+        const anchors = src.inputAnchors;
+        const resolved = anchors ? resolveAnchorsToOutputSlots(srcNode, anchors) : null;
         for (let li = 0; li < src.imageSlotIndices.length; li++) {
-            const gi = src.imageSlotIndices[li];
-            if (collectorNode.inputs[offset + li]?.link == null) {
-                srcNode.connect(gi, collectorNode, offset + li);
+            if (collectorNode.inputs[offset + li]?.link != null) continue;
+            let gi = src.imageSlotIndices[li];
+            const r = resolved?.[li];
+            if (r) {
+                gi = r.slotIndex;
+            } else if (resolved) {
+                // アンカー解決失敗 (対象出力が消えた) → 接続スキップ (誤接続回避)
+                console.warn(`[sax_image_collector] anchor unresolved, skip slot li=${li} (src ${srcNode.id})`);
+                continue;
+            } else {
+                console.warn(`[sax_image_collector] inputAnchors missing, fallback to position index (src ${srcNode.id})`);
             }
+            srcNode.connect(gi, collectorNode, offset + li);
         }
     },
 

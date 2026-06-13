@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
 import { ensureRenderLinkPatch, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
+import { buildInputAnchors, resolveAnchorToOutputSlot } from "./sax_collector_link.js";
 
 const EXT_NAME  = "SAX.PipeCollector";
 const NODE_TYPE = "SAX_Bridge_Pipe_Collector";
@@ -22,21 +23,39 @@ const SOURCE_SPEC = {
     },
 
     buildSource(srcNode, _collectorNode, _offset, _remaining) {
-        const pipeOutput = (srcNode.outputs ?? []).find(o => o.type === "PIPE_LINE");
+        // H-1: buildSource は常に現在の srcNode から fresh に構築する (旧 source を参照しない)。
+        // 「ユーザーが選んだ特定の PIPE_LINE 出力」の維持は rebuild 経路の anchor 引継ぎ
+        // (mergeSourceAnchors で inputAnchors[0] / pipeSlotIndex を旧から保持) が担う。
+        // fresh では最初の PIPE_LINE を採用する。
+        const outputs = srcNode.outputs ?? [];
+        const pipeOutput = outputs.find(o => o.type === "PIPE_LINE");
         if (!pipeOutput) return null;
-        const gi = (srcNode.outputs ?? []).indexOf(pipeOutput);
+        const gi = outputs.indexOf(pipeOutput);
+        const inputAnchors = buildInputAnchors(srcNode, [gi]);
         return {
             ...initSourceBase(srcNode),
             pipeSlotIndex: gi,
+            inputAnchors,
             slotCount:     1,
         };
     },
 
     connectSource(srcNode, src, collectorNode, offset) {
-        const gi = src.pipeSlotIndex;
-        if (collectorNode.inputs[offset]?.link == null) {
-            srcNode.connect(gi, collectorNode, offset);
+        if (collectorNode.inputs[offset]?.link != null) return;
+        // B2: 保存アンカーで上流の特定 PIPE_LINE 出力へ再接続 (先頭固定を解消)。
+        const anchor = src.inputAnchors?.[0];
+        const r = anchor ? resolveAnchorToOutputSlot(srcNode, anchor) : null;
+        let gi;
+        if (r) {
+            gi = r.slotIndex;
+        } else if (anchor) {
+            console.warn(`[sax_pipe_collector] anchor unresolved, skip (src ${srcNode.id})`);
+            return;
+        } else {
+            console.warn(`[sax_pipe_collector] inputAnchors missing, fallback to pipeSlotIndex (src ${srcNode.id})`);
+            gi = src.pipeSlotIndex;
         }
+        srcNode.connect(gi, collectorNode, offset);
     },
 
     showAddPicker(collectorNode, selection, onConfirm) {

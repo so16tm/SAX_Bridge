@@ -680,6 +680,8 @@ output/2026-03-20/001_20260320_153045.webp
 
 - Open picker with `+ Add Source` button to select and add multiple nodes (up to 32 slots)
 - Automatically detects slot additions, removals, and renames on sources and re-syncs input/output slots (preserving downstream connections)
+- Keeps connections on the same logical slot even when upstream output slots are renamed or reordered
+- Cleans up a source entry only when the upstream node is actually deleted. Transient unavailability (paste / undo / subgraph collapse) does not remove entries
 - Show links pill toggle to show/hide connection wires to sources
 - Automatically restores source connections after copy & paste
 
@@ -853,14 +855,14 @@ applied_loras: {'lora_a'} (1 entries)
 - Each Relation row has a leading toggle (pill) / `[✎]` (item picker) / `[↑↓]` (reorder) / `[×]` (delete)
 - Toggling OFF keeps the Item assignment but emits `""` from the Slot (use to silence outputs temporarily)
 - OFF rows render their text with reduced opacity
-- Unset Relations show `(unset)` in gray
-- Relations referencing deleted Items show `<orphan>` with warning color
+- Unset Relations show `(unset)` in gray (the slot remains and any connection to it is preserved)
+- Relations referencing deleted Items show `<orphan>` with warning color (the slot remains and any connection to it is preserved)
 
 **Manager Dialog (Text Management)**
 - Left pane: Item list (search, tag filter, `×N` reference count badge)
 - Right pane: edit Name / Tags / Text of the selected Item (text editor area is enlarged)
 - `[+ New]` to add, `[Duplicate]` / `[Delete]` to copy / remove
-- Confirmation dialog when deleting an Item that is currently referenced
+- Confirmation dialog when deleting a referenced Item. `[Save]` after deletion preserves downstream connections (the slot remains as `(unset)`)
 - `[Manage Tags]` opens a sub-dialog for favorite tag management
 - Footer: `[Close]` (asks before discarding unsaved changes) / `[Save]` (commits, dialog stays open)
 
@@ -868,6 +870,7 @@ applied_loras: {'lora_a'} (1 entries)
 - Same search + tag filter UI as the Manager
 - "(unset)" pinned at the top (to revert to unassigned)
 - AND filtering (search query + all selected tags must match)
+- Changing the Item via the picker preserves downstream connections for that Relation
 
 **Tag Features**
 - Hybrid input: pick from existing candidates or type freely (auto-added to `tag_definitions`)

@@ -53,10 +53,6 @@
  *   hideSourceLinks(node) / unhideSourceLinks(node)
  *   applyLinkVisibility(node) / toggleLinkVisibility(node)
  *
- * 出力スロット接続維持ユーティリティ:
- *   captureOutputLinks(node, items, slotOffset?)
- *   restoreOutputLinks(node, items, syncFn, slotOffset?)
- *
  * Combo → ファイルピッカー置換 / Wildcard:
  *   replaceComboWithFilePicker(widget, opts)
  *   loadWildcardList(opts?) → Promise<string[]>
@@ -72,6 +68,12 @@
  */
 
 import { app } from "../../scripts/app.js";
+import {
+    sourceSignature       as _sourceSignatureImpl,
+    reconcileAllRemoved,
+    partitionLiveSources,
+    mergeSourceAnchors,
+} from "./sax_collector_link.js";
 
 export const PAD             = 8;    // 水平余白（左右パディング）
 export const ROW_H           = 24;   // 標準行高（LoRA / SAM3 / Toggle Manager）
@@ -936,6 +938,15 @@ export function applySourceListLifecycle(nodeType, spec) {
         origOnConfigure?.apply(this, arguments);
         this._saxSourceWidget?.onConfigure.call(this, data);
     };
+
+    // B1: Collector 自身の削除時に削除イベント pending / 登録を解除する。
+    // sax_toggle_manager.js と同じ chain 規律 (orig を必ず後続呼出)。
+    const origOnRemoved = nodeType.prototype.onRemoved;
+    nodeType.prototype.onRemoved = function () {
+        try { this._saxSourceWidget?.disposeRemovalController?.(this); }
+        catch (e) { console.warn("[sax_collector] disposeRemovalController error:", e); }
+        origOnRemoved?.apply(this, arguments);
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -1634,10 +1645,9 @@ export function makeSourceListWidget(spec, coordinator) {
         return _getSources(node).reduce((sum, s) => sum + getSlotCount(s), 0);
     }
 
-    function _sourceSignature(srcNode) {
-        return (srcNode.outputs ?? [])
-            .map(o => `${o.label ?? o.name ?? ""}:${o.type ?? ""}`).join(",");
-    }
+    // _sourceSignature は app 非依存ロジックとして sax_collector_link.js に集約済み。
+    // 二重管理を避けるため実関数を再利用する (座標非依存・出力構造依存)。
+    const _sourceSignature = _sourceSignatureImpl;
 
     function _defaultSyncSlotLabels(node) {
         const sources = _getSources(node);
@@ -1669,7 +1679,13 @@ export function makeSourceListWidget(spec, coordinator) {
 
     // Coordinator トランザクション (mutate) の内側で呼ぶための「素」の追加処理。
     // capture/restore は外側の mutate に任せるため、ここでは何もしない。
-    function _addSourceInner(collectorNode, srcNode) {
+    //
+    // H-1: oldSource を渡すと、buildSource が fresh 生成したアンカー系フィールド
+    // (inputAnchors / slotNames / slotTypes) を旧 source の identity で index 対応に
+    // 引き継ぐ (mergeSourceAnchors)。これにより rebuild でアンカーが fresh に上書きされず、
+    // 上流改名/並べ替えの追従基準 (初回接続時の identity) が保持される。
+    // 初回 addSource では oldSource=null で fresh のまま (正しい挙動)。
+    function _addSourceInner(collectorNode, srcNode, oldSource = null) {
         const offset    = _getTotalSlotCount(collectorNode);
         const remaining = maxSlots - offset;
         if (remaining <= 0) return;
@@ -1682,6 +1698,8 @@ export function makeSourceListWidget(spec, coordinator) {
             return;
         }
         if (!src) return;
+
+        if (oldSource) mergeSourceAnchors(oldSource, src);
 
         src.sig = _sourceSignature(srcNode);
 
@@ -1747,87 +1765,32 @@ export function makeSourceListWidget(spec, coordinator) {
         app.canvas?.setDirty(true, false);
     }
 
-    function rebuildAllSources(node) {
-        // Coordinator が capture/restore を内蔵するため preDownstream 引数は撤廃。
-        // entityHints の Coordinator 伝達 (mutate(action, { entityHints })) は TODO 4 で
-        // NodeCollector の _applySlotSelection 経由化と一体実装する。Image/Pipe Collector は
-        // hints を使わないため TODO 3 段階での未渡しは動作影響なし。
-        coordinator.mutate(() => {
-            const savedSources = [..._getSources(node)];
-            const autoHints = hasOutputSlots && !node._rebuildHints;
-            if (autoHints) {
-                node._rebuildHints = new Map(
-                    savedSources.map(s => [s.sourceId, { enabledSlots: s.enabledSlots, slotCount: s.slotCount }])
-                );
-            }
-
-            unhideSourceLinks(node);
-            for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
-                const linkId = node.inputs[i]?.link;
-                if (linkId != null) app.graph.removeLink(linkId);
-                node.removeInput(i);
-            }
-            if (hasOutputSlots) {
-                for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
-            }
-            node._remoteSources = [];
-
-            for (const src of savedSources) {
-                const srcNode = app.graph.getNodeById(src.sourceId);
-                if (srcNode) _addSourceInner(node, srcNode);
-            }
-
-            _syncSlotLabels(node);
-            if (autoHints) node._rebuildHints = null;
-        });
+    // missing (一時 null) があれば B1 の遅延 reconcile をトリガーする共通ヘルパ。
+    // genuine missing は次 tick で _remoteSources から除去され、transient は遅延再確認で取り消され温存される。
+    // rebuildAllSources / swapSources の両経路で必ず呼ぶ (片方への反映漏れ防止)。
+    function _triggerReconcileIfMissing(node) {
+        const { missing } = partitionLiveSources(_getSources(node), (id) => app.graph.getNodeById(id));
+        if (missing.length > 0) node._saxRemovalController?.reconcileAll?.();
     }
 
-    function swapSources(node, si, sj) {
-        // Coordinator 経由で capture → swap + rebuild → restore。二重 capture を解消。
-        // entityHints の Coordinator 伝達は TODO 4 で NodeCollector 移行と一体実装 (rebuildAllSources と同方針)。
-        coordinator.mutate(() => {
-            const sources = _getSources(node);
-            [sources[si], sources[sj]] = [sources[sj], sources[si]];
-
-            // 順序入れ替え後、現状の sources 配列をそのまま再構築する (rebuildAllSources の内側処理を inline)。
-            const savedSources = [...sources];
-            const autoHints = hasOutputSlots && !node._rebuildHints;
-            if (autoHints) {
-                node._rebuildHints = new Map(
-                    savedSources.map(s => [s.sourceId, { enabledSlots: s.enabledSlots, slotCount: s.slotCount }])
-                );
-            }
-            unhideSourceLinks(node);
-            for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
-                const linkId = node.inputs[i]?.link;
-                if (linkId != null) app.graph.removeLink(linkId);
-                node.removeInput(i);
-            }
-            if (hasOutputSlots) {
-                for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
-            }
-            node._remoteSources = [];
-            for (const src of savedSources) {
-                const srcNode = app.graph.getNodeById(src.sourceId);
-                if (srcNode) _addSourceInner(node, srcNode);
-            }
-            _syncSlotLabels(node);
-            if (autoHints) node._rebuildHints = null;
-        });
-
-        applyLinkVisibility(node);
-        autoResize(node);
-        app.canvas?.setDirty(true, false);
-    }
-
-    // WARNING(Phase 1.2.B): resetAllSources は Coordinator.mutate を経由していない。
-    // 現状 hasOutputSlots=true パスで未呼出のため動作影響なし。将来 NodeCollector 等
-    // hasOutputSlots=true ノードがこの関数を呼ぶと R9 (capture/restore 違反) になる。
-    // 詳細は `docs/knowledge/20260608-reset-sources-coordinator-warning.md` 参照。
-    function resetAllSources(node) {
-        for (const [id] of _hiddenLinkIds) {
-            if (!app.graph.links[id]) _hiddenLinkIds.delete(id);
+    // rebuild の内側処理 (coordinator.mutate の action 内で実行)。savedSources は希望する順序。
+    // rebuildAllSources / swapSources で共通利用し DRY 違反 (反映漏れ) を構造的に防ぐ。
+    //
+    // H-3: 一時 null (missing) があっても live source の rebuild を凍結しない。
+    //   live は fresh に rebuild (H-1: 旧 source を _addSourceInner に渡しアンカー identity を引き継ぐ)。
+    //   missing は _remoteSources に温存し、offset 整合のため空 (未接続) スロットだけ再生成する
+    //   (リンクはこの tick で落ちる = B1 残存穴①と同質。遅延再確認で source データは保全され、
+    //    復帰後の sig 変化で次回 rebuild に拾われ再接続される)。
+    // offset 整合: live / missing いずれも getSlotCount 分の物理スロットを生成するため
+    //   _getOffset の累積和と物理 index が一致し続ける。
+    function _rebuildInner(node, savedSources) {
+        const autoHints = hasOutputSlots && !node._rebuildHints;
+        if (autoHints) {
+            node._rebuildHints = new Map(
+                savedSources.map(s => [s.sourceId, { enabledSlots: s.enabledSlots, slotCount: s.slotCount }])
+            );
         }
+
         unhideSourceLinks(node);
         for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
             const linkId = node.inputs[i]?.link;
@@ -1838,6 +1801,49 @@ export function makeSourceListWidget(spec, coordinator) {
             for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
         }
         node._remoteSources = [];
+
+        for (const src of savedSources) {
+            const srcNode = app.graph.getNodeById(src.sourceId);
+            if (srcNode) {
+                _addSourceInner(node, srcNode, src);
+            } else {
+                const physCount = getSlotCount(src);
+                const base = _getTotalSlotCount(node);
+                for (let li = 0; li < physCount; li++) {
+                    node.addInput(`slot_${base + li}`, "*");
+                    if (hasOutputSlots && buildOutputSlots) {
+                        try { buildOutputSlots(src, base + li, li, node); }
+                        catch (e) { console.warn(`[${widgetName}] buildOutputSlots (missing) error:`, e); }
+                    }
+                }
+                node._remoteSources.push(src);
+            }
+        }
+
+        _syncSlotLabels(node);
+        if (autoHints) node._rebuildHints = null;
+    }
+
+    function rebuildAllSources(node) {
+        _triggerReconcileIfMissing(node);
+        // Coordinator が capture/restore を内蔵するため preDownstream 引数は撤廃。
+        coordinator.mutate(() => {
+            _rebuildInner(node, [..._getSources(node)]);
+        });
+    }
+
+    function swapSources(node, si, sj) {
+        // missing membership は swap 順序に非依存のため、swap 前に reconcile をトリガーしてよい
+        // (rebuildAllSources と同じ「消さない」責務を swap 経路にも適用する)。
+        _triggerReconcileIfMissing(node);
+        // Coordinator 経由で capture → swap + rebuild → restore。二重 capture を解消。
+        coordinator.mutate(() => {
+            const sources = _getSources(node);
+            [sources[si], sources[sj]] = [sources[sj], sources[si]];
+            _rebuildInner(node, [...sources]);
+        });
+
+        applyLinkVisibility(node);
         autoResize(node);
         app.canvas?.setDirty(true, false);
     }
@@ -1865,16 +1871,16 @@ export function makeSourceListWidget(spec, coordinator) {
                 _widgetY = y;
             const t = getComfyTheme();
 
-            // 毎フレーム: ソース生存確認・タイトル変更・sig 変化の検知
+            // 毎フレーム: タイトル変更・sig 変化の検知。
+            // B1: ソースノードが取得不能 (一時 null) でも破壊的削除は行わない。
+            // 「本当の削除」は app.graph.onNodeRemoved (ensureCollectorRemovalHook) が
+            // 検知し遅延再確認のうえ掃除する。draw は「不在表示で保持」に徹する。
             const sources = _getSources(drawNode);
             let sigChangedDetected = false;
             for (let si = sources.length - 1; si >= 0; si--) {
                 const src     = sources[si];
                 const srcNode = app.graph.getNodeById(src.sourceId);
-                if (!srcNode) {
-                    removeSourceAt(drawNode, si);
-                    continue;
-                }
+                if (!srcNode) continue;  // 一時 null は温存 (削除しない)
                 const currentTitle = srcNode.title || srcNode.type || `Node#${srcNode.id}`;
                 if (currentTitle !== src.sourceTitle) {
                     src.sourceTitle = currentTitle;
@@ -2054,10 +2060,60 @@ export function makeSourceListWidget(spec, coordinator) {
     // ノードフック
     // ----------------------------------------------------------------
 
+    // B1: ノード削除イベントを受けた際の遅延再確認 + 掃除。
+    // 削除候補を pending に積み、setTimeout(0) で getNodeById を再確認して
+    // 依然 null の source のみ removeSourceAt する。pending timer は node ごとに
+    // 保持し、Collector 自身の onRemoved (registerRemovalController.dispose) で解除する。
+    function _makeRemovalController(node) {
+        let pendingTimer = null;
+
+        // 遅延再確認の本体: 全 source を走査し依然 null のものを全て掃除する (H-2)。
+        // 削除イベントの id に依存しないため、同フレームの複数同時削除を取りこぼさない。
+        const _runReconcile = () => {
+            pendingTimer = null;
+            const indices = reconcileAllRemoved(
+                _getSources(node),
+                (id) => app.graph.getNodeById(id),
+            );
+            for (const idx of indices) {
+                // M: 1 件の removeSourceAt 例外でループ中断しないよう各回 try/catch する。
+                try { removeSourceAt(node, idx); }
+                catch (e) { console.warn(`[${widgetName}] removeSourceAt (reconcile) error idx=${idx}:`, e); }
+            }
+        };
+
+        const _schedule = () => {
+            // 即削除せず次タスクへ送る (undo/redo/折畳の即復活を取り消すため)。
+            if (pendingTimer != null) return;  // 既存 pending に集約
+            pendingTimer = setTimeout(_runReconcile, 0);
+        };
+
+        return {
+            // H-2: removedId は受け取るが特定 id 限定の掃除はせず、全 source 走査へ集約する。
+            reconcile(_removedId) { _schedule(); },
+            // H-3: rebuild 経路から missing 検出時に遅延再確認をトリガーするためのエイリアス。
+            reconcileAll() { _schedule(); },
+            dispose() {
+                if (pendingTimer != null) { clearTimeout(pendingTimer); pendingTimer = null; }
+                _sourceListControllers.delete(node.id);
+            },
+        };
+    }
+
+    function _registerRemovalController(node) {
+        ensureCollectorRemovalHook();
+        // 既存登録があれば dispose してから差し替え (再 onNodeCreated / 再ロード対応)
+        _sourceListControllers.get(node.id)?.dispose?.();
+        const ctrl = _makeRemovalController(node);
+        _sourceListControllers.set(node.id, ctrl);
+        node._saxRemovalController = ctrl;
+    }
+
     function onNodeCreated() {
         this._remoteSources      = [];
         this._remoteLinksVisible = false;
         this.addCustomWidget(_createWidget(this));
+        _registerRemovalController(this);
     }
 
     function onSerialize(data) {
@@ -2101,6 +2157,9 @@ export function makeSourceListWidget(spec, coordinator) {
             this.addCustomWidget(_createWidget(this));
         }
 
+        // B1: 再ロード後も削除イベント検知を有効化する (graph 切替に追従)。
+        _registerRemovalController(this);
+
         const node = this;
         setTimeout(() => {
             const sources = _getSources(node);
@@ -2140,6 +2199,13 @@ export function makeSourceListWidget(spec, coordinator) {
         rebuildAllSources(node);
     }
 
+    // B1: Collector 自身の削除時に pending timer 解除 + 登録解除を行う。
+    // applySourceListLifecycle が nodeType.prototype.onRemoved に chain する。
+    function disposeRemovalController(node) {
+        (node._saxRemovalController ?? _sourceListControllers.get(node.id))?.dispose?.();
+        node._saxRemovalController = null;
+    }
+
     return {
         createWidget: _createWidget,
         onNodeCreated,
@@ -2148,6 +2214,7 @@ export function makeSourceListWidget(spec, coordinator) {
         addSource,
         getSources: _getSources,
         modifySource,
+        disposeRemovalController,
     };
 }
 
@@ -2324,6 +2391,61 @@ export async function loadWildcardList({
 const _hiddenLinkIds = new Map();
 let _renderLinkPatched = false;
 
+// ---------------------------------------------------------------------------
+// B1: ノード削除イベント駆動の Collector source 掃除
+//
+// draw 内の毎フレーム null チェックによる破壊的削除を廃止し、上流ノードの
+// 「本当の削除」を app.graph.onNodeRemoved で検知する。検知後も即削除せず
+// setTimeout(0) で getNodeById を再確認し、依然 null の時のみ掃除する
+// (undo/redo/サブグラフ折畳での即復活を取り消すため)。
+//
+// 設計根拠: docs/plans/20260613-dynamic-slot-disconnect-permanent-fix.md
+//           「B1 第2回 architect レビュー確定事項」
+// ---------------------------------------------------------------------------
+
+// Collector ノード id → { reconcile(removedId), reconcileAll(), dispose() } の登録簿。
+// 各ノードの onRemoved で登録解除する。graph 切替時は ensureCollectorRemovalHook が一掃する。
+const _sourceListControllers = new Map();
+
+// 現在フック済みの graph 参照。切替検知 (M: graph 切替リーク対策) に用いる。
+let _hookedGraph = null;
+
+/**
+ * 現在の app.graph に onNodeRemoved 削除イベントフックが未装着なら 1 度だけ chain する。
+ * 冪等ガード (graph.__saxCollectorRemovalHooked) + onNodeCreated 経由の遅延再装着で
+ * ワークフロー切替・再ロードに追従する。sax_toggle_manager.js と同じ chain 規律。
+ */
+function ensureCollectorRemovalHook() {
+    const graph = app.graph;
+    if (!graph) return;
+
+    // M (graph 切替リーク対策): 新しい graph を検出したら、旧 graph の Collector に対する
+    // controller 登録を全て掃除する。_sourceListControllers は module-level Map のため、
+    // graph 切替/再ロードで旧ノード id のエントリが残留しリークする (新 graph で同 id の
+    // 別ノードに誤通知する危険もある)。新 graph 初回フック時に一掃する。
+    if (_hookedGraph !== graph) {
+        for (const [, ctrl] of _sourceListControllers) {
+            try { ctrl.dispose?.(); } catch (e) { console.warn("[sax_collector] stale controller dispose error:", e); }
+        }
+        _sourceListControllers.clear();
+        _hookedGraph = graph;
+    }
+
+    if (graph.__saxCollectorRemovalHooked) return;
+    const orig = graph.onNodeRemoved;
+    graph.onNodeRemoved = function (removedNode) {
+        // 各 Collector に削除候補を通知 (遅延再確認は controller 側で実施)
+        const removedId = removedNode?.id;
+        if (removedId != null) {
+            for (const [, ctrl] of _sourceListControllers) {
+                try { ctrl.reconcile(removedId); } catch (e) { console.warn("[sax_collector] reconcile error:", e); }
+            }
+        }
+        orig?.apply(this, arguments);
+    };
+    graph.__saxCollectorRemovalHooked = true;
+}
+
 /** renderLink を1度だけパッチし、_hiddenLinkIds に含まれるリンクをスキップする。 */
 export function ensureRenderLinkPatch() {
     if (_renderLinkPatched) return;
@@ -2367,89 +2489,6 @@ export function applyLinkVisibility(node) {
 export function toggleLinkVisibility(node) {
     node._remoteLinksVisible = !node._remoteLinksVisible;
     applyLinkVisibility(node);
-}
-
-// ---------------------------------------------------------------------------
-// 出力スロット接続維持ユーティリティ
-// ---------------------------------------------------------------------------
-
-/**
- * 各アイテムに現在の出力スロット接続状態を `_links` プロパティとして記録する。
- *
- * **呼び出しタイミング:**
- * - `makeItemListWidget` の `beforeModify` コールバック内（配列変更の直前）
- * - `onConfigure` の setTimeout 内（LiteGraph によるリンク復元後）
- *
- * @param {object}   node        LiteGraph ノード
- * @param {object[]} items       現在のアイテム配列（node.outputs と同順）
- * @param {number}  [slotOffset] 出力スロットの開始インデックス（デフォルト: 0）
- */
-export function captureOutputLinks(node, items, slotOffset = 0) {
-    for (let i = 0; i < items.length; i++) {
-        const slotLinks = node.outputs?.[slotOffset + i]?.links ?? [];
-        items[i]._links = slotLinks.map(linkId => {
-            const link = app.graph.links[linkId];
-            return link ? { targetId: link.target_id, targetSlot: link.target_slot } : null;
-        }).filter(Boolean);
-    }
-}
-
-/**
- * 全出力スロットのリンクを削除し、`syncFn` でスロット構造を更新してから
- * 各アイテムの `_links` に記録された接続先へ非同期で再接続する。
- *
- * **使い方（パターン）:**
- * ```js
- * const saveItems = (newItems) => {
- *     node._myItems = newItems;
- *     restoreOutputLinks(node, newItems, () => syncMyOutputSlots(node, newItems));
- * };
- * return makeItemListWidget({
- *     ...
- *     beforeModify: (items) => captureOutputLinks(node, items),
- *     saveItems,
- * });
- * ```
- *
- * @param {object}   node        LiteGraph ノード
- * @param {object[]} items       新しいアイテム配列（syncFn 適用後の順序）
- * @param {Function} syncFn      スロット構造を更新する同期関数（removeOutput/addOutput を含む）
- * @param {number}  [slotOffset] 出力スロットの開始インデックス（デフォルト: 0）
- */
-export function restoreOutputLinks(node, items, syncFn, slotOffset = 0) {
-    // 全スロットのリンクを削除（removeOutput は内部でリンクも消すが、
-    // スロット数が変わらない場合は removeOutput が呼ばれないため明示削除する）
-    for (let i = 0; i < (node.outputs?.length ?? 0); i++) {
-        for (const linkId of [...(node.outputs[i]?.links ?? [])]) {
-            app.graph.removeLink(linkId);
-        }
-    }
-
-    // スロット構造を更新
-    syncFn();
-
-    // LiteGraph の DOM/グラフ更新を待ってから再接続
-    setTimeout(() => {
-        const affectedNodes = new Set();
-        for (let i = 0; i < items.length; i++) {
-            for (const conn of (items[i]._links ?? [])) {
-                const targetNode = app.graph.getNodeById(conn.targetId);
-                if (targetNode) {
-                    node.connect(slotOffset + i, targetNode, conn.targetSlot);
-                    affectedNodes.add(targetNode);
-                }
-            }
-        }
-        // 再接続後の状態を _links に反映
-        captureOutputLinks(node, items, slotOffset);
-        // 接続先ノードのリンク非表示状態を再適用（link ID が変わるため）
-        for (const targetNode of affectedNodes) {
-            if (targetNode._remoteLinksVisible === false) {
-                applyLinkVisibility(targetNode);
-            }
-        }
-        app.canvas?.setDirty(true, true);
-    }, 0);
 }
 
 // ---------------------------------------------------------------------------

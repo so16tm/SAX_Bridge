@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
 import { ensureRenderLinkPatch, showDialog, h, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
+import { resolveAnchorToOutputSlot } from "./sax_collector_link.js";
 
 const EXT_NAME  = "SAX.NodeCollector";
 const NODE_TYPE = "SAX_Bridge_Node_Collector";
@@ -51,10 +52,15 @@ const SOURCE_SPEC = {
             enabledSlots = Array.from({ length: allCount }, (_, i) => i);
         }
 
+        // B3: 上流出力の identity (name/type) を常に現在の srcNode から fresh 生成する。
+        // 初回 identity の保持 (改名前 name を rebuild で上書きしない) は rebuild 経路
+        // (sax_ui_base.js の mergeSourceAnchors が slotNames/slotTypes を旧から index 対応で
+        // 引き継ぐ) が担う。これにより上流改名後も出力 resolver (slotName 解決) と入力再接続
+        // (アンカー解決) が同一の保存名を基準にできる (H-1: buildSource 内で旧 source を参照しない)。
         const slotNames = [];
         const slotTypes = [];
         for (let i = 0; i < allCount; i++) {
-            const out  = srcOutputs[i];
+            const out = srcOutputs[i];
             slotNames.push(out.label || out.name || out.type || `out_${offset + i}`);
             slotTypes.push(out.type || "*");
         }
@@ -70,10 +76,24 @@ const SOURCE_SPEC = {
 
     connectSource(srcNode, src, collectorNode, offset) {
         const enabled = src.enabledSlots ?? Array.from({ length: src.slotCount ?? 0 }, (_, i) => i);
+        // B2: 各 enabled スロットの保存 identity (slotNames/slotTypes + global index) を
+        // アンカーとして段階解決し、上流改名/並べ替えでも同一論理スロットへ接続する。
         for (let li = 0; li < enabled.length; li++) {
-            if (collectorNode.inputs[offset + li]?.link == null) {
-                srcNode.connect(enabled[li], collectorNode, offset + li);
+            if (collectorNode.inputs[offset + li]?.link != null) continue;
+            const gi = enabled[li];
+            let connectGi = gi;
+            const name = src.slotNames?.[gi];
+            if (name != null) {
+                const anchor = { name, type: src.slotTypes?.[gi] ?? "*", originalSlotIndex: gi };
+                const r = resolveAnchorToOutputSlot(srcNode, anchor);
+                if (r) {
+                    connectGi = r.slotIndex;
+                } else {
+                    console.warn(`[sax_node_collector] anchor unresolved, skip slot gi=${gi} (src ${srcNode.id})`);
+                    continue;
+                }
             }
+            srcNode.connect(connectGi, collectorNode, offset + li);
         }
     },
 

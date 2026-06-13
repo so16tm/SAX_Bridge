@@ -103,6 +103,18 @@ export class DynamicSlotCoordinator {
      */
     #linkSnapshots = new Map();
 
+    /**
+     * G1: absIdx (物理スロット位置) → 接続情報。entity identity 解決に失敗したスロットを
+     * 「同一物理位置」の capture 済みリンクで復元するための positional snapshot。
+     * 新オブジェクト化 (`{...e, x}`) で entity identity が壊れても 1:1 output では切断を
+     * 非致命化する構造的セーフティネット。#captureSnapshots の度に再構築する。
+     * @type {Map<number, Array<{ targetId: number, targetSlot: number }>>}
+     */
+    #positionalSnapshots = new Map();
+
+    /** G1: capture 時点の物理スロット総数。restore 時の「slot 数不変」判定に使う。 */
+    #capturedSlotCount = 0;
+
     /** 次の ID 採番カウンタ。セッション内のみ有効でシリアライズ対象外。 */
     #nextId = 1;
 
@@ -449,6 +461,11 @@ export class DynamicSlotCoordinator {
         }
         const outputs = this.#node.outputs ?? [];
         const graphLinks = this.#node.graph?.links ?? globalThis.app?.graph?.links ?? null;
+        // G1: positional snapshot を毎 capture で再構築する (absIdx キー、stale 防止)。
+        // restore は capture 直後に同一トランザクションで実行されるため、capture 開始時の
+        // clear で常に最新の物理配置を反映する。
+        this.#positionalSnapshots.clear();
+        this.#capturedSlotCount = outputs.length;
         // 防御コード (NEW3-MEDIUM-1): ループ途中例外時に部分書込みスナップショットを cleanup する。
         const writtenIds = [];
         try {
@@ -478,6 +495,10 @@ export class DynamicSlotCoordinator {
                             slotName,
                             localSlotIdx,
                         });
+                        // G1: 同一物理位置 (absIdx) の positional snapshot も併記する。
+                        const posConns = this.#positionalSnapshots.get(absIdx) ?? [];
+                        posConns.push({ targetId: link.target_id, targetSlot: link.target_slot });
+                        this.#positionalSnapshots.set(absIdx, posConns);
                     }
                 }
                 this.#linkSnapshots.set(id, conns);
@@ -509,6 +530,17 @@ export class DynamicSlotCoordinator {
         const graph = this.#node.graph ?? globalThis.app?.graph ?? null;
         if (!graph) return;
 
+        // G1: positional fallback の適用可否。1:1 output (resolver 両未定義) かつ slot 数不変の時のみ、
+        // entity identity 解決失敗スロットを同一物理位置の snapshot で復元する。
+        // 1:N (NodeCollector: resolver 定義済) は enabledSlots 編集で slot 数が変動し、positional は
+        // 隣接スロットへの誤接続を招くため適用しない (段階1/2 resolver に委ねる)。
+        // move は entity identity が維持され id 解決に成功するため、この fallback 経路には落ちない。
+        const hasResolvers
+            = typeof this.#spec.resolveLocalSlotBySlotName === "function"
+            || typeof this.#spec.resolveLocalSlotByGlobalIdx === "function";
+        const positionalEligible
+            = !hasResolvers && (this.#node.outputs?.length ?? 0) === this.#capturedSlotCount;
+
         // 既存リンクをクリアしてから再接続 (capture 前の link は action 内で
         // syncSlotStructure 経由 removeOutput により graph.links からも除去済の想定だが、
         // 防御的に現状全 outputs 経由で残存 link を removeLink する)。
@@ -533,6 +565,13 @@ export class DynamicSlotCoordinator {
 
             const conns = id !== undefined ? this.#linkSnapshots.get(id) : null;
             if (!conns?.length) {
+                // G1: entity が「新オブジェクト (id 未採番 = identity 破壊)」の時のみ、
+                // 同一物理位置の positional snapshot で復元し切断を非致命化する。
+                // id が採番済 (move 等で identity 維持された既存 entity) で link を持たない場合は
+                // positional を発火させない (別 entity の旧位置 link を誤って引き継がないため)。
+                if (positionalEligible && id === undefined) {
+                    this.#restorePositional(baseOffset, slots.length, graph);
+                }
                 baseOffset += slots.length;
                 continue;
             }
@@ -574,6 +613,29 @@ export class DynamicSlotCoordinator {
                 }
             }
             baseOffset += slots.length;
+        }
+    }
+
+    /**
+     * G1: entity identity 解決失敗時の positional fallback。
+     * baseOffset から slotCount 分の物理スロットを、capture 時の同一 absIdx に記録した
+     * positional snapshot で再接続する。1:1 output・slot 数不変時のみ #restoreFromSnapshots から呼ばれる。
+     *
+     * @param {number} baseOffset  entity の先頭物理スロット位置
+     * @param {number} slotCount   entity が占める物理スロット数 (1:1 なら 1)
+     * @param {object} graph       LiteGraph グラフ
+     */
+    #restorePositional(baseOffset, slotCount, graph) {
+        for (let localSlotIdx = 0; localSlotIdx < slotCount; localSlotIdx++) {
+            const absIdx = baseOffset + localSlotIdx;
+            const posConns = this.#positionalSnapshots.get(absIdx);
+            if (!posConns?.length) continue;
+            for (const pc of posConns) {
+                const targetNode = graph.getNodeById?.(pc.targetId);
+                if (targetNode && this.#node.outputs?.[absIdx]) {
+                    this.#node.connect?.(absIdx, targetNode, pc.targetSlot);
+                }
+            }
         }
     }
 

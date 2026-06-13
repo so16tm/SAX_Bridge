@@ -1347,45 +1347,38 @@ function makeCatalogWidget(node) {
             const state = getState();
             const validIds = new Set(draftCatalog.items.map(it => it.id));
 
-            // 変更対象 relation のみ新オブジェクト + 変更不要は元参照を引き継ぐ
-            // (entity identity 維持: WeakMap ベースの ID 採番が古い参照を保持しているため、
-            // 不必要に新オブジェクト化すると snapshot の id 解決が壊れる)。
-            // on 欠損補正 (NEW-LOW-2) は両分岐で対称に行う。
-            const newRelations = state.relations.map(rel => {
-                if (rel.item_id && !validIds.has(rel.item_id)) {
-                    return { ...rel, item_id: null, on: rel.on ?? true };
-                }
-                if (rel.on === undefined || rel.on === null) {
-                    return { ...rel, on: true };
-                }
-                return rel;
-            });
-
-            // ロールバック対象を退避 (commitState 中の例外で catalog/relations が不整合になる可能性)
+            // Manager Save は items/tags のみ編集し relations 件数は不変 (slot 数不変)。
+            // 孤立 relation (削除済み item を参照) の item_id を in-place で null 化して
+            // entity identity を維持する。新オブジェクト化すると Coordinator の snapshot 解決が
+            // 壊れ、(unset)/<orphan> となるスロットの下流リンクが落ちる。on 欠損補正も in-place で対称に行う。
+            // (relations 件数が不変のため、capture/restore を伴う commitState ではなく applySaveOnly を使う。
+            //  将来 Manager が relation 追加/削除を持つ場合は add/del 経路 = applyAfterCapture が必要。)
+            // ロールバック退避: in-place mutation 前に各 relation の item_id/on を記録する (A2-1)。
+            const relSnapshot = state.relations.map(r => ({ rel: r, item_id: r.item_id, on: r.on }));
             const oldCatalog = state.catalog;
-            const oldRelations = state.relations;
+
+            for (const rel of state.relations) {
+                if (rel.item_id && !validIds.has(rel.item_id)) rel.item_id = null;
+                if (rel.on === undefined || rel.on === null) rel.on = true;
+            }
 
             // catalog 先行更新: slot 名導出 (resolveRelationLabel) は catalog.items を参照するため、
-            // commitState の syncSlotStructure 呼出時点で新しい catalog が反映されている必要がある。
+            // applySaveOnly の syncSlotStructure 呼出時点で新しい catalog が反映されている必要がある。
             node._textCatalogState = { ...state, catalog: draftCatalog };
 
             try {
-                // commitState で relations 差し替え + capture/restore + syncSlotStructure
-                coordinator.commitState(newRelations);
+                // relations 件数不変 + identity 維持 → applySaveOnly (capture/restore なし、下流リンク保持)。
+                coordinator.applySaveOnly(state.relations);
             } catch (e) {
-                // atomic ロールバック: slot 数不変の場合は同期スコープで完結する
-                node._textCatalogState = {
-                    ...node._textCatalogState,
-                    catalog: oldCatalog,
-                    relations: oldRelations,
-                };
-                // ロールバック中の syncOutputSlots 例外を捕捉 (NEW3-MEDIUM-2)。
-                // 再例外時は abort せずログのみ。catalog/relations は既に復元済み、
-                // 次回 onConfigure の validIds fallback で救済される。
+                // best-effort ロールバック: relations の item_id/on を in-place 復元し catalog を戻して
+                // syncOutputSlots を再実行する (A2-1)。再例外時は abort せずログのみ
+                // (次回 onConfigure の validIds fallback で救済)。
+                for (const s of relSnapshot) { s.rel.item_id = s.item_id; s.rel.on = s.on; }
+                node._textCatalogState = { ...node._textCatalogState, catalog: oldCatalog };
                 try {
                     syncOutputSlots(node, node._textCatalogState);
                 } catch (rollbackError) {
-                    console.error("[TextCatalog] Rollback syncOutputSlots failed after commitState error:", rollbackError);
+                    console.error("[TextCatalog] Rollback syncOutputSlots failed after applySaveOnly error:", rollbackError);
                 }
                 throw e;
             }
@@ -1425,17 +1418,13 @@ function makeCatalogWidget(node) {
                         const currentState = getState();
                         // picker 表示中に対象 relation が他経路で削除されていた場合は no-op で終わる。
                         if (!currentState.relations.includes(relation)) return;
-                        // onPopup は makeItemListWidget の beforeModify 経路を通らないため、
-                        // capture/apply を利用側で明示的にペアにする (Phase 1.1 確定 API パターン)。
-                        coordinator.captureFromExisting();
-                        // 変更対象 relation のみ新オブジェクト、その他は元参照引き継ぎ
-                        // (entity identity 維持で WeakMap 上の snapshot id 解決を壊さない)。
-                        const newRelations = currentState.relations.map(r =>
-                            r === relation
-                                ? { ...r, item_id: selectedId, on: r.on ?? true }
-                                : r
-                        );
-                        coordinator.applyAfterCapture(newRelations);
+                        // item_id 変更は slot 数不変・type STRING 固定の「値のみ変更」。
+                        // relation を in-place 更新して entity identity を維持し、applySaveOnly で保存する
+                        // (PrimitiveStore 同型。capture/restore を通さないため下流リンクは保持される。
+                        // 新オブジェクト化すると Coordinator の WeakMap snapshot 解決が壊れ切断する)。
+                        relation.item_id = selectedId;
+                        if (relation.on === undefined || relation.on === null) relation.on = true;
+                        coordinator.applySaveOnly(currentState.relations);
                     });
                 },
             },
