@@ -285,7 +285,7 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
             io.String.Input("text"),
             prefix="text",
             min=1,
-            max=10,
+            max=32,
         )
         return io.Schema(
             node_id="SAX_Bridge_Prompt_Concat",

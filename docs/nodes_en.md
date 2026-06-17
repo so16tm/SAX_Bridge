@@ -242,9 +242,9 @@ In the normal flow (Loader → Pipe → KSampler), `loader_settings` is always p
 
 ### SAX Prompt Concat
 
-`SAX_Bridge_Prompt_Concat` — Concatenates multiple text inputs (up to 10 ports) and processes them together.
+`SAX_Bridge_Prompt_Concat` — Concatenates multiple text inputs (up to 32 ports) and processes them together.
 
-**Inputs**: `pipe`, `target_positive` (Boolean), `text_1` to `text_N` (variable, up to 10)
+**Inputs**: `pipe`, `target_positive` (Boolean), `text_1` to `text_N` (variable, up to 32)
 
 **Outputs**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
 

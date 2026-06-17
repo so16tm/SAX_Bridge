@@ -242,9 +242,9 @@
 
 ### SAX Prompt Concat
 
-`SAX_Bridge_Prompt_Concat` — 複数のテキスト入力（最大 10 ポート）を連結して一括処理します。
+`SAX_Bridge_Prompt_Concat` — 複数のテキスト入力（最大 32 ポート）を連結して一括処理します。
 
-**入力**: `pipe`, `target_positive` (Boolean), `text_1`〜`text_N`（可変、最大 10）
+**入力**: `pipe`, `target_positive` (Boolean), `text_1`〜`text_N`（可変、最大 32）
 
 **出力**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
 
