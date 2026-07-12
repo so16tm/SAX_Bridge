@@ -130,6 +130,7 @@ The SAM3 `mask_grow` and this node's `grow` are additive. When fanning out, set 
 - **Hybrid tag input** with auto-normalization (trim + lowercase), favorite tags pinned to the front
 - **Tag-aware sorting** keeps related items grouped and matches the tag toggle order
 - Output empty string for unset / orphan Relations — drops cleanly into `SAX Prompt Concat`
+- **`merge_outputs` toggle** collapses all Relations into a single newline-joined output — a clean single wire into `SAX Prompt Concat` that avoids its many-input slot ordering glitch
 - Text editor supports **danbooru tag autocomplete** when [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) is installed (falls back to manual input otherwise)
 
 See [Node Reference: SAX Text Catalog](docs/nodes_en.md#sax-text-catalog) for full details.

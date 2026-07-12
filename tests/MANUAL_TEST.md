@@ -275,6 +275,20 @@
 - [ ] ワークフロー保存 → 再読込で ON/OFF 状態が復元される
 - [ ] 旧ワークフロー（`on` フィールド欠損の `items_json`）読込で全 Relation が ON 状態になる（後方互換）
 
+### I-10b. merge_outputs トグル（個別 / マージ切替）
+
+- [ ] ノード本体に `merge_outputs` トグル（`individual` / `merged`）が表示される（既定は `individual`）
+- [ ] `individual` 状態では Relation 件数分の出力ピンが表示される（従来動作）
+- [ ] トグルを `merged` に切替 → 出力ピンが単一 `merged` ピン 1 本になる
+- [ ] 切替時に既存の下流接続が切断される（出力形態が変わるため。切断は仕様）
+- [ ] `merged` ピンを `SAX Prompt Concat` の 1 入力に接続 → ON の全 Relation テキストが改行結合されて渡る
+- [ ] `merged` の結果が、同じ内容を個別出力で Prompt Concat に複数接続した場合と一致する（BREAK 構文含め同一挙動）
+- [ ] OFF / unset / orphan の Relation は `merged` 結合に含まれない（空文字は結合対象外）
+- [ ] `merged` → `individual` に戻す → Relation 件数分のピンが再生成される（接続は切断済み）
+- [ ] `merged` 状態でワークフロー保存 → 再読込で `merged` 状態と単一ピンが復元される
+- [ ] `merged` 状態で Relation の追加 / 削除 / 並べ替えを行っても単一 `merged` ピンが維持される（ピンが増殖しない）
+- [ ] 11 個以上の Relation を `merged` で Prompt Concat に接続 → 入力スロット並び順崩れが発生しない（本機能の主目的）
+
 ### I-11. LoRA / Wildcard ピッカー（Manager Editor 内）
 
 #### LoRA ピッカー

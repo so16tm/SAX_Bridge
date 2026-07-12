@@ -389,13 +389,14 @@ class TestNodeIntegration:
         schema = SAX_Bridge_Text_Catalog.GET_SCHEMA()
         assert len(schema.outputs) == MAX_RELATIONS
 
-    def test_is_changed_returns_input_json(self):
+    def test_is_changed_embeds_items_json_and_merge_flag(self):
+        # merge_outputs 既定 (False) の識別子。items_json をそのまま含む。
         result = SAX_Bridge_Text_Catalog.IS_CHANGED(items_json="{}")
-        assert result == "{}"
+        assert result == "{}\x00merge=False"
 
         payload = _make_payload()
         result = SAX_Bridge_Text_Catalog.IS_CHANGED(items_json=payload)
-        assert result == payload
+        assert result == f"{payload}\x00merge=False"
 
     def test_execute_returns_node_output(self):
         payload = _make_payload(
@@ -409,3 +410,134 @@ class TestNodeIntegration:
     def test_execute_with_default_input(self):
         output = SAX_Bridge_Text_Catalog.execute()
         assert output.args == tuple([""] * MAX_RELATIONS)
+
+
+# ---------------------------------------------------------------------------
+# マージ出力トグル (merge_outputs)
+# ---------------------------------------------------------------------------
+
+class TestMergeOutputs:
+    def test_merged_joins_multiple_on_relations_with_newline(self):
+        payload = _make_payload(
+            items=[
+                {"id": "a", "name": "x", "text": "AAA", "tags": []},
+                {"id": "b", "name": "y", "text": "BBB", "tags": []},
+            ],
+            relations=[{"item_id": "a"}, {"item_id": "b"}],
+        )
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload, merge_outputs=True)
+        assert output.args[0] == "AAA\nBBB"
+        # out_1..31 は空文字
+        assert all(a == "" for a in output.args[1:])
+        assert len(output.args) == MAX_RELATIONS
+
+    def test_merged_excludes_whitespace_only_text(self):
+        payload = _make_payload(
+            items=[
+                {"id": "a", "name": "x", "text": "AAA", "tags": []},
+                {"id": "b", "name": "y", "text": "   ", "tags": []},
+                {"id": "c", "name": "z", "text": "CCC", "tags": []},
+            ],
+            relations=[{"item_id": "a"}, {"item_id": "b"}, {"item_id": "c"}],
+        )
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload, merge_outputs=True)
+        # 空白のみの text は strip 述語で除外される
+        assert output.args[0] == "AAA\nCCC"
+
+    def test_merged_strips_each_line(self):
+        payload = _make_payload(
+            items=[
+                {"id": "a", "name": "x", "text": "  AAA  ", "tags": []},
+                {"id": "b", "name": "y", "text": "\tBBB\n", "tags": []},
+            ],
+            relations=[{"item_id": "a"}, {"item_id": "b"}],
+        )
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload, merge_outputs=True)
+        assert output.args[0] == "AAA\nBBB"
+
+    def test_merged_excludes_off_unset_and_orphan_relations(self):
+        payload = _make_payload(
+            items=[
+                {"id": "a", "name": "x", "text": "AAA", "tags": []},
+                {"id": "b", "name": "y", "text": "BBB", "tags": []},
+            ],
+            relations=[
+                {"item_id": "a", "on": True},
+                {"item_id": "b", "on": False},   # OFF → 除外
+                {"item_id": None},               # unset → 除外
+                {"item_id": "ghost"},            # orphan → 除外
+            ],
+        )
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload, merge_outputs=True)
+        assert output.args[0] == "AAA"
+
+    def test_merged_all_off_or_unset_returns_empty(self):
+        payload = _make_payload(
+            items=[{"id": "a", "name": "x", "text": "AAA", "tags": []}],
+            relations=[{"item_id": "a", "on": False}, {"item_id": None}],
+        )
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload, merge_outputs=True)
+        # Concat の空契約と整合: 全除外なら空文字
+        assert output.args[0] == ""
+        assert all(a == "" for a in output.args)
+
+    def test_merged_equivalent_to_prompt_concat_normalization(self):
+        """merged の out_0 が prompt.py Concat の正規化と一致すること。"""
+        payload = _make_payload(
+            items=[
+                {"id": "a", "name": "x", "text": "  foo BREAK  ", "tags": []},
+                {"id": "b", "name": "y", "text": "bar", "tags": []},
+                {"id": "c", "name": "z", "text": "   ", "tags": []},
+            ],
+            relations=[{"item_id": "a"}, {"item_id": "b"}, {"item_id": "c"}],
+        )
+        resolved = _resolve_relations(payload)
+        # prompt.py SAX_Bridge_Prompt_Concat.execute と同じ正規化
+        expected = "\n".join(v.strip() for v in resolved if v.strip())
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload, merge_outputs=True)
+        assert output.args[0] == expected
+        # BREAK を含む text でも改行結合と一致（BREAK 分割は改行と無関係）
+        assert output.args[0] == "foo BREAK\nbar"
+
+    def test_individual_default_matches_current_behavior(self):
+        payload = _make_payload(
+            items=[
+                {"id": "a", "name": "x", "text": "AAA", "tags": []},
+                {"id": "b", "name": "y", "text": "BBB", "tags": []},
+            ],
+            relations=[{"item_id": "a"}, {"item_id": "b"}],
+        )
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload, merge_outputs=False)
+        assert output.args[0] == "AAA"
+        assert output.args[1] == "BBB"
+        assert all(a == "" for a in output.args[2:])
+
+    def test_backward_compat_execute_without_merge_arg(self):
+        """merge_outputs 未指定 → individual（後方互換）。"""
+        payload = _make_payload(
+            items=[{"id": "a", "name": "x", "text": "AAA", "tags": []}],
+            relations=[{"item_id": "a"}],
+        )
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload)
+        assert output.args[0] == "AAA"
+        assert len(output.args) == MAX_RELATIONS
+
+    def test_is_changed_differs_by_merge_flag(self):
+        payload = _make_payload(
+            items=[{"id": "a", "name": "x", "text": "AAA", "tags": []}],
+            relations=[{"item_id": "a"}],
+        )
+        changed_off = SAX_Bridge_Text_Catalog.IS_CHANGED(
+            items_json=payload, merge_outputs=False
+        )
+        changed_on = SAX_Bridge_Text_Catalog.IS_CHANGED(
+            items_json=payload, merge_outputs=True
+        )
+        assert changed_off != changed_on
+
+    def test_schema_includes_merge_outputs_input(self):
+        schema = SAX_Bridge_Text_Catalog.GET_SCHEMA()
+        input_ids = {getattr(inp, "id", None) for inp in schema.inputs}
+        assert "merge_outputs" in input_ids
+        # outputs は依然 32 STRING 固定
+        assert len(schema.outputs) == MAX_RELATIONS

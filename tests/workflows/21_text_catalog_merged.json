@@ -1,0 +1,54 @@
+{
+  "id": "test-21-text-catalog-merged",
+  "revision": 0,
+  "last_node_id": 2,
+  "last_link_id": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Text_Catalog",
+      "pos": [200, 200],
+      "size": [320, 260],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "merged",
+          "type": "STRING",
+          "links": [1]
+        }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Text_Catalog" },
+      "title": "Text Catalog (merged smoke)",
+      "widgets_values": [
+        "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"a1\",\"name\":\"scene_day\",\"text\":\"a beautiful sunny landscape\",\"tags\":[\"positive\",\"scene\"]},{\"id\":\"a2\",\"name\":\"neg_default\",\"text\":\"low quality, blurry\",\"tags\":[\"negative\"]}],\"tag_definitions\":[\"positive\",\"negative\",\"scene\"]},\"relations\":[{\"item_id\":\"a1\",\"on\":true},{\"item_id\":\"a2\",\"on\":true}]}",
+        "Select the LoRA to add to the text",
+        "Select the Wildcard to add to the text",
+        true
+      ]
+    },
+    {
+      "id": 2,
+      "type": "Note",
+      "pos": [580, 200],
+      "size": [340, 260],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "How to test (merged)",
+      "widgets_values": [
+        "Smoke test for SAX Text Catalog merge_outputs = merged:\n\n1. The node has merge_outputs toggle ON (merged). It exposes a single 'merged' output pin only.\n2. The merged pin joins all active relations' texts with newlines:\n   'a beautiful sunny landscape\\nlow quality, blurry'\n3. Connect the merged pin to a single input of SAX Prompt Concat.\n   The result must match wiring the two individual outputs separately.\n4. Toggle merge_outputs OFF (individual) -> two per-relation pins reappear (connections are dropped by design)."
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

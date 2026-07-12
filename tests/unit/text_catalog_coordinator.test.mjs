@@ -538,3 +538,120 @@ describe("TextCatalog: onPopup の stale closure 回避 (Phase 1.2.A Review M-2)
         assert.strictEqual(updated[2], relC, "relC は元参照を引き継いでいるべき");
     });
 });
+
+// ===========================================================================
+// CRITICAL-1: merge_outputs トグル中は restore 発火 API を回避する
+//
+// 遮断点の一本化 (sax_text_catalog.js の makeCatalogWidget mutation フック分岐):
+//   - individual: beforeModify=capture, saveItemsCapturing=applyAfterCapture (restore 発火)
+//   - merged:     beforeModify=no-op,   saveItemsCapturing=applySaveOnly    (restore 非発火)
+//
+// #restoreLinkPreserving はピン数を entities.length (=relations 件数 N) で駆動するため、
+// merged (単一ピン前提) 中に restore 経路が走ると単一ピン前提が壊れる。本テストは
+// 「merged 中は applySaveOnly が syncSlotStructure のみ呼び、outputs.length を entities.length に
+// 強制しない」ことと、「individual 中は applyAfterCapture が restore を発火しピンを成長させる」
+// ことを対比で固定する。
+//
+// sax_text_catalog.js 本体は app import が必要でランタイム依存のため、TextCatalog の spec 形状
+// (linkPreserving:true) を再現した merged 対応 fixture を Coordinator に直接渡して検証する。
+// ===========================================================================
+
+describe("TextCatalog: CRITICAL-1 merged 中は restore 発火 API を回避 (merge_outputs)", () => {
+    let graph;
+    beforeEach(() => { graph = makeGraphMock(); installAppMock(graph); });
+    afterEach(() => { uninstallAppMock(); });
+
+    /**
+     * merged 対応 Coordinator fixture。node._merged フラグで syncSlotStructure の収束先を
+     * 切り替える (sax_text_catalog.js:syncOutputSlots の isMerged 分岐と同型)。
+     * spec.linkPreserving=true で TextCatalog 本体と同じ 1:1 link-preserving 経路を再現する。
+     */
+    function ensureMergeAwareCoordinator(node) {
+        if (node._saxCoordinator) return node._saxCoordinator;
+        const syncOutputSlots = (n) => {
+            const state = n._textCatalogState ?? { catalog: { items: [] }, relations: [] };
+            if (n._merged) {
+                while (n.outputs.length > 1) n.removeOutput(n.outputs.length - 1);
+                if (n.outputs.length === 0) n.addOutput("merged", "STRING");
+                n.outputs[0].name = "merged";
+                n.outputs[0].type = "STRING";
+            } else {
+                const relations = state.relations;
+                while (n.outputs.length > relations.length) n.removeOutput(n.outputs.length - 1);
+                while (n.outputs.length < relations.length) n.addOutput("", "STRING");
+                for (let i = 0; i < relations.length; i++) {
+                    const item = (state.catalog?.items ?? []).find(it => it.id === relations[i].item_id);
+                    n.outputs[i].name = item ? item.name : "(unset)";
+                    n.outputs[i].type = "STRING";
+                }
+            }
+        };
+        node._saxCoordinator = new DynamicSlotCoordinator(node, {
+            direction: "output",
+            linkPreserving: true,
+            getEntities: () => (node._textCatalogState ?? { relations: [] }).relations,
+            entityToSlots: () => [{ name: "", type: "STRING" }],
+            syncSlotStructure: () => syncOutputSlots(node),
+            setEntities: (newRelations) => {
+                const prev = node._textCatalogState ?? { catalog: { items: [] }, relations: [] };
+                node._textCatalogState = { ...prev, relations: newRelations };
+            },
+        });
+        return node._saxCoordinator;
+    }
+
+    it("merged 中の add を applySaveOnly で処理するとピンは単一 merged のまま (restore 非発火・entities.length に成長しない)", () => {
+        const node = makeNode({ id: 600, outputCount: 0 });
+        node._graph = graph;
+        graph.registerNode(node);
+        node._merged = true;
+        const relA = { item_id: "a", on: true };
+        node._textCatalogState = {
+            catalog: { items: [{ id: "a", name: "a_text" }, { id: "b", name: "b_text" }] },
+            relations: [relA],
+        };
+        const coord = ensureMergeAwareCoordinator(node);
+
+        // merged 初期同期 → 単一 "merged" ピン
+        coord.applySaveOnly(node._textCatalogState.relations);
+        assert.equal(node.outputs.length, 1, "merged 初期は単一ピン");
+        assert.equal(node.outputs[0].name, "merged");
+
+        // add 相当: relations を 2 件へ。merged では saveItemsCapturing が applySaveOnly を選ぶ。
+        const relB = { item_id: "b", on: true };
+        node.connectCalls = [];
+        coord.applySaveOnly([relA, relB]);
+
+        // 核心: applySaveOnly は capture/restore を通さず syncSlotStructure のみ呼ぶため、
+        // #restoreLinkPreserving のピン成長 (entities.length=2) が発火せず単一ピンが維持される。
+        assert.equal(node.outputs.length, 1,
+            "merged 中の add でもピンは単一 merged のまま (entities.length に強制されない)");
+        assert.equal(node.outputs[0].name, "merged");
+        assert.equal(node.connectCalls.length, 0, "applySaveOnly は再接続を行わない");
+    });
+
+    it("対比: individual 中の add を applyAfterCapture で処理すると restore が発火しピンが relations 件数へ成長する", () => {
+        const node = makeNode({ id: 601, outputCount: 1 });
+        node._graph = graph;
+        graph.registerNode(node);
+        node._merged = false;
+        const relA = { item_id: "a", on: true };
+        node._textCatalogState = {
+            catalog: { items: [{ id: "a", name: "a_text" }, { id: "b", name: "b_text" }] },
+            relations: [relA],
+        };
+        node.outputs[0].name = "a_text";
+        const coord = ensureMergeAwareCoordinator(node);
+
+        // beforeModify 経路: capture → 新 relations → applyAfterCapture (restore 発火)
+        coord.captureFromExisting();
+        const relB = { item_id: "b", on: true };
+        coord.applyAfterCapture([relA, relB]);
+
+        // individual では restore (link-preserving) がピンを entities.length へ成長させる。
+        assert.equal(node.outputs.length, 2,
+            "individual の applyAfterCapture は restore を発火しピンを relations 件数へ成長させる");
+        assert.equal(node.outputs[0].name, "a_text");
+        assert.equal(node.outputs[1].name, "b_text");
+    });
+});

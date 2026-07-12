@@ -880,7 +880,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Text_Catalog` — Manages named texts (prompts, etc.) as an in-node catalog and assigns them to output slots via Relations. Lets you maintain multiple prompts as a binder and switch between them without rewiring the workflow.
 
-**Outputs**: STRING outputs dynamically generated per Relation
+**Outputs**: STRING outputs dynamically generated per Relation (when `merge_outputs` is OFF) / a single STRING output joining all Relations with newlines (when `merge_outputs` is ON)
 
 #### Four-Element Model
 
@@ -902,6 +902,7 @@ applied_loras: {'lora_a'} (1 entries)
 - OFF rows render their text with reduced opacity
 - Unset Relations show `(unset)` in gray (the slot remains and any connection to it is preserved)
 - Relations referencing deleted Items show `<orphan>` with warning color (the slot remains and any connection to it is preserved)
+- The `merge_outputs` toggle (`individual` / `merged`) switches the output form. In `merged` mode only a single `merged` pin is emitted, joining all active Relations' texts with newlines (use this to work around the ComfyUI frontend input-slot ordering glitch that appears once `SAX Prompt Concat`'s dynamic inputs grow past 11, by collapsing to a single input). Toggling changes the output form, so downstream connections are disconnected on switch
 
 **Manager Dialog (Text Management)**
 - Left pane: Item list (search, tag filter, `×N` reference count badge)
@@ -959,6 +960,8 @@ applied_loras: {'lora_a'} (1 entries)
 | Relation references a deleted Item | `""` |
 
 This aligns with the empty-string skip behavior of downstream nodes such as `SAX Prompt Concat`.
+
+When `merge_outputs` is ON, the Relations that are not emptied above have their text `strip()`-ed and joined with newlines (`\n`) into a single string on the `merged` pin (or `""` if all Relations are empty). This is equivalent to how `SAX Prompt Concat` strips and newline-joins its multiple inputs before processing, so it produces the same result as wiring the individual outputs into Prompt Concat directly (BREAK syntax is also split independently of newlines, hence identical behavior).
 
 > **Compatibility**: Older workflows whose `items_json` lacks the `on` field are loaded as ON (backward compatible).
 

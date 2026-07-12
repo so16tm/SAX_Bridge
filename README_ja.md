@@ -130,6 +130,7 @@ SAM3 側の `mask_grow` と本ノードの `grow` は加算的に効くため、
 - **タグはハイブリッド入力**（候補 + 自由入力、自動正規化）。お気に入りタグは先頭に固定可
 - **タグ連動ソート** で関連 Item をグループ化し、タグトグル並びと一致させる
 - 未割当 / 削除済み Item 参照は空文字を出力 — `SAX Prompt Concat` 等の空文字スキップと整合
+- **`merge_outputs` トグル** で全 Relation を改行結合した単一出力に切替 — `SAX Prompt Concat` へ 1 本で接続でき、多入力時の入力スロット並び順崩れを回避できる
 - [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) が導入されていれば Text 編集エリアで **danbooru タグオートコンプリート** が利用可能（未導入時は手動入力）
 
 詳細は [ノードリファレンス: SAX Text Catalog](docs/nodes_ja.md#sax-text-catalog) を参照してください。

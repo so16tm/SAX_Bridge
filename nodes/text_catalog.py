@@ -156,6 +156,18 @@ class SAX_Bridge_Text_Catalog(io.ComfyNode):
                     options=get_wildcard_options(),
                     optional=True,
                 ),
+                # 個別出力 / マージ出力の切替。
+                # individual (default): relation ごとに 1 出力ピン（現行動作）。
+                # merged: 有効な relation を strip → 空除外 → 改行結合した単一 STRING を
+                #   out_0 に出力し、out_1..31 は空文字。結合仕様は SAX_Bridge_Prompt_Concat の
+                #   空文字スキップ契約に一致させる。
+                io.Boolean.Input(
+                    "merge_outputs",
+                    default=False,
+                    label_on="merged",
+                    label_off="individual",
+                    optional=True,
+                ),
             ],
             outputs=[
                 io.String.Output(display_name=f"out_{i}")
@@ -164,10 +176,19 @@ class SAX_Bridge_Text_Catalog(io.ComfyNode):
         )
 
     @classmethod
-    def IS_CHANGED(cls, items_json: str = "{}", **kwargs) -> str:
-        return items_json
+    def IS_CHANGED(cls, items_json: str = "{}", merge_outputs: bool = False, **kwargs) -> str:
+        # merge_outputs の切替でも再実行させるため識別子に含める。
+        # items_json は任意 JSON なので、衝突しない NUL 区切りで連結する。
+        return f"{items_json}\x00merge={bool(merge_outputs)}"
 
     @classmethod
-    def execute(cls, items_json: str = "{}", **kwargs) -> io.NodeOutput:
-        result = _resolve_relations(items_json)
-        return io.NodeOutput(*result)
+    def execute(
+        cls, items_json: str = "{}", merge_outputs: bool = False, **kwargs
+    ) -> io.NodeOutput:
+        resolved = _resolve_relations(items_json)
+        if merge_outputs:
+            # SAX_Bridge_Prompt_Concat の正規化（strip → 空文字スキップ → 改行結合）と
+            # behaviorally 等価。resolved は全て str のため型チェックは不要。
+            merged = "\n".join(s.strip() for s in resolved if s.strip())
+            return io.NodeOutput(merged, *([""] * (MAX_RELATIONS - 1)))
+        return io.NodeOutput(*resolved)

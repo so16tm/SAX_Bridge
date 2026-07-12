@@ -880,7 +880,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Text_Catalog` — 名前付きテキスト（プロンプト等）をノード内のカタログとして保管し、Relation 経由で出力スロットに割り当てるノードです。複数のプロンプトをバインダー的に管理し、ワークフロー側を書き換えずに切替できます。
 
-**出力**: Relation ごとに動的生成された STRING 出力
+**出力**: Relation ごとに動的生成された STRING 出力（`merge_outputs` OFF 時）／ 全 Relation を改行結合した単一 STRING 出力（`merge_outputs` ON 時）
 
 #### 4 要素モデル
 
@@ -902,6 +902,7 @@ applied_loras: {'lora_a'} (1 entries)
 - OFF 状態の Relation はテキストが半透明表示になる
 - 未割当 Relation は `(unset)` を灰色で表示（スロットは残存し、接続していれば維持される）
 - 削除済み Item を参照する Relation は `<orphan>` を警告色で表示（スロットは残存し、接続していれば維持される）
+- `merge_outputs` トグル（`individual` / `merged`）で出力形態を切替。`merged` にすると有効な全 Relation のテキストを改行結合した単一 `merged` ピンだけを出力する（`SAX Prompt Concat` の動的入力が 11 本以上に増えると発生する ComfyUI フロントエンドの入力スロット並び順崩れを、入力 1 本化で回避する用途）。切替時は出力形態が変わるため下流接続を切断する
 
 **Manager Dialog（テキスト管理）**
 - 左ペイン：Item 一覧（検索、タグフィルタ、参照中 Relation 数 `×N` 表示）
@@ -959,6 +960,8 @@ applied_loras: {'lora_a'} (1 entries)
 | Relation が削除済み Item を参照 | `""` |
 
 下流ノード（`SAX Prompt Concat` 等）の空文字スキップ実装と整合します。
+
+`merge_outputs` を ON にすると、上記で空文字にならない Relation のテキストを `strip()` して改行（`\n`）で結合した単一文字列を `merged` ピンに出力します（全 Relation が空文字の場合は `""`）。これは `SAX Prompt Concat` が複数入力を `strip()` + 改行結合してから処理する挙動と等価で、個別出力を Prompt Concat に直結した場合と同じ結果になります（BREAK 構文も改行と独立に分割されるため同一挙動）。
 
 > **互換性**: 旧ワークフロー（`on` フィールドが存在しない `items_json`）は ON 扱いで読み込まれます（後方互換）。
 
