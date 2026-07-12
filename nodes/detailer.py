@@ -8,6 +8,7 @@ from comfy_api.latest import io
 from .io_types import PipeLine
 from .noise import SAXNoiseEngine
 from .guidance import apply_guidance_to_model, _ALL_MODES
+from .structure_control import STRUCTURE_CONTROL_KEY, apply_structure_control_cfg
 from .vae_utils import decode_image
 from .latent_utils import broadcast_mask_to_latent
 
@@ -285,6 +286,8 @@ def _run_detail_loop(
     edge_weight: float = 0.0, edge_blur_sigma: float = 1.0,
     # Guidance（共通）
     guidance_mode: str = "off", guidance_strength: float = 0.0, pag_strength: float = 0.0,
+    # ControlNet 構造拘束（pipe["structure_control"] の設定 dict。None=無効）
+    structure_cfg: dict | None = None,
 ) -> torch.Tensor | None:
     """
     Detailer / Enhanced Detailer 共通のディテーリングループ。
@@ -340,6 +343,18 @@ def _run_detail_loop(
         context_blur_sigma, context_blur_radius,
         grain_seed=seed + _GRAIN_SEED_OFFSET,
     )
+
+    # ControlNet 構造拘束は crop 済み領域をヒント元に適用する（フル画像では空間がずれる）。
+    # conditioning は cycle 間不変のため、ループ前に 1 回だけパッチする。
+    # ここでパッチした conditioning は crop ローカルであり、execute が pipe へ書き戻す
+    # positive（prompt 上書きのみ・CN 未パッチ）には伝播しない（下流への二重適用を防ぐ）。
+    # model は standard_cn では素通しだが、将来の lllite（モデルパッチ方式）用の seam を通す。
+    structure_result = apply_structure_control_cfg(
+        structure_cfg, positive, negative, cropped_images[:, :, :, :3], sample_model
+    )
+    positive = structure_result.positive
+    negative = structure_result.negative
+    sample_model = structure_result.model
 
     t = vae.encode(cropped_images[:, :, :, :3])
     # 動画系 VAE は latent が (B, C, T, H, W) になるため空間次元は末尾2軸で取得する
@@ -465,6 +480,7 @@ class SAX_Bridge_Detailer(io.ComfyNode):
             0.0, 48,
             mask=mask,
             guidance_mode=guidance_mode, guidance_strength=guidance_strength, pag_strength=pag_strength,
+            structure_cfg=pipe.get(STRUCTURE_CONTROL_KEY),
         )
 
         if result_images is None:
@@ -552,6 +568,7 @@ class SAX_Bridge_Detailer_Enhanced(io.ComfyNode):
             edge_weight=edge_weight,
             edge_blur_sigma=edge_blur_sigma,
             guidance_mode=guidance_mode, guidance_strength=guidance_strength, pag_strength=pag_strength,
+            structure_cfg=pipe.get(STRUCTURE_CONTROL_KEY),
         )
 
         if result_images is None:

@@ -9,6 +9,7 @@ from nodes.upscaler import (
     _pixel_upscale,
     _esrgan_upscale,
 )
+from nodes.structure_control import STRUCTURE_CONTROL_KEY, StructureApplyResult
 
 
 def _make_images(b: int = 1, h: int = 16, w: int = 16, c: int = 3) -> torch.Tensor:
@@ -249,6 +250,48 @@ class TestUpscalerExecute:
             )
         _, kwargs = mock_ksampler.call_args
         assert kwargs.get("denoise") == 0.35
+
+    def test_structure_cfg_wiring_uses_full_image_and_keeps_pipe_positive_unpatched(self):
+        # Arrange — pipe に structure_control 設定を載せて i2i を実行
+        pipe = self._make_pipe(16, 16)
+        cfg = {
+            "backend": "standard_cn", "mode": "tile", "strength": 0.6,
+            "start_percent": 0.0, "end_percent": 1.0,
+            "controlnet_name": "union_cn.safetensors",
+        }
+        pipe[STRUCTURE_CONTROL_KEY] = cfg
+
+        patched_pos, patched_neg = MagicMock(name="cn_pos"), MagicMock(name="cn_neg")
+        seam_model = MagicMock(name="seam_model")
+        structure_mock = MagicMock(return_value=StructureApplyResult(
+            positive=patched_pos, negative=patched_neg, model=seam_model,
+        ))
+        pipe["vae"].encode.return_value = torch.rand(1, 4, 4, 4)
+        sampler_result = ({"samples": torch.rand(1, 4, 4, 4)},)
+
+        # Act
+        with patch("comfy.utils.common_upscale") as mock_upscale, \
+             patch("nodes.upscaler.apply_structure_control_cfg", structure_mock), \
+             patch("nodes.common_ksampler", return_value=sampler_result) as mock_ksampler, \
+             patch("nodes.upscaler.decode_image", return_value=torch.rand(1, 32, 32, 3)):
+            mock_upscale.return_value = torch.rand(1, 3, 32, 32)
+            result = SAX_Bridge_Upscaler.execute(
+                pipe, upscale_model_name="None", method="lanczos",
+                scale_by=2.0, denoise=0.5,
+            )
+
+        # Assert — pipe の cfg が届き、ヒント元はアップスケール後のフル画像
+        call = structure_mock.call_args
+        assert call.args[0] == cfg
+        assert call.args[3].shape == (1, 32, 32, 3)
+        # ksampler にはパッチ済み conditioning + seam 経由の model が渡る
+        k_args, _ = mock_ksampler.call_args
+        assert k_args[0] is seam_model
+        assert k_args[6] is patched_pos
+        assert k_args[7] is patched_neg
+        # pipe へは CN 未パッチの positive のみ伝播（二重適用防止）
+        assert result[0]["positive"] is pipe["positive"]
+        assert result[0]["positive"] is not patched_pos
 
     def test_preserves_other_pipe_fields(self):
         pipe = self._make_pipe(16, 16)

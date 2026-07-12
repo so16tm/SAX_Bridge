@@ -10,6 +10,7 @@ from .nodes import text_catalog as text_catalog_node
 from .nodes import guidance as guidance_node
 from .nodes import sam3 as sam3_node
 from .nodes import mask_adjust as mask_adjust_node
+from .nodes import structure_lock as structure_lock_node
 from .nodes import debug_log as debug_log_module
 from .nodes.schedulers import register_schedulers
 
@@ -35,6 +36,8 @@ for v3_node in [
     image_collector_node.SAX_Bridge_Image_Collector,
     node_collector_node.SAX_Bridge_Node_Collector,
     pipe_collector_node.SAX_Bridge_Pipe_Collector,
+    # Control
+    structure_lock_node.SAX_Bridge_Structure_Lock,
     # Debug
     debug_node.SAX_Bridge_Assert,
     debug_node.SAX_Bridge_Assert_Pipe,

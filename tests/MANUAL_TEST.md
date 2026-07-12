@@ -83,6 +83,29 @@
 
 ---
 
+## D-4. Structure Lock（構造拘束）
+
+> SAX Structure Lock ノードを Detailer / Upscaler の上流に配置して確認する。
+> A/B 比較は Union ControlNet モデル（xinsir Union ProMax 等）が `ComfyUI/models/controlnet/` に配置済みの場合に実施。
+
+### fail-fast 確認
+
+- [ ] Structure Lock を配置し `controlnet_name=None` のまま実行 → エラーで停止する（黙ってスキップされない）
+- [ ] Structure Lock を配置しない場合 → 従来どおり動作する（構造拘束なし）
+
+### tile での A/B 比較（CN モデル導入時）
+
+- [ ] Structure Lock で `controlnet_name` に CN モデルを選択 → `mode=tile`, `strength=0.6`, `start_percent=0.0`, `end_percent=1.0` に設定
+- [ ] 下流の Detailer を `denoise > 0` で実行 → 警告なく完了する
+- [ ] Structure Lock を外した場合との比較で人体構図の変化が確認できる（崩れが減る）
+- [ ] 下流の Upscaler でも同様に実行 → エラーなく完了する
+
+### mode フォールバック確認
+
+- [ ] controlnet_aux 未導入で `mode=depth` / `openpose` / `lineart` を選択して実行 → `tile` フォールバックの warning が出てエラーにならない
+
+---
+
 ## E. Image Preview
 
 > **Workflow**: `workflows/05_image_preview.json`

@@ -14,6 +14,7 @@ from nodes.detailer import (
     crop_bbox,
     uncrop_and_blend,
 )
+from nodes.structure_control import STRUCTURE_CONTROL_KEY, StructureApplyResult
 
 
 class TestAddLatentNoiseVideo5D:
@@ -195,6 +196,53 @@ class TestDetailerExecute:
         assert result[0] is not pipe
         assert torch.equal(result[0]["images"], fake_images)
         assert torch.equal(result[1], fake_images)
+
+    def test_structure_cfg_wiring_uses_cropped_image_and_keeps_pipe_positive_unpatched(self):
+        # Arrange — pipe に structure_control 設定、マスクは 64x64 中の 16x16 領域
+        pipe = self._make_pipe()
+        cfg = {
+            "backend": "standard_cn", "mode": "tile", "strength": 0.6,
+            "start_percent": 0.0, "end_percent": 1.0,
+            "controlnet_name": "union_cn.safetensors",
+        }
+        pipe[STRUCTURE_CONTROL_KEY] = cfg
+        mask = torch.zeros(1, 64, 64)
+        mask[:, 16:32, 16:32] = 1.0
+
+        patched_pos, patched_neg = MagicMock(name="cn_pos"), MagicMock(name="cn_neg")
+        seam_model = MagicMock(name="seam_model")
+        structure_mock = MagicMock(return_value=StructureApplyResult(
+            positive=patched_pos, negative=patched_neg, model=seam_model,
+        ))
+        pipe["vae"].encode.return_value = torch.rand(1, 4, 2, 2)
+        sampler_result = ({"samples": torch.rand(1, 4, 2, 2)},)
+
+        # Act
+        with patch("nodes.detailer.apply_structure_control_cfg", structure_mock), \
+             patch("nodes.common_ksampler", return_value=sampler_result) as mock_ksampler, \
+             patch("nodes.detailer.decode_image", return_value=torch.rand(1, 16, 16, 3)):
+            result = SAX_Bridge_Detailer.execute(
+                pipe, denoise=0.45, cycle=1, crop_factor=1.0,
+                noise_mask_feather=0, blend_feather=0, mask=mask,
+            )
+
+        # Assert — pipe の cfg が届き、ヒント元は crop 済み領域（フル画像ではない）
+        call = structure_mock.call_args
+        assert call.args[0] == cfg
+        hint_source = call.args[3]
+        assert hint_source.shape[1] < 64 and hint_source.shape[2] < 64
+        # ヒント元は VAE encode される crop 領域と同一テンソル（空間整合の不変条件）
+        encode_arg = pipe["vae"].encode.call_args.args[0]
+        assert hint_source.shape == encode_arg.shape
+        assert torch.equal(hint_source, encode_arg)
+        # ksampler にはパッチ済み conditioning + seam 経由の model が渡る
+        k_args, _ = mock_ksampler.call_args
+        assert k_args[0] is seam_model
+        assert k_args[6] is patched_pos
+        assert k_args[7] is patched_neg
+        # pipe へは CN 未パッチの positive のみ伝播（二重適用防止）
+        assert result[0]["positive"] is pipe["positive"]
+        assert result[0]["positive"] is not patched_pos
 
     @patch("nodes.detailer._run_detail_loop")
     def test_enhanced_success(self, mock_loop):

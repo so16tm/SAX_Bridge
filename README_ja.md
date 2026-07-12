@@ -40,6 +40,8 @@ Differential Diffusion を内蔵しているため、境界の馴染みを別途
 > **SAX Guidance** をスタンドアロンノードとして SAX KSampler や SAX Upscaler の前に配置することもできます。
 > Guidance は CFG スケールに依存しない **PAG（Perturbed Attention Guidance）** にも対応しています。
 
+パイプに **SAX Structure Lock (SDXL)** ノードを挟むと、両 Detailer ノードおよび SAX Upscaler の i2i に ControlNet 構造拘束がかかり、人体広域破綻（臍・胸・四肢・構図崩れ）を防止できます。ノード配置で有効、削除で完全無効です。
+
 ### 最終仕上げを1ノードで — Finisher
 
 **SAX Finisher** は最終画像にポストエフェクトと画質調整を適用する仕上げノードです。Detailer と Output の間に配置します。

@@ -40,6 +40,8 @@ Both Detailer nodes include an optional **CFG Guidance Enhancement** feature —
 > **SAX Guidance** is also available as a standalone node for use before SAX KSampler or SAX Upscaler.
 > Guidance also supports **PAG (Perturbed Attention Guidance)** which works independently of CFG scale.
 
+Insert a **SAX Structure Lock (SDXL)** node into the pipe to apply a ControlNet structure constraint to the i2i passes of both Detailer nodes and SAX Upscaler, preventing wide-area anatomy breakdown (torso, limbs, composition). Placing the node enables it; removing it disables it completely.
+
 ### Finishing touches — Finisher
 
 **SAX Finisher** applies post-processing effects and image quality adjustments to the final image. Place it between the Detailer and Output.

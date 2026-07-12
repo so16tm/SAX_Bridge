@@ -15,6 +15,7 @@
 | [Pipe](#pipe) | Pipe の構築・切替 | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
 | [Enhance](#enhance) | Detailer / Upscaler / Finisher | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
+| [Control](#control) | ControlNet 構造拘束 | [SAX Structure Lock (SDXL)](#sax-structure-lock-sdxl) |
 | [Option](#option) | 独立ユーティリティ（ノイズ注入等） | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | SAM3 によるセグメンテーション | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | [Mask](#mask) | マスクの後処理 | [SAX Mask Adjust](#sax-mask-adjust) |
@@ -282,6 +283,8 @@
 
 > `negative` が Pipe に存在しない場合、CLIP で空文字列をエンコードして自動補完します。
 
+> **構造拘束**: 上流の [SAX Structure Lock (SDXL)](#sax-structure-lock-sdxl) ノードの設定が pipe にあれば透過的に消費します。
+
 [↑ トップへ](#top)
 
 ---
@@ -320,6 +323,8 @@
 
 **出力**: `PIPE`, `IMAGE`
 
+> **構造拘束**: 上流の [SAX Structure Lock (SDXL)](#sax-structure-lock-sdxl) ノードの設定が pipe にあれば透過的に消費します。
+
 **denoise_decay 計算式**:
 
 各サイクル `i`（0 始まり）における実効 denoise と latent noise 強度は次式で算出します。
@@ -351,6 +356,10 @@ effective_noise_intensity(i) = latent_noise_intensity * decay_factor(i)
 | `denoise` | Float (0.0〜1.0) | 0 = アップスケールのみ。0 より大きい値でアップスケール後に軽量 i2i を実行 |
 | `steps_override` | Int (0〜200) | i2i 時の steps（0 = Loader 設定を継承） |
 | `cfg_override` | Float (0.0〜100.0) | i2i 時の CFG（0.0 = Loader 設定を継承） |
+| `guidance_mode` | Combo (optional) | i2i パスの CFG ガイダンス強化（`off` / `agc` / `fdg` / `agc+fdg` / `post_fdg`） |
+| `guidance_strength` | Float (0.0〜1.0) | ガイダンス効果強度 |
+| `pag_strength` | Float (0.0〜1.0) | Perturbed Attention Guidance 強度（任意 CFG で動作。1 ステップ毎に追加 forward pass） |
+| `positive_prompt` | String (optional) | i2i パスの Positive プロンプト上書き（`denoise > 0` 時のみ有効） |
 
 **出力**: `PIPE`, `IMAGE`
 
@@ -360,6 +369,8 @@ effective_noise_intensity(i) = latent_noise_intensity * decay_factor(i)
 - `negative` が Pipe に存在しない場合、CLIP で空文字列をエンコードして自動補完
 
 > ESRGAN 系モデルは実写・圧縮画像の復元に効果的。AI 生成アニメ調画像には `4x-AnimeSharp` 等のアニメ特化モデルを推奨。
+
+> **構造拘束**: 上流の [SAX Structure Lock (SDXL)](#sax-structure-lock-sdxl) ノードの設定が pipe にあれば i2i パスで透過的に消費します。
 
 [↑ トップへ](#top)
 
@@ -395,6 +406,39 @@ color_correction → smooth → sharpen → bloom → vignette → color_temp �
 ```
 
 すべての効果が無効値（0 / False）かつ `reference_image` 未接続なら、入力 pipe をそのまま返してパススルーします。Finisher の出力は `pipe.images` にも反映されるため、後段ノードに加工済み画像が伝播します。
+
+[↑ トップへ](#top)
+
+---
+
+## Control
+
+### SAX Structure Lock (SDXL)
+
+`SAX_Bridge_Structure_Lock` — ControlNet 構造拘束の設定を pipe に載せるノードです。下流の Detailer / Upscaler が処理対象画像（Detailer はクロップ済み領域、Upscaler はアップスケール後のフル画像）から構造ヒントを内部生成して ControlNet を適用し、i2i での人体広域破綻（臍・胸・四肢・構図崩れ）を防止します。
+
+**入力**
+
+| パラメータ | 型 | デフォルト | 説明 |
+|-----------|-----|-----------|------|
+| `pipe` | PIPE_LINE | — | 入力パイプ |
+| `controlnet_name` | Combo | `None` | 構造拘束用 ControlNet モデル。Union ControlNet (SDXL) 推奨（xinsir Union ProMax 等）。`None` のまま実行するとエラー |
+| `mode` | Combo | `tile` | 構造ヒント種別。`tile` = ぼかし構造ロック（追加依存なし）/ `depth` = 深度ロック / `openpose` = 骨格ロック / `lineart` = 線画ロック |
+| `strength` | Float (0.0〜1.5) | 0.6 | 構造拘束強度 |
+| `start_percent` | Float (0.0〜1.0, optional) | 0.0 | ControlNet 適用開始ステップ比率 |
+| `end_percent` | Float (0.0〜1.0, optional) | 1.0 | ControlNet 適用終了ステップ比率 |
+
+**出力**: `PIPE`
+
+**動作**:
+- ノード配置 = 有効、未配置 = 完全無効（`off` オプションは存在しない）
+- fail-fast: `controlnet_name=None`・CN ロード失敗・不正 `mode`・全ヒント生成失敗はエラーで停止（黙ってスキップしない）
+- `depth` / `openpose` / `lineart` は `controlnet_aux` 依存。未導入・検出失敗時はフォールバック連鎖で劣化継続（warning ログ。`openpose` → `depth` → `tile`、`depth` → `tile`、`lineart` → `tile`）
+- ControlNet の適用は各消費ノードのローカル処理で、pipe の `positive` へは書き戻しません（下流への二重適用なし）
+
+> Union ControlNet モデル（xinsir Union ProMax 等）を事前に `ComfyUI/models/controlnet/` へ配置してください。
+
+> **Upscaler の限界**: 全画像一括 i2i + 構造拘束は広域破綻防止用。極端な高倍率では Detailer の併用を推奨。
 
 [↑ トップへ](#top)
 
