@@ -3,7 +3,14 @@
 import pytest
 import torch
 from unittest.mock import MagicMock, patch
-from nodes.loader_diffusion import SAX_Bridge_Loader_Diffusion, _unet_model_options
+import comfy.sd
+import comfy.supported_models
+from nodes.loader_diffusion import (
+    SAX_Bridge_Loader_Diffusion,
+    _CLIP_TYPE_BY_CONFIG,
+    _clip_type_for_model_config,
+    _unet_model_options,
+)
 from nodes.io_types import _APPLIED_LORAS_KEY, _normalize_lora_name
 
 
@@ -253,3 +260,72 @@ class TestLoaderDiffusionLora:
         assert pipe["clip"] is new_clip
         applied = pipe.get(_APPLIED_LORAS_KEY, set())
         assert _normalize_lora_name("my_lora.safetensors") in applied
+
+
+class _DummyKrea2Config:
+    """Krea2 相当の model_config を模したダミー型。"""
+
+
+class TestClipTypeForModelConfig:
+    """_clip_type_for_model_config の型照合ロジック。"""
+
+    def test_registered_type_returns_krea2(self):
+        mapping = {_DummyKrea2Config: comfy.sd.CLIPType.KREA2}
+        clip_type, matched = _clip_type_for_model_config(_DummyKrea2Config(), mapping)
+        assert clip_type is comfy.sd.CLIPType.KREA2
+        assert matched is True
+
+    def test_unregistered_type_falls_back_to_stable_diffusion(self):
+        class _UnknownConfig:
+            pass
+
+        clip_type, matched = _clip_type_for_model_config(_UnknownConfig())
+        assert clip_type is comfy.sd.CLIPType.STABLE_DIFFUSION
+        assert matched is False
+
+    def test_subclass_does_not_match(self):
+        # exact 型照合（isinstance 不使用）— サブクラス誤マッチによる沈黙劣化を防ぐ設計
+        class _DerivedConfig(_DummyKrea2Config):
+            pass
+
+        mapping = {_DummyKrea2Config: comfy.sd.CLIPType.KREA2}
+        clip_type, matched = _clip_type_for_model_config(_DerivedConfig(), mapping)
+        assert clip_type is comfy.sd.CLIPType.STABLE_DIFFUSION
+        assert matched is False
+
+    def test_krea2_registered_in_default_mapping(self):
+        # upstream 改名検知（実体照合の意図）: 実環境では comfy.supported_models.Krea2 が
+        # 改名/削除されると loader_diffusion の import 時に AttributeError で fail-fast する。
+        # conftest のモック環境では supported_models が自動スタブされ属性アクセスが常に
+        # 成功するため、ここでは import 時に参照した同一オブジェクトがデフォルト mapping に
+        # キー登録されていることを確認する。
+        assert comfy.supported_models.Krea2 in _CLIP_TYPE_BY_CONFIG
+
+
+class TestExecuteClipTypeWiring:
+    """execute() が導出した clip_type を load_clip へ渡すことの検証。"""
+
+    @staticmethod
+    def _run_execute(model_config):
+        model = MagicMock(name="model")
+        model.model.model_config = model_config
+        _, clip, vae = _make_mocks()
+        with patch("nodes.loader_diffusion.comfy.sd.load_diffusion_model", return_value=model), \
+             patch("nodes.loader_diffusion.comfy.sd.load_clip", return_value=clip) as mock_load_clip, \
+             patch("nodes.loader_diffusion.comfy.sd.VAE", return_value=vae), \
+             patch("nodes.loader_diffusion.comfy.utils.load_torch_file", return_value={}):
+            SAX_Bridge_Loader_Diffusion.execute(**_default_kwargs())
+        return mock_load_clip
+
+    def test_krea2_config_passes_krea2_clip_type(self):
+        # patch.dict は既存 dict を in-place 変更するため、default 引数に束縛済みの
+        # mapping オブジェクトにも反映される
+        with patch.dict(_CLIP_TYPE_BY_CONFIG, {_DummyKrea2Config: comfy.sd.CLIPType.KREA2}):
+            mock_load_clip = self._run_execute(_DummyKrea2Config())
+        _, kwargs = mock_load_clip.call_args
+        assert kwargs["clip_type"] is comfy.sd.CLIPType.KREA2
+
+    def test_unknown_config_falls_back_to_stable_diffusion(self):
+        mock_load_clip = self._run_execute(MagicMock(name="unknown_config"))
+        _, kwargs = mock_load_clip.call_args
+        assert kwargs["clip_type"] is comfy.sd.CLIPType.STABLE_DIFFUSION

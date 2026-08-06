@@ -69,7 +69,7 @@
 
 ### SAX Diffusion Loader
 
-`SAX_Bridge_Loader_Diffusion` — UNET（diffusion model）単体・CLIP（text encoder）単体・VAE を個別フォルダから読み込み、`PIPE_LINE` コンテキストを初期化します。Checkpoint に model/clip/vae が baked されていない分割配布モデル（Anima など）向けです。出力 pipe は SAX Loader と同一構造のため、下流ノードは無改修で利用できます。
+`SAX_Bridge_Loader_Diffusion` — UNET（diffusion model）単体・CLIP（text encoder）単体・VAE を個別フォルダから読み込み、`PIPE_LINE` コンテキストを初期化します。Checkpoint に model/clip/vae が baked されていない分割配布モデル（Anima・Krea 2 など）向けです。出力 pipe は SAX Loader と同一構造のため、下流ノードは無改修で利用できます。
 
 **入力**
 
@@ -94,11 +94,16 @@
 
 **動作**:
 - `model` は `load_diffusion_model` で `diffusion_models` から、`clip` は `load_clip` で `text_encoders` から、`vae` は `vae` フォルダからそれぞれ個別にロードする
-- CLIP の種別は state_dict から自動判別される（Anima の Qwen3 0.6B 等）
+- `clip_type` は UNET の model_config 型から自動判別される（Krea 2 → `KREA2`。未登録モデルは `STABLE_DIFFUSION` フォールバックで、Anima の Qwen3 0.6B は state_dict 判別により従来どおり動作）
 - 空 latent は 4ch で生成し、KSampler 側の `fix_empty_latent_channels` がモデルの latent_channels / latent_dimensions へ自動適応する（16ch・3次元モデルも追加設定不要）
 - `weight_dtype` の fp8 指定は ComfyUI 本体 UNETLoader と同一の dtype マッピングを適用する
 - `lora_model_strength` は LoRA の model strength と clip strength の両方に同じ値を適用する
 - SAX Loader と異なり `clip_skip` / `v_pred` は持たない（diffusion model の flow 系サンプリング・非 CLIP テキストエンコーダに非該当のため）
+
+**Krea 2 対応**:
+- 必要ファイル: `diffusion_models/krea2_*.safetensors` + `text_encoders/qwen3vl_4b_*.safetensors` + `vae/qwen_image_vae.safetensors`
+- text encoder は **Qwen3VL-4B が必須**（それ以外は本体の KREA2 専用エンコーダ分岐に入らず conditioning が不正になる）
+- 非対応機能: `structure_control`（SDXL 専用）/ `ays_sd1`・`ays_sdxl` スケジューラ（SD1/SDXL 専用）/ SAX_Cache の TGate・DeepCache（UNet 前提のため DiT 非対応）
 
 [↑ トップへ](#top)
 

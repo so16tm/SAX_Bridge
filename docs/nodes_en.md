@@ -69,7 +69,7 @@
 
 ### SAX Diffusion Loader
 
-`SAX_Bridge_Loader_Diffusion` — Loads a UNET (diffusion model), CLIP (text encoder), and VAE from separate folders and initializes the `PIPE_LINE` context. Intended for split-distribution models (such as Anima) where model/clip/vae are not baked into a checkpoint. The output pipe shares the same structure as SAX Loader, so downstream nodes work unchanged.
+`SAX_Bridge_Loader_Diffusion` — Loads a UNET (diffusion model), CLIP (text encoder), and VAE from separate folders and initializes the `PIPE_LINE` context. Intended for split-distribution models (such as Anima and Krea 2) where model/clip/vae are not baked into a checkpoint. The output pipe shares the same structure as SAX Loader, so downstream nodes work unchanged.
 
 **Inputs**
 
@@ -94,11 +94,16 @@
 
 **Behavior**:
 - `model` is loaded from `diffusion_models` via `load_diffusion_model`, `clip` from `text_encoders` via `load_clip`, and `vae` from the `vae` folder, each independently
-- The CLIP type is auto-detected from the state_dict (e.g. Anima's Qwen3 0.6B)
+- `clip_type` is auto-detected from the UNET's model_config type (Krea 2 → `KREA2`; unregistered models fall back to `STABLE_DIFFUSION`, and Anima's Qwen3 0.6B keeps working via state_dict detection)
 - The empty latent is created with 4 channels; KSampler's `fix_empty_latent_channels` adapts it to the model's latent_channels / latent_dimensions automatically (16-channel / 3-dimensional models need no extra setup)
 - The `weight_dtype` fp8 options apply the same dtype mapping as ComfyUI's built-in UNETLoader
 - `lora_model_strength` applies the same value to both the LoRA model strength and clip strength
 - Unlike SAX Loader, it has no `clip_skip` / `v_pred` (not applicable to diffusion models' flow-based sampling and non-CLIP text encoders)
+
+**Krea 2 support**:
+- Required files: `diffusion_models/krea2_*.safetensors` + `text_encoders/qwen3vl_4b_*.safetensors` + `vae/qwen_image_vae.safetensors`
+- The text encoder **must be Qwen3VL-4B** (anything else does not enter ComfyUI's KREA2-specific encoder branch and produces invalid conditioning)
+- Unsupported features: `structure_control` (SDXL only) / `ays_sd1`, `ays_sdxl` schedulers (SD1/SDXL only) / SAX_Cache TGate and DeepCache (UNet-based, not applicable to DiT)
 
 [↑ Back to top](#top)
 

@@ -443,6 +443,7 @@
 - [ ] **generate**: Anima モデルで実行 → 空 latent (4ch) が KSampler 側で 16ch/5D へ自動適応され、エラーなく画像生成される
 - [ ] **fp8**: `weight_dtype` を `fp8_e4m3fn` に設定 → エラーなくロード・生成される
 - [ ] **lora**: `lora_name` を実 LoRA に設定 → model/clip に適用され生成結果に反映される
+- [ ] **krea2**: Krea2 Turbo（`diffusion_models/` に krea2、`text_encoders/` に qwen3vl_4b、`vae/` に qwen_image_vae）を選択し steps=8 / cfg=1.0 目安で実行 → ログに `clip_type auto-detected: CLIPType.KREA2` が出力され、空 latent (4ch) が 16ch へ自動適応されてエラーなく画像生成される
 
 ## M. UI Phase 1.2.A 検証 (TextCatalog Coordinator 移行)
 

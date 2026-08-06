@@ -1,12 +1,58 @@
+import logging
+from collections.abc import Mapping
+
 import torch
 
 import folder_paths
 import comfy.sd
 import comfy.samplers
+import comfy.supported_models
 import comfy.utils
 from comfy_api.latest import io
 
 from .io_types import PipeLine, record_applied_loras
+
+logger = logging.getLogger("SAX_Bridge")
+
+# INTERNAL API: comfy.supported_models.Krea2 / ModelPatcher.model.model_config は
+# ComfyUI 内部 API。バージョン更新時に要確認。クラス identity キーのため
+# 本体で改名/削除されると import 時に AttributeError で fail-fast する (意図的設計)。
+_CLIP_TYPE_BY_CONFIG: dict[type, comfy.sd.CLIPType] = {
+    comfy.supported_models.Krea2: comfy.sd.CLIPType.KREA2,
+}
+
+
+def _clip_type_for_model_config(
+    model_config: object,
+    mapping: Mapping[type, comfy.sd.CLIPType] = _CLIP_TYPE_BY_CONFIG,
+) -> tuple[comfy.sd.CLIPType, bool]:
+    """model_config の exact 型で CLIPType を引く純粋関数。未登録は STABLE_DIFFUSION。
+
+    戻り値は (clip_type, matched)。matched=False はフォールバック適用を意味する。
+    mapping はテスト注入用の read-only シーム。破壊的変更は禁止
+    (デフォルトはモジュール共有の _CLIP_TYPE_BY_CONFIG 実体)。
+    """
+    clip_type = mapping.get(type(model_config))
+    if clip_type is None:
+        return comfy.sd.CLIPType.STABLE_DIFFUSION, False
+    return clip_type, True
+
+
+def _log_clip_type_detection(
+    model_config: object, clip_type: comfy.sd.CLIPType, matched: bool
+) -> None:
+    if matched:
+        logger.info(
+            "[SAX_Bridge] Diffusion Loader: clip_type auto-detected: %s for %s",
+            clip_type,
+            type(model_config).__name__,
+        )
+    else:
+        logger.debug(
+            "[SAX_Bridge] Diffusion Loader: clip_type fallback: %s for %s",
+            clip_type,
+            type(model_config).__name__,
+        )
 
 
 def _unet_model_options(weight_dtype: str) -> dict:
@@ -36,6 +82,11 @@ class SAX_Bridge_Loader_Diffusion(io.ComfyNode):
     出力 pipe は SAX_Bridge_Loader と同一構造のため下流ノードは無改修で動作する。
     空 latent は 4ch 全ゼロで生成し、KSampler 側の fix_empty_latent_channels が
     モデルの latent_channels / latent_dimensions へ自動適応する。
+
+    clip_type は UNET の model_config 型から自動判別する（Krea2 → KREA2、
+    未登録は STABLE_DIFFUSION フォールバック）。checkpoint 版 SAX_Bridge_Loader は
+    本体 clip_target() 経由のため本判別と無関係。separate-load はこのノードのみ
+    のためローカル実装とする。
     """
 
     @classmethod
@@ -92,13 +143,17 @@ class SAX_Bridge_Loader_Diffusion(io.ComfyNode):
             raise ValueError("[SAX_Bridge] Diffusion Loader: diffusion model not found: %s" % unet_name)
         model = comfy.sd.load_diffusion_model(unet_path, model_options=_unet_model_options(weight_dtype))
 
+        model_config = model.model.model_config
+        clip_type, matched = _clip_type_for_model_config(model_config)
+        _log_clip_type_detection(model_config, clip_type, matched)
+
         clip_path = folder_paths.get_full_path("text_encoders", clip_name)
         if clip_path is None:
             raise ValueError("[SAX_Bridge] Diffusion Loader: text encoder not found: %s" % clip_name)
         clip = comfy.sd.load_clip(
             ckpt_paths=[clip_path],
             embedding_directory=folder_paths.get_folder_paths("embeddings"),
-            clip_type=comfy.sd.CLIPType.STABLE_DIFFUSION,
+            clip_type=clip_type,
         )
 
         vae_path = folder_paths.get_full_path("vae", vae_name)
