@@ -1,7 +1,11 @@
 name: CI
 
 on:
+  # ブランチへの push と、その PR の両方で発火すると同じコミットを 2 回検証してしまう。
+  # push は main だけに絞り、作業ブランチは PR 側で検証する
+  # (PR を出す前に回したいときは workflow_dispatch で手動実行できる)。
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
