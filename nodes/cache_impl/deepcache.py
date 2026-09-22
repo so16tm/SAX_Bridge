@@ -41,6 +41,14 @@ def is_unet_like(diffusion_model):
     return not missing_unet_attrs(diffusion_model)
 
 
+def _format_missing(missing, limit=3):
+    """ログ用に欠損属性名を先頭 limit 件までに短くまとめる。"""
+    head = ", ".join(missing[:limit])
+    if len(missing) > limit:
+        return f"{head} (+{len(missing) - limit} more)"
+    return head
+
+
 def _get_diffusion_model(model):
     """ModelPatcher から実体の diffusion model を取り出す。辿れない場合は None。"""
     inner = getattr(model, "model", None)
@@ -172,7 +180,7 @@ def deepcache_diffusion_model_wrapper(executor, x, timesteps, context, y=None, c
             state.structure_warned = True
             logger.warning(
                 "[SAX_Bridge] Cache: the diffusion model at sampling time is not a UNet "
-                f"(missing {', '.join(missing)}); running without DeepCache."
+                f"(missing {_format_missing(missing)}); running without DeepCache."
             )
         return executor(x, timesteps, context, y, control, transformer_options, **kwargs)
 
@@ -410,7 +418,7 @@ def apply_deepcache(
         logger.warning(
             "[SAX_Bridge] Cache: DeepCache supports UNet models only "
             "(SD1.5 / SDXL / Illustrious / Pony). "
-            f"The diffusion model '{model_name}' lacks {', '.join(missing)}, "
+            f"The diffusion model '{model_name}' lacks {_format_missing(missing)}, "
             "so DeepCache was skipped and the model is returned unchanged. "
             "DiT models such as FLUX, SD3.5, Qwen-Image, Chroma and Wan are not supported."
         )
