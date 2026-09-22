@@ -910,8 +910,9 @@ applied_loras: {'lora_a'} (1 entries)
 | `items_json` | String (hidden) | JSON of the Catalog and its Relations, managed automatically by the Manager Dialog and node UI |
 | `select_to_add_lora` | Combo (hidden) | Option source for the Manager Editor's LoRA picker. Unused at execution |
 | `select_to_add_wildcard` | Combo (hidden) | Option source for the Manager Editor's Wildcard picker. Unused at execution |
+| `merge_outputs` | Boolean | `individual`: one output per Relation / `merged`: newline-join enabled Relation texts into one output |
 
-**Outputs**: STRING outputs dynamically generated per Relation
+**Outputs**: per-Relation STRING outputs in `individual` mode; one `merged` STRING output in `merged` mode
 
 #### Four-Element Model
 
@@ -927,6 +928,7 @@ applied_loras: {'lora_a'} (1 entries)
 **Node Body Widget**
 - `📖 Manage Texts...` button / right-click menu opens the Manager Dialog
 - `[+ Add Relation]` adds a Relation and a corresponding output Slot
+- Setting `merge_outputs` to `merged` strips enabled Relation texts, skips empty strings, newline-joins the rest, and exposes one `merged` output
 - Adding, removing, or reordering Relations preserves connections to downstream nodes (including dynamic-input nodes such as `SAX Prompt Concat`)
 - Each Relation row has a leading toggle (pill) / `[✎]` (item picker) / `[↑↓]` (reorder) / `[×]` (delete)
 - Toggling OFF keeps the Item assignment but emits `""` from the Slot (use to silence outputs temporarily)
@@ -990,6 +992,8 @@ applied_loras: {'lora_a'} (1 entries)
 | Relation references a deleted Item | `""` |
 
 This aligns with the empty-string skip behavior of downstream nodes such as `SAX Prompt Concat`.
+
+With `merge_outputs=merged`, the surviving strings are stripped, empty strings are dropped, and the remainder is joined with newlines. The backend returns the merged text in `out_0` and empty strings in `out_1..31`; the frontend exposes only a single `merged` pin.
 
 > **Compatibility**: Older workflows whose `items_json` lacks the `on` field are loaded as ON (backward compatible).
 
