@@ -332,30 +332,82 @@ function parseState(raw) {
     }
 }
 
-/** state → items_json (string)。内部プロパティ（_links 等）は明示的に除外する */
-function serializeState(state) {
-    const payload = {
-        version: SCHEMA_VERSION,
-        catalog: {
-            items: state.catalog.items.map(({ id, name, text, tags }) => ({
-                id, name, text, tags: [...(tags ?? [])],
-            })),
-            tag_definitions: [...state.catalog.tag_definitions],
-            favorite_tags: [...(state.catalog.favorite_tags ?? [])],
-        },
-        // `on` の正規化は parseState と対称に書く（欠損 → true、それ以外は Boolean()）
-        relations: state.relations.map(({ item_id, on }) => ({
-            item_id,
-            on: on !== undefined ? Boolean(on) : true,
+/**
+ * catalog オブジェクト → その JSON 断片のキャッシュ。
+ *
+ * items 索引 (`_itemIndexCache`) と同じ不変条件に乗る: catalog は内容が変わるとき必ず
+ * 新しいオブジェクトに差し替わる (parseState / Manager Save の snapshot) ため、
+ * オブジェクト identity をキーにすれば stale なキャッシュは発生しない。
+ */
+const _catalogJsonCache = new WeakMap();
+
+/** catalog 部分の JSON 断片を返す（catalog オブジェクトごとに初回のみ生成）。 */
+function serializeCatalog(catalog) {
+    const cached = _catalogJsonCache.get(catalog);
+    if (cached !== undefined) return cached;
+    const json = JSON.stringify({
+        items: catalog.items.map(({ id, name, text, tags }) => ({
+            id, name, text, tags: [...(tags ?? [])],
         })),
-    };
-    return JSON.stringify(payload);
+        tag_definitions: [...catalog.tag_definitions],
+        favorite_tags: [...(catalog.favorite_tags ?? [])],
+    });
+    _catalogJsonCache.set(catalog, json);
+    return json;
 }
 
-/** Catalog 内で id から Item を引く（O(n) 線形検索でも n<=32 なので問題なし） */
+/**
+ * state → items_json (string)。内部プロパティ（_links 等）は明示的に除外する。
+ *
+ * relation の追加・削除・並べ替え・トグルは `syncOutputSlots` 経由で毎回ここを通るが、
+ * catalog (最大 MAX_ITEMS=256 件) は relation 操作では変化しない。catalog 断片を
+ * キャッシュし、毎回作り直すのは relations 部分だけにする。
+ * 出力は従来実装とバイト単位で同一 (キー順・正規化規則とも不変)。
+ */
+function serializeState(state) {
+    // `on` の正規化は parseState と対称に書く（欠損 → true、それ以外は Boolean()）
+    const relationsJson = JSON.stringify(state.relations.map(({ item_id, on }) => ({
+        item_id,
+        on: on !== undefined ? Boolean(on) : true,
+    })));
+    return `{"version":${JSON.stringify(SCHEMA_VERSION)}`
+        + `,"catalog":${serializeCatalog(state.catalog)}`
+        + `,"relations":${relationsJson}}`;
+}
+
+/**
+ * `catalog.items` 配列 → `id → item` の索引キャッシュ。
+ *
+ * 配列そのものを WeakMap のキーにする。items 配列は内容が変わるとき必ず
+ * 新しい配列に差し替わる (parseState / Manager Save の deep copy) ため、
+ * 「同じ配列 identity なら中身も同じ」が成立し stale 索引は発生しない。
+ * 配列が GC されれば索引も一緒に消える。
+ */
+const _itemIndexCache = new WeakMap();
+
+/** `catalog.items` の id 索引を取得する（配列ごとに初回のみ構築）。 */
+function itemIndexOf(items) {
+    if (!Array.isArray(items)) return null;
+    let index = _itemIndexCache.get(items);
+    if (index) return index;
+    index = new Map();
+    for (const it of items) {
+        if (it?.id != null) index.set(it.id, it);
+    }
+    _itemIndexCache.set(items, index);
+    return index;
+}
+
+/**
+ * Catalog 内で id から Item を引く。
+ *
+ * MAX_ITEMS を 32 → 256 に引き上げたことで、線形検索のままでは
+ * relation ごとに呼ぶ `syncOutputSlots` と毎フレーム走る `drawRelationContent` が
+ * O(relations × items) になる。id 索引で O(1) にする。
+ */
 function findItemById(state, itemId) {
     if (!itemId) return null;
-    return state.catalog.items.find(it => it.id === itemId) ?? null;
+    return itemIndexOf(state.catalog?.items)?.get(itemId) ?? null;
 }
 
 /** Relation の表示名を解決 */
@@ -441,17 +493,33 @@ function sortTagsByContext(filteredItems, activeTags, favoriteTags = []) {
 }
 
 /**
+ * タグ順序配列を `tag → index` の Map に変換する。
+ * items ループの外で 1 回だけ作り、`sortItemTagsByContext` に使い回す。
+ *
+ * @param {string[]} sortedTags
+ * @returns {Map<string, number>}
+ */
+function tagOrderMap(sortedTags) {
+    return new Map((sortedTags ?? []).map((t, i) => [t, i]));
+}
+
+/**
  * Item のタグ配列を sortedTags の順序に並び替える。
  * sortedTags に含まれないタグ（コンテキスト外タグ）は末尾にアルファベット順で付加する。
  * Editor / リスト内のタグ表示でタグトグルと並びを揃えるために使う。
  *
+ * items を列挙するループから呼ぶ場合は `tagOrderMap(sortedTags)` で作った Map を渡すこと。
+ * 配列を渡すと呼び出しごとに Map を組み直すため、items 件数 × タグ語彙数のコストになる
+ * (MAX_ITEMS=256 では無視できない)。
+ *
  * @param {string[]} itemTags    - Item の tags 配列
- * @param {string[]} sortedTags  - sortTagsByContext で得たタグ全体順序
+ * @param {string[] | Map<string, number>} sortedTags
+ *        sortTagsByContext で得たタグ全体順序、または `tagOrderMap` で Map 化したもの
  * @returns {string[]} 並び替え後の新配列（元配列は変更しない）
  */
 function sortItemTagsByContext(itemTags, sortedTags) {
     if (!Array.isArray(itemTags) || itemTags.length === 0) return [];
-    const order = new Map(sortedTags.map((t, i) => [t, i]));
+    const order = sortedTags instanceof Map ? sortedTags : tagOrderMap(sortedTags);
     const inOrder = [];
     const outOfContext = [];
     for (const tag of itemTags) {
@@ -504,9 +572,29 @@ function sortItemsByTagOrder(items, sortedTags) {
     return keyed.map(k => k.item);
 }
 
-/** Item を参照している Relation 数を返す */
+/** Item を参照している Relation 数を返す（単発呼び出し用） */
 function countRelationsReferencing(state, itemId) {
     return state.relations.filter(r => r.item_id === itemId).length;
+}
+
+/**
+ * 全 Item の被参照数を 1 パスで集計する。
+ *
+ * items を列挙しながら `countRelationsReferencing` を呼ぶと O(items × relations) に
+ * なるうえ、呼び出しごとの state スプレッドで毎回オブジェクトを作ってしまう。
+ * リスト描画ではこちらを 1 回だけ呼ぶ。
+ *
+ * @param {object[]} relations
+ * @returns {Map<string, number>} item_id → 参照している relation 数
+ */
+function countRelationsByItem(relations) {
+    const counts = new Map();
+    for (const rel of relations ?? []) {
+        const id = rel?.item_id;
+        if (!id) continue;
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return counts;
 }
 
 // ---------------------------------------------------------------------------
@@ -616,8 +704,16 @@ function showManagerDialog(node, getState, applyDraft) {
     let searchQuery = "";
     let dirty = false;  // Save 後の追加変更を検知
 
+    /** 選択中のアイテム行の背景色。初回描画と選択変更 fast path で共有する。 */
+    const ROW_SELECTED_BG = "var(--comfy-menu-secondary-bg,#303030)";
+
     // -- レンダリング再構築用ハンドル --
     let leftListEl = null;
+    /**
+     * item_id → リスト行 DOM。選択が変わっただけのときに、リスト全体を作り直さず
+     * 旧行／新行のハイライトだけ差し替えるために保持する (renderItemList が毎回張り替える)。
+     */
+    let rowElsById = new Map();
     let editorEl   = null;
     let tagFilterRowEl = null;
     let leftTitleEl = null;
@@ -662,6 +758,7 @@ function showManagerDialog(node, getState, applyDraft) {
     function renderItemList() {
         if (!leftListEl) return;
         leftListEl.innerHTML = "";
+        rowElsById = new Map();
         if (leftTitleEl) {
             leftTitleEl.textContent = `Items (${draft.items.length}/${MAX_ITEMS})`;
         }
@@ -673,15 +770,25 @@ function showManagerDialog(node, getState, applyDraft) {
             return;
         }
         const sorted = sortItemsByTagOrder(filtered, sortedTags);
+        // items ループの外で 1 回だけ作る (items 件数に比例した再構築を避ける)。
+        const refCounts = countRelationsByItem(original.relations);
+        const tagOrder  = tagOrderMap(sortedTags);
 
         for (const it of sorted) {
             const row = h("div", "padding:5px 6px;border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:6px;");
             if (it.id === selectedId) {
-                row.style.background = "var(--comfy-menu-secondary-bg,#303030)";
+                row.style.background = ROW_SELECTED_BG;
             }
             row.addEventListener("click", () => {
+                // 選択が変わるだけならリストの中身 (並び順・参照数・タグ) は不変。
+                // MAX_ITEMS=256 では行を全再生成すると 1 クリックが数 ms かかるため、
+                // ハイライトの付け替えと Editor 再描画だけで済ませる。
+                if (it.id === selectedId) return;
+                const prevRow = rowElsById.get(selectedId);
+                if (prevRow) prevRow.style.background = "";
                 selectedId = it.id;
-                renderAll();
+                row.style.background = ROW_SELECTED_BG;
+                renderEditor();
             });
             row.addEventListener("mouseenter", () => {
                 if (it.id !== selectedId) row.style.background = "var(--comfy-menu-secondary-bg,#2a2a2a)";
@@ -693,14 +800,15 @@ function showManagerDialog(node, getState, applyDraft) {
             const nameEl = h("div", "flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", it.name || "(unnamed)");
             row.appendChild(nameEl);
 
-            const refs = countRelationsReferencing({ ...original, catalog: draft }, it.id);
+            const refs = refCounts.get(it.id) ?? 0;
             if (refs > 0) {
                 row.appendChild(h("span", "font-size:9px;color:#7a9;background:#234;padding:1px 5px;border-radius:8px;flex-shrink:0;", `×${refs}`));
             }
-            const tagsForDisplay = sortItemTagsByContext(it.tags, sortedTags).slice(0, 3);
+            const tagsForDisplay = sortItemTagsByContext(it.tags, tagOrder).slice(0, 3);
             for (const tag of tagsForDisplay) {
                 row.appendChild(h("span", "font-size:9px;color:#aab;background:#334;padding:1px 4px;border-radius:6px;flex-shrink:0;", tag));
             }
+            rowElsById.set(it.id, row);
             leftListEl.appendChild(row);
         }
     }
@@ -1176,6 +1284,8 @@ function pickItemForRelation(state, currentItemId, onSelect) {
                 return row;
             };
 
+            // `sortedTags` は配列でも Map でも受け付ける。items ループから呼ぶ側は
+            // tagOrderMap で Map 化したものを渡し、行ごとの Map 再構築を避ける。
             const makeItemRow = (item, isCurrent, sortedTags) => {
                 const row = h("div", "padding:5px 6px;border-radius:3px;display:flex;align-items:center;gap:6px;" +
                     (isCurrent ? "background:var(--comfy-menu-secondary-bg,#303030);" : ""));
@@ -1205,8 +1315,9 @@ function pickItemForRelation(state, currentItemId, onSelect) {
                     return;
                 }
                 const sorted = sortItemsByTagOrder(filtered, sortedTags);
+                const tagOrder = tagOrderMap(sortedTags);
                 for (const it of sorted) {
-                    listEl.appendChild(makeItemRow(it, it.id === currentItemId, sortedTags));
+                    listEl.appendChild(makeItemRow(it, it.id === currentItemId, tagOrder));
                 }
             };
 
