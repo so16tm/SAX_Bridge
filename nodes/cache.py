@@ -15,7 +15,11 @@ class SAX_Bridge_Cache(io.ComfyNode):
             node_id="SAX_Bridge_Cache",
             display_name="SAX Cache",
             category="SAX/Bridge/Utility",
-            description="Applies DeepCache to the model in the pipe, accelerating all downstream processing (KSampler, Detailer).",
+            description=(
+                "Applies DeepCache to the model in the pipe, accelerating all downstream processing "
+                "(KSampler, Detailer). UNet models only (SD1.5 / SDXL / Illustrious / Pony); "
+                "for DiT models such as FLUX, SD3.5 or Qwen-Image the pipe passes through unchanged."
+            ),
             inputs=[
                 PipeLine.Input("pipe"),
                 io.Boolean.Input("enabled", default=True,
@@ -46,17 +50,23 @@ class SAX_Bridge_Cache(io.ComfyNode):
             raise ValueError("[SAX_Bridge] Pipe does not contain a model.")
 
         if deepcache_interval > 1:
-            model = apply_deepcache(
+            patched = apply_deepcache(
                 model=model,
                 deepcache_interval=deepcache_interval,
                 deepcache_start_ratio=deepcache_start_percent,
                 cfg_skip_start_ratio=0.4,
                 cfg_skip_multiplier=1,
             )
-            logger.info(
-                f"[SAX_Bridge] Cache: DeepCache applied (interval={deepcache_interval}, "
-                f"start={deepcache_start_percent:.0%})"
-            )
+            # apply_deepcache は適用できない場合に同じ model をそのまま返す。
+            # 適用できたかどうかで INFO ログを出し分ける (理由は apply_deepcache 側が WARNING で出す)。
+            if patched is model:
+                logger.info("[SAX_Bridge] Cache: DeepCache was not applied; the pipe passes through unchanged.")
+            else:
+                logger.info(
+                    f"[SAX_Bridge] Cache: DeepCache applied (interval={deepcache_interval}, "
+                    f"start={deepcache_start_percent:.0%})"
+                )
+            model = patched
 
         new_pipe = pipe.copy()
         new_pipe["model"] = model
