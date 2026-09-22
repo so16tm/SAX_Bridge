@@ -9,6 +9,7 @@ import {
     clearAllSlots,
     loadWildcardList,
     showConfirmDialog,
+    autoResize,
 } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
 
@@ -38,6 +39,14 @@ const ITEM_LIST_FALLBACK_VIEWPORT = 440;
 
 const UNSET_LABEL  = "(unset)";
 const ORPHAN_LABEL = "<orphan>";
+
+/** 個別出力 / マージ出力を切り替える Boolean widget 名 (Python schema と一致) */
+const MERGE_WIDGET_NAME = "merge_outputs";
+
+/** マージ出力モードか判定する。 */
+function isMerged(node) {
+    return Boolean(node.widgets?.find(w => w.name === MERGE_WIDGET_NAME)?.value);
+}
 
 /** タグフィルタ 1 行に並べる最大件数。残りは [Show all] で展開する */
 const TAG_FILTER_INLINE_LIMIT = 12;
@@ -1571,20 +1580,34 @@ function pickItemForRelation(state, currentItemId, onSelect) {
 // ---------------------------------------------------------------------------
 
 function syncOutputSlots(node, state) {
-    const relations = state.relations;
-    while ((node.outputs?.length ?? 0) > relations.length) {
-        node.removeOutput(node.outputs.length - 1);
-    }
-    while ((node.outputs?.length ?? 0) < relations.length) {
-        node.addOutput("", "STRING");
-    }
+    if (isMerged(node)) {
+        // merged は常に単一 STRING ピン。1 本状態での再同期では add/remove しないため、
+        // relation の値変更だけでは下流リンクを切断しない。
+        while ((node.outputs?.length ?? 0) > 1) {
+            node.removeOutput(node.outputs.length - 1);
+        }
+        if ((node.outputs?.length ?? 0) === 0) {
+            node.addOutput("merged", "STRING");
+        }
+        node.outputs[0].name = "merged";
+        node.outputs[0].type = "STRING";
+        delete node.outputs[0]._textCatalogStatus;
+    } else {
+        const relations = state.relations;
+        while ((node.outputs?.length ?? 0) > relations.length) {
+            node.removeOutput(node.outputs.length - 1);
+        }
+        while ((node.outputs?.length ?? 0) < relations.length) {
+            node.addOutput("", "STRING");
+        }
 
-    for (let i = 0; i < relations.length; i++) {
-        const status = relationStatus(state, relations[i]);
-        const label  = resolveRelationLabel(state, relations[i]);
-        node.outputs[i].name = label;
-        node.outputs[i].type = "STRING";
-        node.outputs[i]._textCatalogStatus = status;
+        for (let i = 0; i < relations.length; i++) {
+            const status = relationStatus(state, relations[i]);
+            const label  = resolveRelationLabel(state, relations[i]);
+            node.outputs[i].name = label;
+            node.outputs[i].type = "STRING";
+            node.outputs[i]._textCatalogStatus = status;
+        }
     }
 
     const w = node.widgets?.find(w => w.name === "items_json");
@@ -1594,6 +1617,66 @@ function syncOutputSlots(node, state) {
 
     node.size[1] = node.computeSize()[1];
     app.canvas?.setDirty(true, true);
+}
+
+/**
+ * merge_outputs 切替時は出力の意味自体が変わるため、既存リンクを明示切断して
+ * individual / merged のスロット構造を作り直す。
+ *
+ * @param {object} node
+ * @param {boolean} previousMerged callback 発火前に記録していた状態
+ */
+function onMergeToggle(node, previousMerged) {
+    const mergeWidget = node.widgets?.find(w => w.name === MERGE_WIDGET_NAME);
+    const nextMerged = Boolean(mergeWidget?.value);
+    if (nextMerged === Boolean(previousMerged)) return;
+
+    const state = node._textCatalogState ?? emptyState();
+    try {
+        clearAllSlots(node, { inputs: false });
+        syncOutputSlots(node, state);
+        if (!nextMerged) {
+            const coordinator = ensureCoordinator(node, buildTextCatalogSpec);
+            setTimeout(() => coordinator.captureFromExisting(), 0);
+        }
+        autoResize(node);
+    } catch (e) {
+        // widget とスロット構造を切替前へ戻す。リンクはモード切替時に意図的に切断済み。
+        if (mergeWidget) mergeWidget.value = Boolean(previousMerged);
+        try {
+            clearAllSlots(node, { inputs: false });
+            syncOutputSlots(node, state);
+            autoResize(node);
+        } catch (rollbackError) {
+            console.error("[TextCatalog] merge_outputs rollback failed:", rollbackError);
+        }
+        throw e;
+    }
+}
+
+/** merge_outputs widget の callback に切替処理を一度だけチェーンする。 */
+function chainMergeToggle(node) {
+    const w = node.widgets?.find(w => w.name === MERGE_WIDGET_NAME);
+    if (!w) return;
+
+    // onConfigure が同じ instance に再度走った場合は、復元された現在値を基準値へ同期する。
+    if (w._saxMergeChained) {
+        w._saxMergeLastValue = Boolean(w.value);
+        return;
+    }
+
+    const orig = w.callback;
+    w._saxMergeLastValue = Boolean(w.value);
+    w.callback = function () {
+        const previousMerged = Boolean(w._saxMergeLastValue);
+        try {
+            orig?.apply(this, arguments);
+            onMergeToggle(node, previousMerged);
+        } finally {
+            w._saxMergeLastValue = Boolean(w.value);
+        }
+    };
+    w._saxMergeChained = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1717,11 +1800,14 @@ function makeCatalogWidget(node) {
         // フォールバックとして呼ぶ可能性があるため残す。TextCatalog 自身の mutation 経路は
         // beforeModify / saveItemsCapturing / saveItemsValueOnly のみ使用するため通常呼ばれない。
         saveItems: (newRelations) => coordinator.applySaveOnly(newRelations),
-        // beforeModify 経由 (add/del/move): capture 済みスナップショットを使って restore まで行う。
-        saveItemsCapturing: (newRelations) => coordinator.applyAfterCapture(newRelations),
+        // individual はリンク保持 restore、merged は単一ピンを維持するため値/構造同期のみ。
+        saveItemsCapturing: (newRelations) =>
+            isMerged(node)
+                ? coordinator.applySaveOnly(newRelations)
+                : coordinator.applyAfterCapture(newRelations),
         // beforeModify 非経由 (toggle/onPopup 内など): slot 構造不変、値のみ保存。
         saveItemsValueOnly: (newRelations) => coordinator.applySaveOnly(newRelations),
-        beforeModify: () => coordinator.captureFromExisting(),
+        beforeModify: () => { if (!isMerged(node)) coordinator.captureFromExisting(); },
 
         // `hasToggle: true` により行頭 pill が描画され、クリックで `relation.on` がトグルされる。
         // pill toggle 経路 (sax_ui_base.js:1089) は saveItemsValueOnly 経由 (slot 構造不変)。
@@ -1816,6 +1902,8 @@ app.registerExtension({
 
             addManagerButton(this);
             this.addCustomWidget(makeCatalogWidget(this));
+            // merge_outputs は表示したまま、出力構造切替 callback のみ追加する。
+            chainMergeToggle(this);
             this.size[0] = Math.max(this.size[0] ?? 0, 280);
             this.size[1] = 1;
         };
@@ -1842,6 +1930,8 @@ app.registerExtension({
             }
             addManagerButton(this);
             this.addCustomWidget(makeCatalogWidget(this));
+            // merge_outputs は表示したまま、出力構造切替 callback のみ追加する。
+            chainMergeToggle(this);
             this.size[0] = Math.max(this.size[0] ?? 0, 280);
 
             // 削除済 Item を参照する relation の自動修復 (commitState 例外時 / 外部編集時の
@@ -1865,9 +1955,13 @@ app.registerExtension({
             // LiteGraph のリンク復元完了後に Coordinator が現状接続を snapshot に取り込む。
             // setTimeout(0) は LiteGraph link 復元完了待ち (PrimitiveStore L497-499 と同パターン)。
             const coordinator = ensureCoordinator(this, buildTextCatalogSpec);
-            setTimeout(() => {
-                coordinator.captureFromExisting();
-            }, 0);
+            // merged は relation N件 → 出力1本で Coordinator の 1:1 前提と一致しないため、
+            // individual のときだけリンク snapshot を取り込む。
+            if (!isMerged(this)) {
+                setTimeout(() => {
+                    coordinator.captureFromExisting();
+                }, 0);
+            }
         };
 
         const origGetExtraMenuOptions = nodeType.prototype.getExtraMenuOptions;
