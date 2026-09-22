@@ -7,6 +7,22 @@ from nodes.loader import SAX_Bridge_Loader
 from nodes.io_types import _APPLIED_LORAS_KEY, _normalize_lora_name
 
 
+def _get_full_path(folder, name):
+    """folder 別に区別可能なパスを返す side_effect。
+
+    None ガード（ファイル未配置時の ValueError）を通過させつつ、
+    どのフォルダから取得したかをテストで検証可能にする。
+    """
+    return "/models/%s/%s" % (folder, name)
+
+
+@pytest.fixture(autouse=True)
+def _stub_get_full_path():
+    """全テストで folder_paths.get_full_path を folder 別 side_effect に固定する。"""
+    with patch("nodes.loader.folder_paths.get_full_path", side_effect=_get_full_path):
+        yield
+
+
 def _default_kwargs(**overrides):
     """execute 用のデフォルト引数セット。"""
     kwargs = {
@@ -215,3 +231,38 @@ class TestLoaderVPred:
         args, _ = cloned_model.add_object_patch.call_args
         assert args[0] == "model_sampling"
         assert result.args[0]["model"] is cloned_model
+
+
+class TestLoaderMissingFiles:
+    """ファイル未配置時の明示的エラー（get_full_path が None を返すケース）。
+
+    ワークフロー保存後にモデルをリネーム・移動すると起きる。comfy 内部で
+    None を読み込もうとする不明瞭なエラーではなく、どのファイルが無いのかを示す。
+    """
+
+    def test_missing_checkpoint_raises(self):
+        with patch("nodes.loader.folder_paths.get_full_path", return_value=None):
+            with pytest.raises(ValueError, match="checkpoint not found"):
+                SAX_Bridge_Loader.execute(**_default_kwargs())
+
+    def test_missing_external_vae_raises(self):
+        def _side_effect(folder, name):
+            return None if folder == "vae" else "/models/%s/%s" % (folder, name)
+
+        model, clip, vae = _make_checkpoint_mocks()
+        with patch("nodes.loader.folder_paths.get_full_path", side_effect=_side_effect), \
+             patch("nodes.loader.comfy.sd.load_checkpoint_guess_config",
+                   return_value=(model, clip, vae, None)):
+            with pytest.raises(ValueError, match="VAE not found"):
+                SAX_Bridge_Loader.execute(**_default_kwargs(vae_name="custom.safetensors"))
+
+    def test_missing_lora_raises(self):
+        def _side_effect(folder, name):
+            return None if folder == "loras" else "/models/%s/%s" % (folder, name)
+
+        model, clip, vae = _make_checkpoint_mocks()
+        with patch("nodes.loader.folder_paths.get_full_path", side_effect=_side_effect), \
+             patch("nodes.loader.comfy.sd.load_checkpoint_guess_config",
+                   return_value=(model, clip, vae, None)):
+            with pytest.raises(ValueError, match="LoRA not found"):
+                SAX_Bridge_Loader.execute(**_default_kwargs(lora_name="missing.safetensors"))

@@ -13,7 +13,7 @@ import folder_paths
 from comfy_api.latest import io
 
 from .detailer import _extract_pipe
-from .io_types import PipeLine
+from .io_types import PipeLine, basename_no_ext
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -35,7 +35,8 @@ def _expand_template(
     """
     ckpt = p.get("ckpt_name", "")
     if ckpt:
-        ckpt = os.path.splitext(os.path.basename(ckpt))[0]
+        # Windows 保存のワークフローは `\` 区切りなので os.path.basename では落とせない
+        ckpt = basename_no_ext(ckpt)
 
     def replace(m: re.Match) -> str:
         var, _, fmt = m.group(1).partition(":")
@@ -60,10 +61,14 @@ def _expand_template(
     return re.sub(r"\{([^}]+)\}", replace, template)
 
 
-# ファイル名として使用できない文字を置換（パスセパレータは除く）
-_UNSAFE_FILENAME = re.compile(r'[<>:"|?*]')
+# ファイル名として使用できない文字を置換。
+# パスセパレータ (`/` `\`) も含める: 残すと想定外のディレクトリへ書き込もうとして
+# FileNotFoundError になる（ディレクトリ指定は output_dir の責務）。
+_UNSAFE_FILENAME = re.compile(r'[<>:"|?*/\\\0]')
 # ディレクトリパスセグメントとして使用できない文字を置換
 _UNSAFE_SEGMENT = re.compile(r'[<>:"|?*\\\0]')
+# 相対パス指定で output/ の外へ出るセグメント
+_TRAVERSAL_SEGMENTS = {".", ".."}
 
 
 def _resolve_dir(output_dir: str, p: dict, now: datetime.datetime) -> str:
@@ -75,8 +80,14 @@ def _resolve_dir(output_dir: str, p: dict, now: datetime.datetime) -> str:
     elif os.path.isabs(expanded):
         path = expanded
     else:
-        # `/` をセパレータとして分割し、各セグメントを個別にサニタイズ
-        segments = [_UNSAFE_SEGMENT.sub("_", seg) for seg in expanded.replace("\\", "/").split("/") if seg]
+        # `/` をセパレータとして分割し、各セグメントを個別にサニタイズ。
+        # `..` / `.` は除去する。ツールチップ通り相対パスは output/ 起点であり、
+        # そこから外へ出るのは意図しない挙動（外へ出したい場合は絶対パスを使う）。
+        segments = [
+            _UNSAFE_SEGMENT.sub("_", seg)
+            for seg in expanded.replace("\\", "/").split("/")
+            if seg and seg not in _TRAVERSAL_SEGMENTS
+        ]
         path = os.path.join(folder_paths.get_output_directory(), *segments)
 
     os.makedirs(path, exist_ok=True)
@@ -112,7 +123,7 @@ def _build_metadata_str(p: dict, prompt_text: str) -> str:
             params.append(f"{label}: {v}")
     ckpt = p.get("ckpt_name", "")
     if ckpt:
-        params.append(f"Model: {os.path.splitext(os.path.basename(ckpt))[0]}")
+        params.append(f"Model: {basename_no_ext(ckpt)}")
     if params:
         parts.append(", ".join(params))
     return "\n".join(parts)
@@ -325,11 +336,15 @@ class SAX_Bridge_Image_Preview(io.ComfyNode):
         node_id = node_id.unique_id if node_id else None
         prefix = f"sax_preview_{node_id}_" if node_id else "sax_preview_"
 
-        for old in glob.glob(os.path.join(temp_dir, f"{prefix}*.webp")):
-            try:
-                os.remove(old)
-            except OSError:
-                pass
+        # node_id が取れないときの prefix は他ノードの sax_preview_<id>_*.webp にも
+        # 前方一致するため、掃除するとワークフロー内の別 Preview の画像まで消えて
+        # フロントが 404 になる。自分の分を特定できるときだけ掃除する。
+        if node_id:
+            for old in glob.glob(os.path.join(temp_dir, f"{prefix}*.webp")):
+                try:
+                    os.remove(old)
+                except OSError:
+                    pass
 
         max_px  = cls._PREVIEW_MAX_PX.get(preview_quality)
         results = []

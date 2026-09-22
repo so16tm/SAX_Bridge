@@ -6,7 +6,7 @@ import nodes
 
 from comfy_api.latest import io
 from .io_types import PipeLine
-from .noise import SAXNoiseEngine
+from .noise import SAXNoiseEngine, unsharp_mask
 from .guidance import apply_guidance_to_model, _ALL_MODES
 from .vae_utils import decode_image
 from .latent_utils import broadcast_mask_to_latent
@@ -18,12 +18,6 @@ try:
     _HAS_DIFF_DIFFUSION = True
 except ImportError:
     _HAS_DIFF_DIFFUSION = False
-
-
-def unsharp_mask(image_bchw: torch.Tensor, strength: float, sigma: float) -> torch.Tensor:
-    """アンシャープマスクで画像を鮮鋭化する。(B, C, H, W) float32"""
-    blurred = SAXNoiseEngine.gaussian_blur(image_bchw, sigma)
-    return torch.clamp(image_bchw + strength * (image_bchw - blurred), 0.0, 1.0)
 
 
 def blur_context_boundary(

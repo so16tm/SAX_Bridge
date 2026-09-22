@@ -159,6 +159,16 @@ class SAXNoiseEngine:
         return result.permute(0, 2, 3, 1)  # (B, H, W, C)
 
 
+def unsharp_mask(image_bchw: torch.Tensor, strength: float, sigma: float) -> torch.Tensor:
+    """アンシャープマスクで画像を鮮鋭化する。(B, C, H, W) float32
+
+    `SAXNoiseEngine.gaussian_blur` と対で使う画像処理なのでここに置く
+    (Detailer / Finisher の両方から使われる)。
+    """
+    blurred = SAXNoiseEngine.gaussian_blur(image_bchw, sigma)
+    return torch.clamp(image_bchw + strength * (image_bchw - blurred), 0.0, 1.0)
+
+
 class SAX_Bridge_Noise_Image(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:

@@ -175,9 +175,26 @@ def _apply_loras(model, clip, loras):
     return model, clip, applied_names
 
 
+def _matches_lora_entry(entry: str, name: str) -> bool:
+    """カタログ上の LoRA 名 entry が、指定名 name を指しているか判定する。
+
+    素の endswith だと区切りをまたいで部分一致してしまい、`ra.safetensors` が
+    `extra.safetensors` にヒットするなど別の LoRA が無言で適用される。
+    サブフォルダ指定を許しつつ、必ずパス区切りの境界で一致させる。
+    """
+    if entry == name:
+        return True
+    normalized = entry.replace("\\", "/")
+    return normalized.endswith("/" + name.replace("\\", "/"))
+
+
 def _resolve_lora_name(name):
     """LoRA 名を解決する（フォルダ更新時に自動で再スキャン）"""
     global _lora_name_cache, _lora_cache_mtime
+    # `<lora::1.0>` のような書き損じは拡張子だけの名前になる。これを通すと
+    # 境界一致でもカタログ先頭の LoRA を拾ってしまうので先に弾く。
+    if not name or os.path.splitext(name)[0] == "":
+        return None
     if os.path.exists(name):
         return name
 
@@ -187,10 +204,65 @@ def _resolve_lora_name(name):
         _lora_cache_mtime = current_mtime
 
     for x in _lora_name_cache:
-        if x.endswith(name):
+        if _matches_lora_entry(x, name):
             return x
 
     return None
+
+
+def _process_prompt(pipe: dict, wildcard_text: str, target_key: str):
+    """Wildcard 展開 → LoRA 適用 → CLIP エンコード → 新しい pipe の構築。
+
+    SAX Prompt と SAX Prompt Concat の共通処理。両ノードの違いは
+    conditioning を pipe のどちらのキーに載せるか (`target_key`) だけなので、
+    片方だけ直して食い違わないようここへ集約する。
+
+    戻り値: (new_pipe, conditioning, populated)
+    """
+    wildcards = _get_impact_wildcards()
+
+    model = pipe.get("model")
+    clip = pipe.get("clip")
+
+    if model is None:
+        raise ValueError("[SAX_Bridge] Pipe does not contain a model.")
+    if clip is None:
+        raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
+
+    actual_seed = pipe.get("seed", 0)
+    if wildcards is not None:
+        populated = wildcards.process(wildcard_text, actual_seed)
+        loras = wildcards.extract_lora_values(populated)
+        clean_text = wildcards.remove_lora_tags(populated)
+    else:
+        populated = wildcard_text
+        loras = []
+        clean_text = wildcard_text
+
+    new_loras = filter_new_loras(pipe, loras)
+    applied_names = []
+    if new_loras:
+        model, clip, applied_names = _apply_loras(model, clip, new_loras)
+
+    conditioning = _encode_with_break(clip, clean_text)
+
+    new_pipe = {
+        **pipe,
+        "model": model,
+        "clip": clip,
+        target_key: conditioning,
+    }
+
+    record_applied_loras(new_pipe, applied_names)
+
+    loader_settings = new_pipe.get("loader_settings")
+    if isinstance(loader_settings, dict):
+        new_pipe["loader_settings"] = {
+            **loader_settings,
+            target_key: clean_text,
+        }
+
+    return new_pipe, conditioning, populated
 
 
 class SAX_Bridge_Prompt(io.ComfyNode):
@@ -227,49 +299,7 @@ class SAX_Bridge_Prompt(io.ComfyNode):
 
     @classmethod
     def execute(cls, pipe, wildcard_text, **kwargs) -> io.NodeOutput:
-        wildcards = _get_impact_wildcards()
-
-        model = pipe.get("model")
-        clip = pipe.get("clip")
-
-        if model is None:
-            raise ValueError("[SAX_Bridge] Pipe does not contain a model.")
-        if clip is None:
-            raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
-
-        actual_seed = pipe.get("seed", 0)
-        if wildcards is not None:
-            populated = wildcards.process(wildcard_text, actual_seed)
-            loras = wildcards.extract_lora_values(populated)
-            clean_text = wildcards.remove_lora_tags(populated)
-        else:
-            populated = wildcard_text
-            loras = []
-            clean_text = wildcard_text
-
-        new_loras = filter_new_loras(pipe, loras)
-        applied_names = []
-        if new_loras:
-            model, clip, applied_names = _apply_loras(model, clip, new_loras)
-
-        conditioning = _encode_with_break(clip, clean_text)
-
-        new_pipe = {
-            **pipe,
-            "model": model,
-            "clip": clip,
-            "positive": conditioning,
-        }
-
-        record_applied_loras(new_pipe, applied_names)
-
-        loader_settings = new_pipe.get("loader_settings")
-        if isinstance(loader_settings, dict):
-            new_pipe["loader_settings"] = {
-                **loader_settings,
-                "positive": clean_text,
-            }
-
+        new_pipe, _conditioning, populated = _process_prompt(pipe, wildcard_text, "positive")
         return io.NodeOutput(new_pipe, populated)
 
 
@@ -316,8 +346,6 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         target_positive,
         texts: io.Autogrow.Type,
     ) -> io.NodeOutput:
-        wildcards = _get_impact_wildcards()
-
         target_type = "positive" if target_positive else "negative"
 
         text_values = []
@@ -331,47 +359,7 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
             empty_cond = pipe.get(target_type)
             return io.NodeOutput(pipe, empty_cond, "")
 
-        model = pipe.get("model")
-        clip = pipe.get("clip")
-
-        if model is None:
-            raise ValueError("[SAX_Bridge] Pipe does not contain a model.")
-        if clip is None:
-            raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
-
-        actual_seed = pipe.get("seed", 0)
-        if wildcards is not None:
-            populated = wildcards.process(wildcard_text, actual_seed)
-            loras = wildcards.extract_lora_values(populated)
-            clean_text = wildcards.remove_lora_tags(populated)
-        else:
-            populated = wildcard_text
-            loras = []
-            clean_text = wildcard_text
-
-        new_loras = filter_new_loras(pipe, loras)
-        applied_names = []
-        if new_loras:
-            model, clip, applied_names = _apply_loras(model, clip, new_loras)
-
-        conditioning = _encode_with_break(clip, clean_text)
-
-        new_pipe = {
-            **pipe,
-            "model": model,
-            "clip": clip,
-            target_type: conditioning,
-        }
-
-        record_applied_loras(new_pipe, applied_names)
-
-        loader_settings = new_pipe.get("loader_settings")
-        if isinstance(loader_settings, dict):
-            new_pipe["loader_settings"] = {
-                **loader_settings,
-                target_type: clean_text,
-            }
-
+        new_pipe, conditioning, populated = _process_prompt(pipe, wildcard_text, target_type)
         return io.NodeOutput(new_pipe, conditioning, populated)
 
 

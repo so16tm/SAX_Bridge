@@ -2,7 +2,8 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from nodes.prompt import SAX_Bridge_Prompt, _encode_with_break
+from nodes import prompt as prompt_mod
+from nodes.prompt import SAX_Bridge_Prompt, _encode_with_break, _resolve_lora_name
 from nodes.io_types import filter_new_loras, record_applied_loras
 
 
@@ -143,3 +144,38 @@ class TestEncodeWithBreak:
         assert cond_dict["attention_mask"] is extra["attention_mask"]
         assert cond_dict["t5xxl_ids"] is extra["t5xxl_ids"]
         assert cond_dict["t5xxl_weights"] is extra["t5xxl_weights"]
+
+
+class TestResolveLoraName:
+    """`<lora:name:1.0>` の名前解決。
+
+    素の endswith だと区切りをまたいで部分一致し、別の LoRA が無言で適用される。
+    """
+
+    def _resolve(self, catalog, name):
+        with patch("nodes.prompt.os.path.exists", return_value=False), \
+             patch("nodes.prompt._get_lora_folders_mtime", return_value=1.0), \
+             patch("nodes.prompt.folder_paths.get_filename_list", return_value=catalog):
+            prompt_mod._lora_name_cache = None
+            prompt_mod._lora_cache_mtime = 0.0
+            return _resolve_lora_name(name)
+
+    def test_exact_match(self):
+        assert self._resolve(["extra.safetensors", "ra.safetensors"], "ra.safetensors") == "ra.safetensors"
+
+    def test_no_partial_match_across_word(self):
+        """`ra.safetensors` が `extra.safetensors` にマッチしてはいけない。"""
+        assert self._resolve(["extra.safetensors"], "ra.safetensors") is None
+
+    def test_subfolder_match_is_allowed(self):
+        assert self._resolve(["style/foo.safetensors"], "foo.safetensors") == "style/foo.safetensors"
+
+    def test_windows_subfolder_match_is_allowed(self):
+        assert self._resolve(["style\\foo.safetensors"], "foo.safetensors") == "style\\foo.safetensors"
+
+    def test_extension_only_name_is_rejected(self):
+        """`<lora::1.0>` の書き損じは `.safetensors` になる。先頭の LoRA を拾わせない。"""
+        assert self._resolve(["first.safetensors", "second.safetensors"], ".safetensors") is None
+
+    def test_empty_name_is_rejected(self):
+        assert self._resolve(["first.safetensors"], "") is None

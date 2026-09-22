@@ -1,17 +1,15 @@
 import json
 import logging
-import torch
 
 import folder_paths
 import nodes
-import comfy.model_management
 import comfy.model_sampling
 import comfy.sd
-import comfy.samplers
 import comfy.utils
 from comfy_api.latest import io
 
 from .io_types import PipeLine, _APPLIED_LORAS_KEY, _normalize_lora_name, record_applied_loras
+from .loader_common import apply_single_lora, build_pipe, empty_latent, resolve_path, sampling_inputs
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -31,15 +29,7 @@ class SAX_Bridge_Loader(io.ComfyNode):
                 io.Combo.Input("lora_name", options=["None"] + folder_paths.get_filename_list("loras")),
                 io.Float.Input("lora_model_strength", default=1.0, min=-10.0, max=10.0, step=0.01),
                 io.Boolean.Input("v_pred", default=False),
-                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, control_after_generate=True),
-                io.Int.Input("steps", default=20, min=1, max=10000),
-                io.Float.Input("cfg", default=8.0, min=0.0, max=100.0, step=0.5),
-                io.Combo.Input("sampler_name", options=comfy.samplers.KSampler.SAMPLERS),
-                io.Combo.Input("scheduler_name", options=comfy.samplers.KSampler.SCHEDULERS),
-                io.Float.Input("denoise", default=1.0, min=0.0, max=1.0, step=0.01),
-                io.Int.Input("width", default=512, min=8, max=8192, step=8),
-                io.Int.Input("height", default=512, min=8, max=8192, step=8),
-                io.Int.Input("batch_size", default=1, min=1, max=4096),
+                *sampling_inputs(),
             ],
             outputs=[
                 PipeLine.Output("PIPE"),
@@ -49,7 +39,7 @@ class SAX_Bridge_Loader(io.ComfyNode):
 
     @classmethod
     def execute(cls, ckpt_name, clip_skip, vae_name, lora_name, lora_model_strength, v_pred, seed, steps, cfg, sampler_name, scheduler_name, denoise, width, height, batch_size) -> io.NodeOutput:
-        ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
+        ckpt_path = resolve_path("checkpoints", ckpt_name, "Loader: checkpoint")
         out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
         model, clip, vae = out[0], out[1], out[2]
 
@@ -57,15 +47,12 @@ class SAX_Bridge_Loader(io.ComfyNode):
         clip.clip_layer(clip_skip)
 
         if vae_name != "baked_vae":
-            vae_path = folder_paths.get_full_path("vae", vae_name)
+            vae_path = resolve_path("vae", vae_name, "Loader: VAE")
             vae = comfy.sd.VAE(sd=comfy.utils.load_torch_file(vae_path))
 
-        applied_lora_names = []
-        if lora_name != "None":
-            lora_path = folder_paths.get_full_path("loras", lora_name)
-            lora = comfy.utils.load_torch_file(lora_path)
-            model, clip = comfy.sd.load_lora_for_models(model, clip, lora, lora_model_strength, lora_model_strength)
-            applied_lora_names.append(lora_name)
+        model, clip, applied_lora_names = apply_single_lora(
+            model, clip, lora_name, lora_model_strength, "Loader"
+        )
 
         if v_pred:
             class ModelSamplingAdvanced(comfy.model_sampling.ModelSamplingDiscrete, comfy.model_sampling.V_PREDICTION):
@@ -74,32 +61,21 @@ class SAX_Bridge_Loader(io.ComfyNode):
             model_sampling = ModelSamplingAdvanced(model.model.model_config, zsnr=True)
             model.add_object_patch("model_sampling", model_sampling)
 
-        latent = torch.zeros([batch_size, 4, height // 8, width // 8], device="cpu")
-        latent_out = {"samples": latent}
-
-        pipe = {
-            "model": model,
-            "clip": clip,
-            "vae": vae,
-            "positive": None,
-            "negative": None,
-            "samples": latent_out,
-            "images": None,
-            "seed": seed,
-            "loader_settings": {
-                "steps": steps,
-                "cfg": cfg,
-                "sampler_name": sampler_name,
-                "scheduler": scheduler_name,
-                "denoise": denoise,
-                "clip_width": width,
-                "clip_height": height,
-                "positive": "",
-                "negative": "",
-                "xyplot": None,
-                "batch_size": batch_size,
-            }
-        }
+        pipe = build_pipe(
+            model=model,
+            clip=clip,
+            vae=vae,
+            latent=empty_latent(width, height, batch_size),
+            seed=seed,
+            steps=steps,
+            cfg=cfg,
+            sampler_name=sampler_name,
+            scheduler_name=scheduler_name,
+            denoise=denoise,
+            width=width,
+            height=height,
+            batch_size=batch_size,
+        )
         record_applied_loras(pipe, applied_lora_names)
 
         return io.NodeOutput(pipe, seed)
@@ -167,11 +143,24 @@ class SAX_Bridge_Loader_Lora(io.ComfyNode):
         newly_applied = []
 
         for entry in entries:
+            # loras_json は JS UI が書くが、手編集や旧形式のワークフローで
+            # 型の崩れたエントリが混ざる。docstring 通り「警告してスキップ」に揃える
+            # （ここで例外を投げるとノード全体が落ちる）。
+            if not isinstance(entry, dict):
+                logger.warning("[SAX_Bridge] Lora Loader: skipping non-object entry: %r", entry)
+                continue
+
             if not entry.get("on", True):
                 continue
 
-            lora_name = entry.get("lora", "").strip()
-            strength  = float(entry.get("strength", 1.0))
+            try:
+                lora_name = str(entry.get("lora", "")).strip()
+                strength = float(entry.get("strength", 1.0))
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "[SAX_Bridge] Lora Loader: skipping malformed entry %r (%s)", entry, exc
+                )
+                continue
 
             if not lora_name or strength == 0.0:
                 continue

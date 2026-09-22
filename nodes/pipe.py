@@ -8,6 +8,51 @@ class SamplerType(io.ComfyTypeIO):
     Type = object
 
 
+# PIPE を展開する出力の並び。2 ノード (SAX Pipe / SAX Pipe Switcher) で共有する。
+# 並び順は io.NodeOutput の位置引数に直結するため、pipe_outputs と explode_pipe は
+# 必ず揃えて変更すること。
+_PIPE_FIELDS = ("model", "positive", "negative", "samples", "vae", "clip", "images", "seed")
+_SETTINGS_FIELDS = ("steps", "cfg", "sampler_name", "scheduler", "denoise",
+                    "optional_sampler", "optional_sigmas")
+
+
+def pipe_outputs() -> list:
+    """PIPE 本体 + 展開 15 出力のスキーマ定義を返す。"""
+    return [
+        PipeLine.Output("PIPE"),
+        io.Model.Output("MODEL"),
+        io.Conditioning.Output("POS"),
+        io.Conditioning.Output("NEG"),
+        io.Latent.Output("LATENT"),
+        io.Vae.Output("VAE"),
+        io.Clip.Output("CLIP"),
+        io.Image.Output("IMAGE"),
+        io.Int.Output("SEED"),
+        io.Int.Output("STEPS"),
+        io.Float.Output("CFG"),
+        AnyType.Output("SAMPLER"),
+        AnyType.Output("SCHEDULER"),
+        io.Float.Output("DENOISE"),
+        SamplerType.Output("OPTIONAL_SAMPLER"),
+        io.Sigmas.Output("OPTIONAL_SIGMAS"),
+    ]
+
+
+def explode_pipe(pipe: dict, loader_settings: dict | None = None) -> tuple:
+    """pipe を pipe_outputs() の 2 番目以降と同じ並びの 15 要素へ分解する。
+
+    loader_settings を渡さない場合は pipe から読む。dict でない (None 等) 場合は
+    空扱いにして、欠けた pipe でも AttributeError にしない。
+    """
+    settings = loader_settings if loader_settings is not None else pipe.get("loader_settings")
+    if not isinstance(settings, dict):
+        settings = {}
+    return (
+        *(pipe.get(k) for k in _PIPE_FIELDS),
+        *(settings.get(k) for k in _SETTINGS_FIELDS),
+    )
+
+
 class SAX_Bridge_Pipe(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -34,24 +79,7 @@ class SAX_Bridge_Pipe(io.ComfyNode):
                 SamplerType.Input("optional_sampler", optional=True),
                 io.Sigmas.Input("optional_sigmas", optional=True),
             ],
-            outputs=[
-                PipeLine.Output("PIPE"),
-                io.Model.Output("MODEL"),
-                io.Conditioning.Output("POS"),
-                io.Conditioning.Output("NEG"),
-                io.Latent.Output("LATENT"),
-                io.Vae.Output("VAE"),
-                io.Clip.Output("CLIP"),
-                io.Image.Output("IMAGE"),
-                io.Int.Output("SEED"),
-                io.Int.Output("STEPS"),
-                io.Float.Output("CFG"),
-                AnyType.Output("SAMPLER"),
-                AnyType.Output("SCHEDULER"),
-                io.Float.Output("DENOISE"),
-                SamplerType.Output("OPTIONAL_SAMPLER"),
-                io.Sigmas.Output("OPTIONAL_SIGMAS"),
-            ]
+            outputs=pipe_outputs()
         )
 
     @classmethod
@@ -112,24 +140,7 @@ class SAX_Bridge_Pipe(io.ComfyNode):
 
         new_pipe["loader_settings"] = loader_settings
 
-        out_model = new_pipe.get("model")
-        out_pos = new_pipe.get("positive")
-        out_neg = new_pipe.get("negative")
-        out_latent = new_pipe.get("samples")
-        out_vae = new_pipe.get("vae")
-        out_clip = new_pipe.get("clip")
-        out_image = new_pipe.get("images")
-        out_seed = new_pipe.get("seed")
-
-        out_steps = loader_settings.get("steps")
-        out_cfg = loader_settings.get("cfg")
-        out_sampler = loader_settings.get("sampler_name")
-        out_scheduler = loader_settings.get("scheduler")
-        out_denoise = loader_settings.get("denoise")
-        out_optional_sampler = loader_settings.get("optional_sampler")
-        out_optional_sigmas = loader_settings.get("optional_sigmas")
-
-        return io.NodeOutput(new_pipe, out_model, out_pos, out_neg, out_latent, out_vae, out_clip, out_image, out_seed, out_steps, out_cfg, out_sampler, out_scheduler, out_denoise, out_optional_sampler, out_optional_sigmas)
+        return io.NodeOutput(new_pipe, *explode_pipe(new_pipe, loader_settings))
 
 
 N_SWITCH_PIPES = 5
@@ -148,24 +159,7 @@ class SAX_Bridge_Pipe_Switcher(io.ComfyNode):
                              tooltip="優先するスロット番号（1 始まり）。0 の場合はスロット順にスキャン"),
                 *[PipeLine.Input(f"pipe{i}", optional=True) for i in range(1, N_SWITCH_PIPES + 1)],
             ],
-            outputs=[
-                PipeLine.Output("PIPE"),
-                io.Model.Output("MODEL"),
-                io.Conditioning.Output("POS"),
-                io.Conditioning.Output("NEG"),
-                io.Latent.Output("LATENT"),
-                io.Vae.Output("VAE"),
-                io.Clip.Output("CLIP"),
-                io.Image.Output("IMAGE"),
-                io.Int.Output("SEED"),
-                io.Int.Output("STEPS"),
-                io.Float.Output("CFG"),
-                AnyType.Output("SAMPLER"),
-                AnyType.Output("SCHEDULER"),
-                io.Float.Output("DENOISE"),
-                SamplerType.Output("OPTIONAL_SAMPLER"),
-                io.Sigmas.Output("OPTIONAL_SIGMAS"),
-            ],
+            outputs=pipe_outputs(),
         )
 
     @classmethod
@@ -187,23 +181,5 @@ class SAX_Bridge_Pipe_Switcher(io.ComfyNode):
             selected = {}
 
         pipe: dict = selected
-        loader_settings: dict = pipe.get("loader_settings", {})
 
-        return io.NodeOutput(
-            pipe,
-            pipe.get("model"),
-            pipe.get("positive"),
-            pipe.get("negative"),
-            pipe.get("samples"),
-            pipe.get("vae"),
-            pipe.get("clip"),
-            pipe.get("images"),
-            pipe.get("seed"),
-            loader_settings.get("steps"),
-            loader_settings.get("cfg"),
-            loader_settings.get("sampler_name"),
-            loader_settings.get("scheduler"),
-            loader_settings.get("denoise"),
-            loader_settings.get("optional_sampler"),
-            loader_settings.get("optional_sigmas"),
-        )
+        return io.NodeOutput(pipe, *explode_pipe(pipe))
