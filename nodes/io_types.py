@@ -17,8 +17,14 @@ _APPLIED_LORAS_KEY = "_applied_loras"
 
 
 def _normalize_lora_name(name: str) -> str:
-    """LoRA名をパス末尾のファイル名（拡張子なし）に正規化する"""
-    return os.path.splitext(os.path.basename(name))[0]
+    """LoRA名をパス末尾のファイル名（拡張子なし）に正規化する。
+
+    Windows で保存されたワークフローは LoRA 名を `\\` 区切りで持つため、
+    os.path.basename では Linux/macOS 上で区切りを落とせない。適用済み LoRA の
+    照合キーが実行 OS で変わらないよう、両方の区切りを自前で処理する。
+    """
+    tail = name.replace("\\", "/").rpartition("/")[2]
+    return os.path.splitext(tail)[0]
 
 
 def filter_new_loras(pipe: dict, loras: list) -> list:
