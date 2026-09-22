@@ -1,5 +1,7 @@
 # SAX_Bridge
 
+[![CI](https://github.com/so16tm/SAX_Bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/so16tm/SAX_Bridge/actions/workflows/ci.yml)
+
 [JP](README_ja.md) | [Key Features](#key-features) | [Installation](#installation) | [Dependencies](#dependencies) | [Node Reference](docs/nodes_en.md) | [MIT License](#license)
 
 **Build advanced workflows with fewer nodes. Smart trial-and-error with management nodes.**

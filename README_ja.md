@@ -1,5 +1,7 @@
 # SAX_Bridge
 
+[![CI](https://github.com/so16tm/SAX_Bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/so16tm/SAX_Bridge/actions/workflows/ci.yml)
+
 [EN](README.md) | [主な機能](#主な機能) | [インストール](#インストール) | [依存関係](#依存関係) | [ノードリファレンス](docs/nodes_ja.md) | [MIT License](#ライセンス)
 
 **少ないノードで高度な生成を。管理ノードで試行錯誤をスマートに。**

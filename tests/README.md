@@ -9,6 +9,12 @@ tests/
 │   └── test_*.py    #   ノード単体テスト + V3 スキーマ検証 + legacy-fixture 不変性
 ├── js/              # Level 1: Node.js テスト
 │   └── *.test.mjs   #   JS serialize/deserialize テスト
+├── unit/            # Level 1: Node.js テスト (DynamicSlotCoordinator 単体)
+│   └── *.test.mjs   #   リンク保持・スロット mutation のリグレッションテスト
+├── integration/     # Level 1: Node.js テスト (ノード間の結合)
+│   └── *.test.mjs   #   旧形式 JSON との互換テスト
+├── bench/           # Level 1b: 性能計測 (README.md 参照)
+│   └── *.bench.mjs  #   ComfyUI なしで js/*.js の所要時間を測る
 ├── workflows/       # Level 2: 手動テスト用ワークフロー
 │   ├── *.json       #   MANUAL_TEST.md と対応
 │   └── legacy-fixture/  # Level 3a: リファクタ前 fixture (凍結、編集禁止、Phase 2 migration テスト入力データ)
@@ -19,16 +25,31 @@ tests/
 ## 実行方法
 
 ### Python テスト
+ComfyUI 本体は `conftest.py` がモックするため不要だが、torch / numpy / Pillow は実物が要る。
+ComfyUI の venv を使えば pytest を足すだけで動く。
+
 ```bash
 cd projects/SAX_Bridge
+/path/to/comfyui/venv/Scripts/python -m pip install -r tests/requirements.txt
 /path/to/comfyui/venv/Scripts/python -m pytest tests/python/ -v
 ```
 
 ### JS テスト
+引数なしの `node --test` はリポジトリ直下を再帰探索するため、`js/` `unit/` `integration/`
+の 3 ディレクトリを一度に実行する。ディレクトリを明示すると取りこぼすので指定しない。
+`bench/` の `*.bench.mjs` は `node --test` の収集対象外なので、性能計測は下の手順で別に実行する。
+
 ```bash
 cd projects/SAX_Bridge
-node --test "tests/js/*.test.mjs"
+node --test
 ```
+
+### 性能計測 (Level 1b)
+```bash
+cd projects/SAX_Bridge
+node --import ./tests/bench/register.mjs tests/bench/slot_scaling.bench.mjs
+```
+詳細と数値の読み方は [bench/README.md](bench/README.md) を参照。
 
 ### 手動テスト (Level 2)
 1. `tests/workflows/` のワークフローを ComfyUI にドラッグ&ドロップで読み込む
@@ -44,6 +65,19 @@ UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../d
 4. リグレッション検出は通常の pytest / JS test / 実害発見時の都度修正で行う
 
 `legacy-fixture/` は Phase 2 (シリアライズ統合) の migration テスト入力データとして凍結。改変禁止。詳細は [legacy-fixture/README.md](workflows/legacy-fixture/README.md)。
+
+### CI
+
+Level 1 (pytest / JS テスト) と ruff は push・PR ごとに GitHub Actions
+([.github/workflows/ci.yml](../.github/workflows/ci.yml)) が自動実行する。Level 2 以降の手動テストは対象外。
+
+| ジョブ | 内容 |
+|---|---|
+| `JS tests` | Node 20 / 22 / 24 で `node --test` |
+| `Python tests` | Python 3.11 / 3.12 で `pytest tests/python` (torch は CPU ビルド) |
+| `Ruff` | `ruff check .` |
+
+性能計測 (Level 1b) は所要時間に環境差が出るため CI では実行しない。
 
 ## ワークフロー一覧
 
