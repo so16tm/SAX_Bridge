@@ -13,6 +13,8 @@ tests/
 │   └── *.test.mjs   #   リンク保持・スロット mutation のリグレッションテスト
 ├── integration/     # Level 1: Node.js テスト (ノード間の結合)
 │   └── *.test.mjs   #   旧形式 JSON との互換テスト
+├── bench/           # Level 1b: 性能計測 (README.md 参照)
+│   └── *.bench.mjs  #   ComfyUI なしで js/*.js の所要時間を測る
 ├── workflows/       # Level 2: 手動テスト用ワークフロー
 │   ├── *.json       #   MANUAL_TEST.md と対応
 │   └── legacy-fixture/  # Level 3a: リファクタ前 fixture (凍結、編集禁止、Phase 2 migration テスト入力データ)
@@ -35,11 +37,19 @@ cd projects/SAX_Bridge
 ### JS テスト
 引数なしの `node --test` はリポジトリ直下を再帰探索するため、`js/` `unit/` `integration/`
 の 3 ディレクトリを一度に実行する。ディレクトリを明示すると取りこぼすので指定しない。
+`bench/` の `*.bench.mjs` は `node --test` の収集対象外なので、性能計測は下の手順で別に実行する。
 
 ```bash
 cd projects/SAX_Bridge
 node --test
 ```
+
+### 性能計測 (Level 1b)
+```bash
+cd projects/SAX_Bridge
+node --import ./tests/bench/register.mjs tests/bench/slot_scaling.bench.mjs
+```
+詳細と数値の読み方は [bench/README.md](bench/README.md) を参照。
 
 ### 手動テスト (Level 2)
 1. `tests/workflows/` のワークフローを ComfyUI にドラッグ&ドロップで読み込む
@@ -66,6 +76,8 @@ Level 1 (pytest / JS テスト) と ruff は push・PR ごとに GitHub Actions
 | `JS tests` | Node 20 / 22 / 24 で `node --test` |
 | `Python tests` | Python 3.11 / 3.12 で `pytest tests/python` (torch は CPU ビルド) |
 | `Ruff` | `ruff check .` |
+
+性能計測 (Level 1b) は所要時間に環境差が出るため CI では実行しない。
 
 ## ワークフロー一覧
 
