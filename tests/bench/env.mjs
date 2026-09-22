@@ -58,6 +58,12 @@ export function captureElements(fn) {
     return created;
 }
 
+/**
+ * installDomStub で作られた ResizeObserver スタブの一覧。
+ * テストから `resizeObservers.at(-1).trigger()` でレイアウト確定を再現できる。
+ */
+export const resizeObservers = [];
+
 export function installDomStub() {
     if (globalThis.document) return;
     const documentElement = makeElement("html");
@@ -71,6 +77,14 @@ export function installDomStub() {
     };
     globalThis.getComputedStyle = () => ({ getPropertyValue: () => "" });
     globalThis.MutationObserver = class { observe() {} disconnect() {} };
+    globalThis.ResizeObserver = class {
+        constructor(cb) { this._cb = cb; this.targets = []; this.disconnected = false; resizeObservers.push(this); }
+        observe(el) { this.targets.push(el); }
+        unobserve(el) { this.targets = this.targets.filter(t => t !== el); }
+        disconnect() { this.targets = []; this.disconnected = true; }
+        /** テスト用: 監視中の要素についてコールバックを走らせる。 */
+        trigger() { this._cb(this.targets.map(target => ({ target })), this); }
+    };
     globalThis.window = globalThis;
 }
 

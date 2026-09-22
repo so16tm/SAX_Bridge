@@ -13,6 +13,50 @@ except ImportError:
     logger.warning("[SAX_Bridge] DeepCache is disabled. Internal API from comfy.ldm.modules.diffusionmodules.openaimodel not found. Check your ComfyUI version.")
 
 
+# DeepCache のラッパーが無条件に参照する UNetModel 固有の属性。
+# 1 つでも欠けていれば openaimodel.UNetModel 系ではないため、DeepCache は適用できない。
+# (FLUX / SD3.5 / Qwen-Image / Chroma / Wan などの DiT 系がこれに該当する)
+REQUIRED_UNET_ATTRS = (
+    "input_blocks",
+    "middle_block",
+    "output_blocks",
+    "model_channels",
+    "time_embed",
+    "num_classes",
+    "predict_codebook_ids",
+    "default_num_video_frames",
+    "out",
+)
+
+
+def missing_unet_attrs(diffusion_model):
+    """diffusion_model に欠けている UNet 属性をタプルで返す。None なら全属性を欠損扱いにする。"""
+    if diffusion_model is None:
+        return REQUIRED_UNET_ATTRS
+    return tuple(name for name in REQUIRED_UNET_ATTRS if not hasattr(diffusion_model, name))
+
+
+def is_unet_like(diffusion_model):
+    """diffusion_model が DeepCache の適用可能な UNet 構造かどうかを返す。"""
+    return not missing_unet_attrs(diffusion_model)
+
+
+def _format_missing(missing, limit=3):
+    """ログ用に欠損属性名を先頭 limit 件までに短くまとめる。"""
+    head = ", ".join(missing[:limit])
+    if len(missing) > limit:
+        return f"{head} (+{len(missing) - limit} more)"
+    return head
+
+
+def _get_diffusion_model(model):
+    """ModelPatcher から実体の diffusion model を取り出す。辿れない場合は None。"""
+    inner = getattr(model, "model", None)
+    if inner is None:
+        return None
+    return getattr(inner, "diffusion_model", None)
+
+
 class DeepCacheState:
     """UNetブロックのキャッシュ状態を管理する"""
     def __init__(self, deepcache_interval=2, deepcache_start_ratio=0.0, cfg_skip_start_ratio=0.4, cfg_skip_multiplier=1):
@@ -28,6 +72,7 @@ class DeepCacheState:
         self.cached_negative = None  # CFGネガティブの最終出力キャッシュ
         self.last_timestep = None
         self.logged = False
+        self.structure_warned = False
 
         # スキップ設定
         self.skip_start_idx = -1
@@ -125,6 +170,18 @@ def deepcache_diffusion_model_wrapper(executor, x, timesteps, context, y=None, c
 
     if state is None:
         # stateがない場合はDeepCacheを適用せず、元のexecutorを呼び出す
+        return executor(x, timesteps, context, y, control, transformer_options, **kwargs)
+
+    # apply_deepcache が通した後でも、実行時のモデルが UNet 構造でなければ素通しする。
+    # (適用時と実行時で diffusion model が差し替わる経路への保険)
+    missing = missing_unet_attrs(model)
+    if missing:
+        if not state.structure_warned:
+            state.structure_warned = True
+            logger.warning(
+                "[SAX_Bridge] Cache: the diffusion model at sampling time is not a UNet "
+                f"(missing {_format_missing(missing)}); running without DeepCache."
+            )
         return executor(x, timesteps, context, y, control, transformer_options, **kwargs)
 
     # ステップ更新
@@ -352,6 +409,19 @@ def apply_deepcache(
     """model に DeepCache を適用して返す。_DEEPCACHE_AVAILABLE が False の場合は model をそのまま返す。"""
     if not _DEEPCACHE_AVAILABLE:
         logger.warning("[SAX_Bridge] DeepCache is unavailable; returning model as-is.")
+        return model
+
+    diffusion_model = _get_diffusion_model(model)
+    missing = missing_unet_attrs(diffusion_model)
+    if missing:
+        model_name = type(diffusion_model).__name__ if diffusion_model is not None else "unknown"
+        logger.warning(
+            "[SAX_Bridge] Cache: DeepCache supports UNet models only "
+            "(SD1.5 / SDXL / Illustrious / Pony). "
+            f"The diffusion model '{model_name}' lacks {_format_missing(missing)}, "
+            "so DeepCache was skipped and the model is returned unchanged. "
+            "DiT models such as FLUX, SD3.5, Qwen-Image, Chroma and Wan are not supported."
+        )
         return model
 
     state = DeepCacheState(

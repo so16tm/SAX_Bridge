@@ -63,6 +63,18 @@ class TestCacheExecute:
         # 返された model が new_pipe に入る
         assert result.args[0]["model"] is patched_model
 
+    def test_unapplied_cache_passes_model_through(self):
+        # apply_deepcache が適用不可で同じ model を返した場合 (DiT 系など)、
+        # pipe の model はそのまま引き継がれ、例外にはならない
+        pipe = self._make_pipe()
+        orig_model = pipe["model"]
+        with patch("nodes.cache.apply_deepcache", side_effect=lambda model, **kw: model):
+            result = SAX_Bridge_Cache.execute(
+                pipe=pipe, enabled=True,
+                deepcache_interval=3, deepcache_start_percent=0.2,
+            )
+        assert result.args[0]["model"] is orig_model
+
     def test_pipe_immutability(self):
         # 元の pipe dict は変更されず new_pipe は新規 dict
         pipe = self._make_pipe()

@@ -1002,7 +1002,7 @@ This aligns with the empty-string skip behavior of downstream nodes such as `SAX
 
 ### SAX Cache
 
-`SAX_Bridge_Cache` — Applies DeepCache / TGate to the model in the Pipe with one touch, accelerating all downstream KSampler and Detailer processing.
+`SAX_Bridge_Cache` — Applies DeepCache to the model in the Pipe with one touch, accelerating all downstream KSampler and Detailer processing.
 
 **Inputs**
 
@@ -1012,12 +1012,11 @@ This aligns with the empty-string skip behavior of downstream nodes such as `SAX
 | `enabled` | Boolean | When `False`, returns the pipe unchanged without applying cache |
 | `deepcache_interval` | Int (1 to 10) | Performs full computation only once every N steps and uses cached values for the rest (1 = DeepCache disabled) |
 | `deepcache_start_percent` | Float (0.0 to 1.0) | Denoising progress percentage at which DeepCache begins |
-| `tgate_enabled` | Boolean (optional) | When `True`, also applies TGate (cross-attention caching) |
-| `tgate_gate_step` | Float (0.0 to 1.0, optional) | Boundary percentage at which TGate caching begins |
 
 **Outputs**: `PIPE`
 
 > **Placement**: Insert immediately after SAX Loader (before KSampler and Detailer) to apply to all processing in one step.
+> **Supported models**: DeepCache is for UNet models only (SD1.5 / SDXL / Illustrious / Pony). With DiT models such as FLUX, SD3.5, Qwen-Image, Chroma or Wan, no cache is applied: a warning is logged and the pipe passes through unchanged.
 > **Note**: May cause noticeable quality degradation when combined with distilled models (DMD2, etc.).
 
 [↑ Back to top](#top)
