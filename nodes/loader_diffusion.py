@@ -7,6 +7,7 @@ import comfy.utils
 from comfy_api.latest import io
 
 from .io_types import PipeLine, record_applied_loras
+from . import model_cache
 
 
 def _unet_model_options(weight_dtype: str) -> dict:
@@ -87,24 +88,36 @@ class SAX_Bridge_Loader_Diffusion(io.ComfyNode):
         height: int,
         batch_size: int,
     ) -> io.NodeOutput:
+        # UNET / text encoder / VAE はそれぞれディスクからのロード結果をキャッシュする。
+        # seed 等のサンプリング設定を変えても再ロード・VRAM 再転送が起きない。
+        # 下流の LoRA 適用は clone 上で行われるためキャッシュ本体は不変。
         unet_path = folder_paths.get_full_path("diffusion_models", unet_name)
         if unet_path is None:
             raise ValueError("[SAX_Bridge] Diffusion Loader: diffusion model not found: %s" % unet_name)
-        model = comfy.sd.load_diffusion_model(unet_path, model_options=_unet_model_options(weight_dtype))
+        model = model_cache.diffusion_model_cache.get_or_load(
+            (unet_name, weight_dtype, model_cache.file_token(unet_path)),
+            lambda: comfy.sd.load_diffusion_model(unet_path, model_options=_unet_model_options(weight_dtype)),
+        )
 
         clip_path = folder_paths.get_full_path("text_encoders", clip_name)
         if clip_path is None:
             raise ValueError("[SAX_Bridge] Diffusion Loader: text encoder not found: %s" % clip_name)
-        clip = comfy.sd.load_clip(
-            ckpt_paths=[clip_path],
-            embedding_directory=folder_paths.get_folder_paths("embeddings"),
-            clip_type=comfy.sd.CLIPType.STABLE_DIFFUSION,
+        clip = model_cache.clip_cache.get_or_load(
+            (clip_name, model_cache.file_token(clip_path)),
+            lambda: comfy.sd.load_clip(
+                ckpt_paths=[clip_path],
+                embedding_directory=folder_paths.get_folder_paths("embeddings"),
+                clip_type=comfy.sd.CLIPType.STABLE_DIFFUSION,
+            ),
         )
 
         vae_path = folder_paths.get_full_path("vae", vae_name)
         if vae_path is None:
             raise ValueError("[SAX_Bridge] Diffusion Loader: VAE not found: %s" % vae_name)
-        vae = comfy.sd.VAE(sd=comfy.utils.load_torch_file(vae_path))
+        vae = model_cache.vae_cache.get_or_load(
+            (vae_name, model_cache.file_token(vae_path)),
+            lambda: comfy.sd.VAE(sd=comfy.utils.load_torch_file(vae_path)),
+        )
 
         applied_lora_names = []
         if lora_name != "None":

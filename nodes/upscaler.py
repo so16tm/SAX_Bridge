@@ -9,6 +9,7 @@ from comfy_api.latest import io
 from .detailer import _extract_pipe, _ensure_negative
 from .io_types import PipeLine
 from .vae_utils import decode_image
+from . import model_cache
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -114,8 +115,12 @@ class SAX_Bridge_Upscaler(io.ComfyNode):
         if upscale_model_name != "None":
             logger.info("[SAX_Bridge] Upscaler: ESRGAN mode / model=%s / %dx%d -> %dx%d",
                         upscale_model_name, w, h, target_w, target_h)
+            # ESRGAN 系モデルも実行のたびにディスクから読まないようキャッシュする。
             from comfy_extras.nodes_upscale_model import UpscaleModelLoader
-            upscale_model = UpscaleModelLoader().load_model(upscale_model_name)[0]
+            upscale_model = model_cache.upscale_model_cache.get_or_load(
+                upscale_model_name,
+                lambda: UpscaleModelLoader().load_model(upscale_model_name)[0],
+            )
             upscaled = _esrgan_upscale(upscale_model, images, target_h, target_w, method)
             logger.info("[SAX_Bridge] Upscaler: ESRGAN done / output size %dx%d",
                         upscaled.shape[2], upscaled.shape[1])

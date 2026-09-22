@@ -194,3 +194,26 @@ sax_nodes.ConditioningConcat = MagicMock
 sax_nodes.common_ksampler = MagicMock
 sax_nodes.NODE_CLASS_MAPPINGS = {}
 sys.modules["nodes"] = sax_nodes
+
+# ---------------------------------------------------------------------------
+# モデルキャッシュのアイソレーション
+# ---------------------------------------------------------------------------
+# ローダー系ノードはプロセス内モデルキャッシュ（nodes/model_cache.py）を共有する。
+# テスト間でキャッシュが残ると、後続テストのモックが前テストのキャッシュ値に
+# 差し替わって assert が壊れるため、各テストの前後で全キャッシュを破棄する。
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _clear_sax_model_cache():
+    try:
+        from nodes import model_cache
+        model_cache.clear_all()
+    except Exception:
+        pass
+    yield
+    try:
+        from nodes import model_cache
+        model_cache.clear_all()
+    except Exception:
+        pass

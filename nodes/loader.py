@@ -12,6 +12,7 @@ import comfy.utils
 from comfy_api.latest import io
 
 from .io_types import PipeLine, _APPLIED_LORAS_KEY, _normalize_lora_name, record_applied_loras
+from . import model_cache
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -50,7 +51,17 @@ class SAX_Bridge_Loader(io.ComfyNode):
     @classmethod
     def execute(cls, ckpt_name, clip_skip, vae_name, lora_name, lora_model_strength, v_pred, seed, steps, cfg, sampler_name, scheduler_name, denoise, width, height, batch_size) -> io.NodeOutput:
         ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
-        out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
+        # チェックポイントのロード結果（基底 model/clip/vae）をキャッシュする。
+        # seed/steps/cfg 等のサンプリング設定はキーに含めないため、それらを変えても
+        # ディスク再読み込み・VRAM 再転送は起きない。clip_skip/LoRA/v_pred は下流で
+        # clone 上に適用されるため、キャッシュ本体は不変に保たれる。
+        out = model_cache.checkpoint_cache.get_or_load(
+            (ckpt_name, model_cache.file_token(ckpt_path)),
+            lambda: comfy.sd.load_checkpoint_guess_config(
+                ckpt_path, output_vae=True, output_clip=True,
+                embedding_directory=folder_paths.get_folder_paths("embeddings"),
+            ),
+        )
         model, clip, vae = out[0], out[1], out[2]
 
         clip = clip.clone()
@@ -58,7 +69,10 @@ class SAX_Bridge_Loader(io.ComfyNode):
 
         if vae_name != "baked_vae":
             vae_path = folder_paths.get_full_path("vae", vae_name)
-            vae = comfy.sd.VAE(sd=comfy.utils.load_torch_file(vae_path))
+            vae = model_cache.vae_cache.get_or_load(
+                (vae_name, model_cache.file_token(vae_path)),
+                lambda: comfy.sd.VAE(sd=comfy.utils.load_torch_file(vae_path)),
+            )
 
         applied_lora_names = []
         if lora_name != "None":
