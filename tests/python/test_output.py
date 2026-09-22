@@ -1,14 +1,19 @@
 """SAX_Bridge_Output / SAX_Bridge_Image_Preview ノードのテスト。"""
 
-import pytest
 import datetime
+import os
+
+import pytest
+import torch
 from unittest.mock import MagicMock, patch
 from nodes.output import (
     SAX_Bridge_Output,
     SAX_Bridge_Image_Preview,
-    _expand_template,
     _build_indexed_name,
     _build_metadata_str,
+    _expand_filename,
+    _expand_template,
+    _resolve_dir,
 )
 
 
@@ -145,3 +150,80 @@ class TestImagePreviewExecute:
     def test_none_images_returns_empty(self):
         result = SAX_Bridge_Image_Preview.execute(cell_w=200, max_cols=1, images=None)
         assert result.ui["images"] == []
+
+
+class TestPathSafety:
+    """保存先・ファイル名のサニタイズ。
+
+    output_dir の相対指定は output/ 起点（ツールチップ記載）であり、
+    filename_template はファイル名でありディレクトリ指定ではない。
+    """
+
+    def test_filename_drops_path_separators(self):
+        """`/` `\\` を残すと存在しないディレクトリへ書きに行き FileNotFoundError になる。"""
+        now = datetime.datetime(2026, 1, 1)
+        assert "/" not in _expand_filename("sub/dir/name", {}, now)
+        assert "\\" not in _expand_filename("sub\\dir\\name", {}, now)
+
+    def test_filename_keeps_normal_characters(self):
+        now = datetime.datetime(2026, 1, 1)
+        assert _expand_filename("shot-01_final", {}, now) == "shot-01_final"
+
+    def test_relative_dir_stays_under_output(self, tmp_path):
+        now = datetime.datetime(2026, 1, 1)
+        with patch("nodes.output.folder_paths.get_output_directory", return_value=str(tmp_path)):
+            resolved = _resolve_dir("../../escape/here", {}, now)
+        assert os.path.commonpath([str(tmp_path), resolved]) == str(tmp_path)
+        assert resolved == str(tmp_path / "escape" / "here")
+
+    def test_relative_dir_normal_case(self, tmp_path):
+        now = datetime.datetime(2026, 3, 15)
+        with patch("nodes.output.folder_paths.get_output_directory", return_value=str(tmp_path)):
+            resolved = _resolve_dir("{date:%Y-%m-%d}/batch", {}, now)
+        assert resolved == str(tmp_path / "2026-03-15" / "batch")
+
+    def test_absolute_dir_is_respected(self, tmp_path):
+        """絶対パス指定は output/ 外でもそのまま使う（ツールチップ記載の仕様）。"""
+        target = tmp_path / "elsewhere"
+        now = datetime.datetime(2026, 1, 1)
+        assert _resolve_dir(str(target), {}, now) == str(target)
+
+
+class TestWindowsCheckpointName:
+    """Windows で保存されたワークフローの `\\` 区切り ckpt_name を落とす。"""
+
+    def test_model_template_strips_backslash_path(self):
+        result = _expand_template(
+            "{model}", {"ckpt_name": "SDXL\\illustrious.safetensors"}, datetime.datetime(2026, 1, 1)
+        )
+        assert result == "illustrious"
+
+    def test_metadata_model_strips_backslash_path(self):
+        result = _build_metadata_str({"ckpt_name": "SDXL\\illustrious.safetensors"}, "")
+        assert "Model: illustrious" in result
+        assert "\\" not in result
+
+
+class TestPreviewTempCleanup:
+    """プレビュー temp ファイルの掃除は自分の分だけに限定する。
+
+    unique_id が取れないと prefix が "sax_preview_" になり、他ノードの
+    "sax_preview_<id>_*.webp" にも前方一致して消してしまう（フロントが 404 になる）。
+    """
+
+    def _run(self, node_id, tmp_path):
+        hidden = MagicMock()
+        hidden.unique_id = node_id
+        images = torch.zeros(1, 8, 8, 3)
+        with patch.object(SAX_Bridge_Image_Preview, "hidden", hidden, create=True), \
+             patch("nodes.output.folder_paths.get_temp_directory", return_value=str(tmp_path)), \
+             patch("nodes.output.glob.glob", return_value=[str(tmp_path / "sax_preview_9_00.webp")]), \
+             patch("nodes.output.os.remove") as rm:
+            SAX_Bridge_Image_Preview.execute(cell_w=200, max_cols=1, images=images)
+        return rm
+
+    def test_no_cleanup_without_node_id(self, tmp_path):
+        assert self._run(None, tmp_path).call_count == 0
+
+    def test_cleanup_runs_with_node_id(self, tmp_path):
+        assert self._run("7", tmp_path).call_count == 1

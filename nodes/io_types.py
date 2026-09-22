@@ -16,15 +16,20 @@ class AnyType(io.ComfyTypeIO):
 _APPLIED_LORAS_KEY = "_applied_loras"
 
 
-def _normalize_lora_name(name: str) -> str:
-    """LoRA名をパス末尾のファイル名（拡張子なし）に正規化する。
+def basename_no_ext(name: str) -> str:
+    """パス末尾のファイル名を拡張子なしで返す（実行 OS に依存しない）。
 
-    Windows で保存されたワークフローは LoRA 名を `\\` 区切りで持つため、
-    os.path.basename では Linux/macOS 上で区切りを落とせない。適用済み LoRA の
-    照合キーが実行 OS で変わらないよう、両方の区切りを自前で処理する。
+    Windows で保存されたワークフローはモデル名を `\\` 区切りで持つため、
+    os.path.basename では Linux/macOS 上で区切りを落とせない。ワークフローの
+    可搬性を保つため、`/` と `\\` の両方を区切りとして自前で処理する。
     """
     tail = name.replace("\\", "/").rpartition("/")[2]
     return os.path.splitext(tail)[0]
+
+
+def _normalize_lora_name(name: str) -> str:
+    """LoRA名を照合キー（拡張子なしのファイル名）に正規化する。"""
+    return basename_no_ext(name)
 
 
 def filter_new_loras(pipe: dict, loras: list) -> list:

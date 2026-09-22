@@ -1455,6 +1455,10 @@ export function makeItemListWidget(spec) {
 
                 const onMove = (e) => {
                     if (endCalled) return;
+                    // `set` を持たない param (onPopup 専用の ✎ など) はドラッグで値を変えられない。
+                    // ここで弾かないと p.set が例外になり、さらに _dragged が立って
+                    // endDrag の onPopup 経路まで塞がれる (= ボタンが無反応になる)。
+                    if (typeof p.set !== "function") return;
                     const dy = startY - e.clientY; // 上方向が正
                     if (!_dragged && Math.abs(dy) < 3) return;
                     _dragged = true;
@@ -1796,6 +1800,7 @@ export function makeSourceListWidget(spec, coordinator) {
             );
         }
 
+        try {
         unhideSourceLinks(node);
         for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
             const linkId = node.inputs[i]?.link;
@@ -1826,7 +1831,11 @@ export function makeSourceListWidget(spec, coordinator) {
         }
 
         _syncSlotLabels(node);
-        if (autoHints) node._rebuildHints = null;
+        } finally {
+            // 途中で例外が出ても必ず消す。残すと以後の capture/restore が古い
+            // enabledSlots で baseOffset を計算し、下流リンクが誤った出力ピンに付く。
+            if (autoHints) node._rebuildHints = null;
+        }
     }
 
     /**

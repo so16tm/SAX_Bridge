@@ -501,7 +501,7 @@ class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
             logger.info("[SAX_Bridge] Segmenter: no enabled entries, returning zero mask")
             empty_mask = torch.zeros(images.shape[0], img_h, img_w)
             # 画像はそのままプレビューとして返す
-            return (empty_mask, images)
+            return io.NodeOutput(empty_mask, images)
 
         comfy.model_management.load_models_gpu([sam3_model])
         processor    = sam3_model.processor
@@ -513,7 +513,9 @@ class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
         batch_preview_masks = []
 
         for b in range(batch_size):
-            img_np    = (images[b].cpu().numpy() * 255).astype(np.uint8)
+            # clip しないと 1.0 超過の画素が uint8 でラップアラウンドし、
+            # 白飛び部分が黒に化けたまま無言で誤ったマスクが出る (output.py と同じ扱い)
+            img_np    = (images[b].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
             pil_image = Image.fromarray(img_np[..., :3])
 
             positive_list = []
@@ -615,7 +617,9 @@ class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
         preview_images = base_img * (1.0 - apply_alpha) + colormap_rgb * apply_alpha
 
         if images.shape[-1] == 4:  # RGBA の場合は Alpha ch を維持
-            preview_images = torch.cat([preview_images, images[..., 3:]], dim=-1)
+            preview_images = torch.cat(
+                [preview_images, images[..., 3:].to(preview_images.device)], dim=-1
+            )
 
         preview_images = preview_images.clamp(0.0, 1.0)
 

@@ -316,10 +316,16 @@ function navigateToItem(item, sourceNode = null) {
 // setup() の呼び出しタイミングに依存しないようモジュールレベルで登録
 document.addEventListener("keydown", (e) => {
     if (_capturingBackKey) return;
+    // 修飾キー付きは ComfyUI 本体・他拡張のショートカット (Ctrl+M のミュート等)。
+    // 奪って preventDefault すると標準操作が壊れるので見送る。
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = e.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
-    const mgr = _managerNode ?? (app.graph._nodes ?? []).find(n => n.comfyClass === NODE_TYPE);
-    const key = mgr ? (getConfig(mgr).backKey ?? "m") : "m";
+    // Toggle Manager が 1 つも無いグラフでは何もしない。既定値 "m" で発火させると
+    // このノードパックを入れただけで素の m がサブグラフ脱出に化ける。
+    const mgr = _managerNode ?? (app.graph?._nodes ?? []).find(n => n.comfyClass === NODE_TYPE);
+    if (!mgr) return;
+    const key = getConfig(mgr).backKey ?? "m";
     if (e.key.toLowerCase() === key.toLowerCase()) {
         e.preventDefault();
         goBack();
@@ -544,11 +550,17 @@ function showSceneManager(node) {
         return b;
     };
 
+    // ✎ (Navigate key 変更) のキャプチャリスナ。キーを押さずにダイアログを閉じた場合も
+    // 必ず解除する。残すと _capturingBackKey が立ちっぱなしで m キーが死に、さらに
+    // 次に押した任意のキーが backKey として保存されてしまう。
+    let releaseKeyCapture = null;
+
     showDialog({
         title:     "Scene Manager",
         width:     400,
         maxHeight: "64vh",
         gap:       10,
+        onClose:   () => { releaseKeyCapture?.(); },
         build(dlg, close) {
 
     const list = h("div", "overflow-y:auto;flex:1;");
@@ -726,6 +738,7 @@ function showSceneManager(node) {
         "border-radius:3px;color:var(--input-text,#ddd);cursor:pointer;font-size:11px;",
         "✎");
     keyEditBtn.addEventListener("click", () => {
+        releaseKeyCapture?.();
         keyDisplay.textContent = "…";
         keyDisplay.style.color = SAX_COLORS.capture;
         _capturingBackKey = true;
@@ -740,8 +753,12 @@ function showSceneManager(node) {
                 keyDisplay.textContent = (getConfig(node).backKey ?? "m").toUpperCase();
             }
             keyDisplay.style.color = "var(--input-text,#ddd)";
+            releaseKeyCapture?.();
+        };
+        releaseKeyCapture = () => {
             _capturingBackKey = false;
             document.removeEventListener("keydown", capture, true);
+            releaseKeyCapture = null;
         };
         document.addEventListener("keydown", capture, true);
     });

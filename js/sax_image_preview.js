@@ -425,7 +425,9 @@ app.registerExtension({
             this.size[0] = calcNodeWidth(cellW, maxCols);
         };
 
+        const origWidgetChanged = nodeType.prototype.onWidgetChanged;
         nodeType.prototype.onWidgetChanged = function (name) {
+            origWidgetChanged?.apply(this, arguments);
             if (!["cell_w", "max_cols"].includes(name)) return;
             const { cellW, maxCols } = getLayoutParams(this);
             this.size[0] = calcNodeWidth(cellW, maxCols);
@@ -433,7 +435,9 @@ app.registerExtension({
             app.graph.setDirtyCanvas(true, true);
         };
 
+        const origExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (output) {
+            origExecuted?.apply(this, arguments);
             const images = output?.images ?? [];
             const w      = this._previewWidget;
             if (!w) return;

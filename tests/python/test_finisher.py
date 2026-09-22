@@ -3,6 +3,7 @@
 import pytest
 import torch
 
+from nodes.noise import unsharp_mask
 from nodes.finisher import (
     SAX_Bridge_Finisher,
     _apply_smooth,
@@ -336,3 +337,61 @@ class TestFinisherExecute:
         assert result[1].shape == pipe["images"].shape
         assert result[1].min() >= 0.0
         assert result[1].max() <= 1.0
+
+
+class TestColorCorrectionBatchMismatch:
+    """reference_image のバッチ数が images と違っても落ちない。
+
+    参照画像の統計は (B_ref, C, 1, 1) なので、B_ref が 1 でも B でもないと
+    ブロードキャストできず RuntimeError になっていた。
+    """
+
+    @pytest.mark.parametrize("b_ref", [1, 2, 3, 4])
+    def test_any_reference_batch_works(self, b_ref):
+        rgb = torch.rand(4, 3, 16, 16)
+        reference = torch.rand(b_ref, 3, 16, 16)
+        result = _apply_color_correction(rgb, reference, 1.0)
+        assert result.shape == rgb.shape
+        assert torch.isfinite(result).all()
+
+    def test_matching_batch_is_per_frame(self):
+        """バッチ数が一致するときは従来通りフレームごとに合わせる。"""
+        rgb = torch.rand(2, 3, 8, 8)
+        reference = torch.stack([torch.full((3, 8, 8), 0.2), torch.full((3, 8, 8), 0.8)])
+        result = _apply_color_correction(rgb, reference, 1.0)
+        assert result[0].mean().item() == pytest.approx(0.2, abs=1e-4)
+        assert result[1].mean().item() == pytest.approx(0.8, abs=1e-4)
+
+    def test_single_reference_broadcasts_to_all_frames(self):
+        rgb = torch.rand(3, 3, 8, 8)
+        reference = torch.full((1, 3, 8, 8), 0.5)
+        result = _apply_color_correction(rgb, reference, 1.0)
+        for i in range(3):
+            assert result[i].mean().item() == pytest.approx(0.5, abs=1e-4)
+
+    def test_execute_with_mismatched_reference_batch(self):
+        """ノード経由でも RuntimeError にならない。"""
+        pipe = {"images": _make_images(4, 16, 16, 3)}
+        reference = _make_images(2, 16, 16, 3)
+        result = SAX_Bridge_Finisher.execute(
+            pipe, **_execute_kwargs(color_correction=0.8), reference_image=reference
+        )
+        assert result[1].shape[0] == 4
+
+
+class TestSharpenSharesImplementation:
+    """Finisher のシャープ化は Detailer と同じ separable 実装を共有する。
+
+    以前は Finisher 側だけ 2D カーネルを手書きしており、片方を直しても
+    もう片方に反映されない状態だった（数値は一致していた）。
+    """
+
+    @pytest.mark.parametrize("sigma", [0.5, 1.0, 3.0])
+    def test_matches_detailer_unsharp_mask(self, sigma):
+        rgb = torch.rand(2, 3, 32, 32)
+        assert torch.allclose(_apply_sharpen(rgb, 0.7, sigma), unsharp_mask(rgb, 0.7, sigma))
+
+    def test_zero_strength_returns_input_unchanged(self):
+        """0 は「無補正」なので clamp も掛けず入力をそのまま返す。"""
+        rgb = torch.rand(1, 3, 8, 8) * 2.0 - 0.5  # 値域外を含める
+        assert torch.equal(_apply_sharpen(rgb, 0.0, 1.0), rgb)

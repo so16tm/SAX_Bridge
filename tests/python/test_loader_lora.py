@@ -231,3 +231,38 @@ class TestLoaderLoraImmutability:
             )
         assert pipe["model"] is orig_model
         assert result.args[0] is not pipe
+
+
+class TestMalformedEntries:
+    """loras_json に型の崩れたエントリが混ざっても落ちない。
+
+    クラス docstring が「読み込みに失敗した場合は警告ログを出してスキップ（継続実行）」
+    と宣言しているので、例外でノードごと落とさない。
+    """
+
+    @pytest.mark.parametrize("entry", [
+        '"a string"',                              # 要素が dict でない
+        "123",                                     # 要素が数値
+        "null",
+        '{"on": true, "lora": 123}',               # lora が数値
+        '{"on": true, "lora": "x.safetensors", "strength": "high"}',  # strength が数値でない
+    ])
+    def test_bad_entry_does_not_raise(self, entry):
+        pipe = _make_pipe()
+        ctx, _ = _patch_lora_loader()
+        with ctx:
+            result = SAX_Bridge_Loader_Lora.execute(pipe=pipe, enabled=True, loras_json=f"[{entry}]")
+        assert isinstance(result.args[0], dict)
+
+    def test_valid_entry_still_applied_after_bad_one(self):
+        """不正エントリでループを止めず、後続の正常エントリは適用される。"""
+        pipe = _make_pipe()
+        ctx, fake = _patch_lora_loader()
+        with ctx:
+            SAX_Bridge_Loader_Lora.execute(
+                pipe=pipe,
+                enabled=True,
+                loras_json='["junk", {"on": true, "lora": "ok.safetensors", "strength": 1.0}]',
+            )
+        assert fake.load_lora.call_count == 1
+        assert fake.load_lora.call_args[0][2] == "ok.safetensors"
