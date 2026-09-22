@@ -5,8 +5,11 @@
 ```
 tests/
 ├── python/          # Level 1: pytest 自動テスト
-│   ├── conftest.py  #   ComfyUI 依存の mock 環境
-│   └── test_*.py    #   ノード単体テスト + V3 スキーマ検証 + legacy-fixture 不変性
+│   ├── conftest.py            # ComfyUI 依存の mock 環境
+│   ├── _node_registry.py      # __init__.py の登録リストからノードを抽出する共通処理
+│   ├── _docs_reference.py     # docs/nodes_*.md のノード節パーサ
+│   └── test_*.py              # ノード単体テスト + V3 スキーマ検証
+│                              # + docs 整合検証 + legacy-fixture 不変性
 ├── js/              # Level 1: Node.js テスト
 │   └── *.test.mjs   #   JS serialize/deserialize テスト
 ├── unit/            # Level 1: Node.js テスト (DynamicSlotCoordinator 単体)
