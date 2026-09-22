@@ -4,6 +4,10 @@
 
 [← Back to README](../README.md)
 
+> The node IDs, display names, categories and **Inputs** (widget) lists on this page are checked
+> against each node's `define_schema()` in CI by `tests/python/test_docs_schema_sync.py`.
+> When you change the implementation, update this page and `docs/nodes_ja.md` as well.
+
 ---
 
 ## Category List
@@ -14,13 +18,13 @@
 | [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
 | [Pipe](#pipe) | Pipe construction and switching | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | Prompt encoding and concatenation | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
-| [Enhance](#enhance) | Detailer / Upscaler / Finisher | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
+| [Enhance](#enhance) | Guidance / Detailer / Upscaler / Finisher | [SAX Guidance](#sax-guidance) / [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
 | [Option](#option) | Standalone utilities (noise injection etc.) | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | Segmentation via SAM3 | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | [Mask](#mask) | Mask post-processing | [SAX Mask Adjust](#sax-mask-adjust) |
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
-| [Debug](#debug) | Debugging & testing | [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
+| [Debug](#debug) | Debugging & testing | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
 | [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
@@ -226,6 +230,8 @@ In the normal flow (Loader → Pipe → KSampler), `loader_settings` is always p
 |-----------|-----|------|
 | `pipe` | PIPE_LINE | Input pipe |
 | `wildcard_text` | String (multiline) | Prompt text. Supports wildcards (`__tag__`), LoRA tags (`<lora:name:weight>`), and `BREAK` syntax |
+| `select_to_add_lora` | Combo | LoRA picker. Selecting an entry appends `<lora:name>` to `wildcard_text` (the value itself is unused at execution) |
+| `select_to_add_wildcard` | Combo | Wildcard picker. Selecting an entry appends `__tag__` to `wildcard_text` (the value itself is unused at execution) |
 
 **Outputs**: `PIPE`, `POPULATED_TEXT` (expanded text)
 
@@ -244,7 +250,7 @@ In the normal flow (Loader → Pipe → KSampler), `loader_settings` is always p
 
 `SAX_Bridge_Prompt_Concat` — Concatenates multiple text inputs (up to 32 ports) and processes them together.
 
-**Inputs**: `pipe`, `target_positive` (Boolean), `text_1` to `text_N` (variable, up to 32)
+**Inputs**: `pipe`, `target_positive` (Boolean), `texts` (Autogrow; grows from `text1` up to 32 ports)
 
 **Outputs**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
 
@@ -255,6 +261,41 @@ Use `target_positive` to choose whether the result is stored in Positive or Nega
 ---
 
 ## Enhance
+
+### SAX Guidance
+
+`SAX_Bridge_Guidance` — Applies AGC / FDG / PAG guidance enhancement to the model in the Pipe. Insert it before KSampler, Detailer, or Upscaler.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | Input pipe |
+| `mode` | Combo | `off` / `agc` / `fdg` / `agc+fdg` (default) / `post_fdg` |
+| `strength` | Float (0.0 to 1.0) | AGC / FDG intensity. `0.0` = disabled, `0.5` = moderate, `1.0` = maximum |
+| `pag_strength` | Float (0.0 to 1.0) | PAG (Perturbed Attention Guidance) intensity. `0.0` = disabled. Can be combined with any `mode` |
+
+**Outputs**: `PIPE` (with the model replaced)
+
+**Modes**
+
+| mode | Hook | Purpose |
+|------|------|---------|
+| `off` | — | Guidance disabled (`pag_strength` can still apply) |
+| `agc` | `sampler_cfg_function` | Soft-clips high-CFG spikes with tanh to avoid blowouts |
+| `fdg` | `sampler_cfg_function` | Splits frequency bands and boosts the high band for detail (for high CFG) |
+| `agc+fdg` | `sampler_cfg_function` | Both of the above |
+| `post_fdg` | `sampler_post_cfg_function` | Band splitting that also works at low CFG / low-step LoRA |
+
+**Behavior**:
+- Returns the Pipe unchanged when `mode` is `off` or `strength` is `0.0`, and `pag_strength` is also `0.0`
+- Returns the Pipe unchanged (no error) when the Pipe has no `model`
+- PAG is added as a post_cfg_function, so it composes with the `mode` guidance
+- When PAG is active, one extra forward pass per step is performed
+
+[↑ Back to top](#top)
+
+---
 
 ### SAX Detailer
 
@@ -437,7 +478,7 @@ If all effects are disabled (0 / False) and `reference_image` is not connected, 
 
 **Inputs**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
 
-**Outputs**: `LATENT`
+**Outputs**: `SAMPLES` (LATENT)
 
 > **No value clamping**: Latent-space noise injection does not clamp values (the image-space `SAX Image Noise` clamps to `[0, 1]`). At high `intensity`, latent values may exceed ±1.0 — this is intentional by design.
 
@@ -458,7 +499,7 @@ If all effects are disabled (0 / False) and `reference_image` is not connected, 
 | `model_name` | Combo | Checkpoint file in the `models/sam3/` directory |
 | `precision` | Combo | `fp32` (best quality, recommended) / `bf16` (lower VRAM, Ampere+) / `fp16` (lower VRAM, Volta+) / `auto` (automatically selected based on GPU) |
 
-**Outputs**: `CSAM3_MODEL`
+**Outputs**: `SAM3_MODEL` (type: `CSAM3_MODEL`)
 
 > **Model placement**: Place `.pt` / `.pth` files in `ComfyUI/models/sam3/`.
 
@@ -676,6 +717,10 @@ output/2026-03-20/001_20260320_153045.webp
 
 > Unlike Set/Get nodes, this uses actual wiring connections and runs on ComfyUI's normal execution graph.
 
+**Inputs**: `slot_0` to `slot_31` (ANY, optional) — Registered source outputs are wired here in order (slots are managed by the UI)
+
+**Outputs**: `out_0` to `out_31` (ANY) — Forwards the value of the input slot with the same index downstream
+
 #### Key Features
 
 - Open picker with `+ Add Source` button to select and add multiple nodes (up to 32 slots)
@@ -717,6 +762,26 @@ output/2026-03-20/001_20260320_153045.webp
 
 ## Debug
 
+### SAX Debug Controller
+
+`SAX_Bridge_Debug_Controller` — A debug switch that emits an execution report for every SAX node in the workflow. Drop one anywhere in the graph and turn it ON.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `enabled` | Boolean (ON / OFF) | `ON` requests report output for this workflow run |
+
+**Outputs**: None (`Debug logging: ON` / `OFF` shown in the node UI)
+
+**Behavior**:
+- Every SAX node's execute is always wrapped and keeps recording, so this node only toggles whether those records are reported. The Controller's position in the execution order therefore does not matter
+- On workflow completion, a flow report is logged and a JSONL file is written to `sax_debug/sax_debug_<UTC timestamp>.jsonl` (under the non-HTTP-exposed system user directory; up to 20 files are kept)
+- `OFF` both withdraws the report and stops record accumulation entirely
+- Caching is always bypassed so the node executes every run, guaranteeing the toggle takes effect
+
+[↑ Back to top](#top)
+
 ### SAX Debug Inspector
 
 `SAX_Bridge_Debug_Inspector` — Inspects a `PIPE_LINE` and displays its internal fields (model/clip/vae existence, seed, loader_settings values, images/samples shape, applied_loras, etc.) in the node UI.
@@ -745,7 +810,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Debug_Text` — Displays an arbitrary string value in the node UI. Useful for checking `POPULATED_TEXT`, intermediate prompts, metadata, or any other string value.
 
-**Inputs**: `text` (STRING, multiline)
+**Inputs**: `value` (ANY)
 
 **Outputs**: None (text displayed in node UI)
 
@@ -753,7 +818,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 ### SAX Assert
 
-`SAX_Bridge_Assert` — Asserts that a value meets the expected condition. Use `stop_on_fail` to choose between halting the workflow on mismatch or just emitting a warning log.
+`SAX_Bridge_Assert` — Asserts that a value meets the expected condition. A mismatch never halts the workflow: the node UI shows FAIL and a warning is logged.
 
 **Inputs**
 
@@ -763,7 +828,6 @@ applied_loras: {'lora_a'} (1 entries)
 | `mode` | Combo | Assertion mode (see table below) |
 | `expected` | String | Expected value (auto-parsed based on mode) |
 | `label` | String | UI label |
-| `stop_on_fail` | Boolean | True: raise RuntimeError on fail / False: warn only |
 
 **Outputs**: None (PASS/FAIL shown in node UI with color-coded border: PASS=green / FAIL=red / ERROR=orange)
 
@@ -800,7 +864,7 @@ applied_loras: {'lora_a'} (1 entries)
 |-----------|------|-------------|
 | `value` | ANY | Target (typically PIPE_LINE) |
 | `path` | String | Dot-separated path (e.g. `loader_settings.steps`) |
-| `mode` / `expected` / `label` / `stop_on_fail` | — | Same as SAX Assert |
+| `mode` / `expected` / `label` | — | Same as SAX Assert |
 
 **Path resolution**: Each segment is tried in order as `dict[key]` → `getattr` → integer index. On failure, a `RuntimeError` is raised listing the available keys/attrs.
 
@@ -815,6 +879,8 @@ applied_loras: {'lora_a'} (1 entries)
 ### SAX Primitive Store
 
 `SAX_Bridge_Primitive_Store` — Defines and manages shared primitive variables used throughout the workflow in one place. Adding items dynamically creates output slots that distribute values to downstream nodes.
+
+**Inputs**: `items_json` (String, hidden) — JSON array of item definitions, managed automatically by the node UI
 
 **Outputs**: Dynamically generated per item (INT / FLOAT / STRING / BOOLEAN)
 
@@ -836,6 +902,14 @@ applied_loras: {'lora_a'} (1 entries)
 ### SAX Text Catalog
 
 `SAX_Bridge_Text_Catalog` — Manages named texts (prompts, etc.) as an in-node catalog and assigns them to output slots via Relations. Lets you maintain multiple prompts as a binder and switch between them without rewiring the workflow.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `items_json` | String (hidden) | JSON of the Catalog and its Relations, managed automatically by the Manager Dialog and node UI |
+| `select_to_add_lora` | Combo (hidden) | Option source for the Manager Editor's LoRA picker. Unused at execution |
+| `select_to_add_wildcard` | Combo (hidden) | Option source for the Manager Editor's Wildcard picker. Unused at execution |
 
 **Outputs**: STRING outputs dynamically generated per Relation
 
@@ -955,6 +1029,10 @@ This aligns with the empty-string skip behavior of downstream nodes such as `SAX
 `SAX_Bridge_Toggle_Manager` — A control node that batch-manages the bypass state and widget values of groups, subgraphs, nodes, and Boolean widgets on a per-scene basis.
 
 > **No execution required**: Scene switching and toggle operations take effect immediately on the frontend. No queue addition needed.
+
+**Inputs**: `config_json` (String, hidden) — Scene configuration JSON, managed by the frontend; no direct editing needed
+
+**Outputs**: None (frontend-only control node)
 
 #### Key Features
 

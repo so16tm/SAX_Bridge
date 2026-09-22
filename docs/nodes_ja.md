@@ -4,6 +4,10 @@
 
 [← README に戻る](../README_ja.md)
 
+> このページのノード ID・表示名・カテゴリ・**入力**（ウィジェット）一覧は、
+> `tests/python/test_docs_schema_sync.py` が各ノードの `define_schema()` と CI で突き合わせています。
+> 実装を変えたらこのページと `docs/nodes_en.md` も合わせて更新してください。
+
 ---
 
 ## カテゴリ一覧
@@ -14,13 +18,13 @@
 | [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
 | [Pipe](#pipe) | Pipe の構築・切替 | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
-| [Enhance](#enhance) | Detailer / Upscaler / Finisher | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
+| [Enhance](#enhance) | Guidance / Detailer / Upscaler / Finisher | [SAX Guidance](#sax-guidance) / [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
 | [Option](#option) | 独立ユーティリティ（ノイズ注入等） | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | SAM3 によるセグメンテーション | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | [Mask](#mask) | マスクの後処理 | [SAX Mask Adjust](#sax-mask-adjust) |
 | [Output](#output) | 出力・プレビュー | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | ノード・画像・Pipe の集約 | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
-| [Debug](#debug) | デバッグ・テスト用 | [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
+| [Debug](#debug) | デバッグ・テスト用 | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
 | [Utility](#utility) | Pipe 内部ヘルパー | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
@@ -226,6 +230,8 @@
 |-----------|-----|------|
 | `pipe` | PIPE_LINE | 入力パイプ |
 | `wildcard_text` | String (multiline) | プロンプトテキスト。Wildcard (`__tag__`)・LoRA タグ (`<lora:name:weight>`)・`BREAK` 構文に対応 |
+| `select_to_add_lora` | Combo | LoRA ピッカー。選ぶと `wildcard_text` の末尾へ `<lora:名前>` を挿入する（値自体は実行に使われない） |
+| `select_to_add_wildcard` | Combo | Wildcard ピッカー。選ぶと `wildcard_text` の末尾へ `__タグ__` を挿入する（値自体は実行に使われない） |
 
 **出力**: `PIPE`, `POPULATED_TEXT`（展開後テキスト）
 
@@ -244,7 +250,7 @@
 
 `SAX_Bridge_Prompt_Concat` — 複数のテキスト入力（最大 32 ポート）を連結して一括処理します。
 
-**入力**: `pipe`, `target_positive` (Boolean), `text_1`〜`text_N`（可変、最大 32）
+**入力**: `pipe`, `target_positive` (Boolean), `texts`（Autogrow。`text1` から最大 32 ポートまで自動増減）
 
 **出力**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
 
@@ -255,6 +261,41 @@
 ---
 
 ## Enhance
+
+### SAX Guidance
+
+`SAX_Bridge_Guidance` — Pipe 内のモデルに AGC / FDG / PAG のガイダンス強化を適用するノードです。KSampler・Detailer・Upscaler より前に挿入して使います。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | 入力パイプ |
+| `mode` | Combo | `off` / `agc` / `fdg` / `agc+fdg`（既定）/ `post_fdg` |
+| `strength` | Float (0.0〜1.0) | AGC / FDG の効き。`0.0` で無効、`0.5` で標準、`1.0` で最大 |
+| `pag_strength` | Float (0.0〜1.0) | PAG (Perturbed Attention Guidance) の強度。`0.0` で無効。`mode` と併用可能 |
+
+**出力**: `PIPE`（model を差し替え）
+
+**mode 一覧**
+
+| mode | 適用フック | 用途 |
+|------|-----------|------|
+| `off` | — | ガイダンス無効（`pag_strength` のみ適用可能） |
+| `agc` | `sampler_cfg_function` | 高 CFG のスパイクを tanh でソフトクリップして破綻を抑える |
+| `fdg` | `sampler_cfg_function` | 帯域分離して高域ゲインを上げ、ディテールを強調（高 CFG 向け） |
+| `agc+fdg` | `sampler_cfg_function` | 上記の併用 |
+| `post_fdg` | `sampler_post_cfg_function` | 低 CFG・低ステップ LoRA でも効く帯域分離 |
+
+**動作**:
+- `mode` が `off` か `strength` が `0.0` で、かつ `pag_strength` も `0.0` の場合は Pipe をそのまま返す
+- Pipe に `model` が無い場合もそのまま返す（エラーにしない）
+- PAG は post_cfg_function として追加されるため、`mode` のガイダンスと同時に使える
+- PAG 有効時は 1 ステップあたり 1 回分の追加 forward が発生する
+
+[↑ トップへ](#top)
+
+---
 
 ### SAX Detailer
 
@@ -437,7 +478,7 @@ color_correction → smooth → sharpen → bloom → vignette → color_temp �
 
 **入力**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
 
-**出力**: `LATENT`
+**出力**: `SAMPLES` (LATENT)
 
 > **値域クランプなし**: Latent 空間のノイズ注入は値域クランプを行いません（画像空間の `SAX Image Noise` は `[0, 1]` にクランプします）。強い `intensity` では latent 値が ±1.0 を超える場合がありますが、これは設計上の意図です。
 
@@ -458,7 +499,7 @@ color_correction → smooth → sharpen → bloom → vignette → color_temp �
 | `model_name` | Combo | `models/sam3/` ディレクトリ内のチェックポイントファイル |
 | `precision` | Combo | `fp32`（最高品質・推奨）/ `bf16`（Ampere+ 省 VRAM）/ `fp16`（Volta+ 省 VRAM）/ `auto`（GPU に応じて自動選択） |
 
-**出力**: `CSAM3_MODEL`
+**出力**: `SAM3_MODEL`（型: `CSAM3_MODEL`）
 
 > **モデルの配置**: `ComfyUI/models/sam3/` に `.pt` / `.pth` ファイルを配置してください。
 
@@ -676,6 +717,10 @@ output/2026-03-20/001_20260320_153045.webp
 
 > Set/Get ノードと異なり実際の配線で接続するため、ComfyUI の通常の実行グラフに乗ります。
 
+**入力**: `slot_0` 〜 `slot_31` (ANY, optional) — 登録したソースの出力が順に接続される（スロットは UI が自動管理）
+
+**出力**: `out_0` 〜 `out_31` (ANY) — 同じ番号の入力スロットの値をそのまま下流へ転送
+
 #### 主な機能
 
 - `+ Add Source` ボタンでピッカーを開き、複数のノードを選択・追加（最大 32 スロット）
@@ -717,6 +762,26 @@ output/2026-03-20/001_20260320_153045.webp
 
 ## Debug
 
+### SAX Debug Controller
+
+`SAX_Bridge_Debug_Controller` — ワークフロー内の全 SAX ノードの実行記録をレポート出力するデバッグスイッチです。ワークフローのどこかに 1 つ置いて ON にするだけで使えます。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `enabled` | Boolean (ON / OFF) | `ON` でこのワークフロー分のレポート出力を要求する |
+
+**出力**: なし（ノード UI に `Debug logging: ON` / `OFF` を表示）
+
+**動作**:
+- 全 SAX ノードの execute は常にラップされて実行記録を蓄積しており、このノードは「その記録をレポートとして出すかどうか」だけを切り替える。そのため Controller の実行順序に関係なく、ワークフロー内の全ノードの記録が取れる
+- ワークフロー完了時にフローレポートをログへ出力し、併せて JSONL を `sax_debug/sax_debug_<UTC時刻>.jsonl` に書き出す（HTTP 非公開の system user ディレクトリ配下。最大 20 ファイルを保持）
+- `OFF` にするとレポート出力の取り下げに加え、記録の蓄積自体を停止する
+- キャッシュを常に外して毎回 execute されるため、トグルの状態が必ず反映される
+
+[↑ トップへ](#top)
+
 ### SAX Debug Inspector
 
 `SAX_Bridge_Debug_Inspector` — `PIPE_LINE` の内部フィールド（model/clip/vae の有無、seed、loader_settings の各値、images/samples の shape、applied_loras 等）を整形してノード UI に表示するデバッグノードです。
@@ -745,7 +810,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Debug_Text` — 任意の文字列値をノード UI に表示するノードです。`POPULATED_TEXT` の確認や、中間プロンプト・メタデータ・任意の文字列値の確認に利用します。
 
-**入力**: `text` (STRING, multiline)
+**入力**: `value` (ANY)
 
 **出力**: なし（ノード UI にテキスト表示）
 
@@ -753,7 +818,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 ### SAX Assert
 
-`SAX_Bridge_Assert` — 任意の値が期待条件を満たすかを検証するノードです。不一致時にワークフロー全体を停止させるか、warning ログを出すだけかを `stop_on_fail` で選択できます。
+`SAX_Bridge_Assert` — 任意の値が期待条件を満たすかを検証するノードです。不一致でもワークフローは停止せず、ノード UI に FAIL を表示して warning ログを出します。
 
 **入力**
 
@@ -763,7 +828,6 @@ applied_loras: {'lora_a'} (1 entries)
 | `mode` | Combo | assertion モード（下表参照） |
 | `expected` | String | 期待値（mode に応じて自動パース） |
 | `label` | String | UI 表示用ラベル |
-| `stop_on_fail` | Boolean | True: 失敗時に RuntimeError / False: warning ログのみ |
 
 **出力**: なし（ノード UI に PASS/FAIL 表示、PASS=緑 / FAIL=赤 / ERROR=橙の枠線）
 
@@ -800,7 +864,7 @@ applied_loras: {'lora_a'} (1 entries)
 |-----------|-----|------|
 | `value` | ANY | 対象（通常は PIPE_LINE） |
 | `path` | String | ドット区切りパス（例: `loader_settings.steps`） |
-| `mode` / `expected` / `label` / `stop_on_fail` | — | SAX Assert と同一 |
+| `mode` / `expected` / `label` | — | SAX Assert と同一 |
 
 **path 解決ルール**: 各セグメントを `dict[key]` → `getattr` → `value[int(seg)]`（インデックス）の順に試行。解決失敗時は `RuntimeError` に available keys/attrs を含めて送出します。
 
@@ -815,6 +879,8 @@ applied_loras: {'lora_a'} (1 entries)
 ### SAX Primitive Store
 
 `SAX_Bridge_Primitive_Store` — ワークフロー内で利用する共通プリミティブ変数を一か所で定義・管理するノードです。アイテムを追加するたびに出力スロットが増え、下流ノードへ値を配布します。
+
+**入力**: `items_json` (String, hidden) — アイテム定義の JSON 配列。ノード UI が自動管理
 
 **出力**: アイテムごとに動的生成（INT / FLOAT / STRING / BOOLEAN）
 
@@ -836,6 +902,14 @@ applied_loras: {'lora_a'} (1 entries)
 ### SAX Text Catalog
 
 `SAX_Bridge_Text_Catalog` — 名前付きテキスト（プロンプト等）をノード内のカタログとして保管し、Relation 経由で出力スロットに割り当てるノードです。複数のプロンプトをバインダー的に管理し、ワークフロー側を書き換えずに切替できます。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `items_json` | String (hidden) | Catalog と Relation の JSON。Manager Dialog / ノード UI が自動管理 |
+| `select_to_add_lora` | Combo (hidden) | Manager Editor の LoRA ピッカーが選択肢ソースとして参照する。実行では未使用 |
+| `select_to_add_wildcard` | Combo (hidden) | Manager Editor の Wildcard ピッカーが選択肢ソースとして参照する。実行では未使用 |
 
 **出力**: Relation ごとに動的生成された STRING 出力
 
@@ -955,6 +1029,10 @@ applied_loras: {'lora_a'} (1 entries)
 `SAX_Bridge_Toggle_Manager` — グループ・サブグラフ・ノード・Boolean ウィジェットの bypass / 値をシーン単位で一括管理するコントロールノードです。
 
 > **実行不要**: シーン切り替えとトグル操作はすべてフロントエンドで即時反映されます。キューへの追加は不要です。
+
+**入力**: `config_json` (String, hidden) — シーン設定の JSON。JS が管理するため直接編集は不要
+
+**出力**: なし（フロントエンド専用のコントロールノード）
 
 #### 主な機能
 

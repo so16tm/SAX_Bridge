@@ -90,21 +90,48 @@ class _Schema:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
+def _stub_input(io_type, args, kwargs, **extra):
+    """入力スタブを生成する。
+
+    ドキュメント整合テスト (``test_docs_schema_sync.py``) が id / optional /
+    min / max を読むため、第 1 引数の id と主要な制約値を必ず属性へ載せる。
+    未指定の制約は ``None``（MagicMock の自動属性と区別するため明示）。
+    """
+    m = MagicMock(
+        id=args[0] if args else None,
+        io_type=io_type,
+        optional=bool(kwargs.get("optional", False)),
+        default=kwargs.get("default"),
+        min=kwargs.get("min"),
+        max=kwargs.get("max"),
+        step=kwargs.get("step"),
+    )
+    for key, value in extra.items():
+        setattr(m, key, value)
+    return m
+
+
+def _stub_output(io_type, args, kwargs):
+    return MagicMock(
+        id=args[0] if args else None,
+        io_type=io_type,
+        display_name=kwargs.get("display_name"),
+    )
+
+
 class _InputFactory:
     def __init__(self, io_type="*"):
         self.io_type = io_type
 
     def Input(self, *args, **kwargs):
-        return MagicMock(id=args[0] if args else None, io_type=self.io_type)
+        return _stub_input(self.io_type, args, kwargs)
 
     def Output(self, *args, **kwargs):
-        return MagicMock(io_type=self.io_type, display_name=kwargs.get("display_name"))
+        return _stub_output(self.io_type, args, kwargs)
 
 class _ComboFactory(_InputFactory):
     def Input(self, *args, **kwargs):
-        m = MagicMock(id=args[0] if args else None, io_type="COMBO")
-        m.options = kwargs.get("options", [])
-        return m
+        return _stub_input("COMBO", args, kwargs, options=kwargs.get("options", []))
 
 class _AutogrowFactory:
     io_type = "AUTOGROW"
@@ -112,7 +139,7 @@ class _AutogrowFactory:
 
     @staticmethod
     def Input(*args, **kwargs):
-        return MagicMock(io_type="AUTOGROW")
+        return _stub_input("AUTOGROW", args, kwargs)
 
     class TemplatePrefix:
         def __init__(self, *args, **kwargs):
@@ -126,8 +153,8 @@ class _HiddenEnum:
 def _comfytype(**kwargs):
     def decorator(cls):
         cls.io_type = kwargs.get("io_type", "*")
-        cls.Input = classmethod(lambda c, *a, **kw: MagicMock(io_type=cls.io_type))
-        cls.Output = classmethod(lambda c, *a, **kw: MagicMock(io_type=cls.io_type))
+        cls.Input = classmethod(lambda c, *a, **kw: _stub_input(cls.io_type, a, kw))
+        cls.Output = classmethod(lambda c, *a, **kw: _stub_output(cls.io_type, a, kw))
         return cls
     return decorator
 
