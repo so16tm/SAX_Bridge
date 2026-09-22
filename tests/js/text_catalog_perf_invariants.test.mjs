@@ -83,13 +83,14 @@ function referenceSerialize(state) {
     });
 }
 
-function buildNode({ itemCount, relations, id = 1 }) {
+function buildNode({ itemCount, relations, id = 1, mergeOutputs = false }) {
     const graph = makeGraph();
     const node = makeNode({ id, graph });
     node.widgets = [
         { name: "items_json", type: "text", value: JSON.stringify(makeStatePayload({ itemCount, relations })) },
         { name: "select_to_add_lora", type: "combo", value: "", options: { values: [] } },
         { name: "select_to_add_wildcard", type: "combo", value: "", options: { values: [] } },
+        { name: "merge_outputs", type: "toggle", value: mergeOutputs, callback: null },
     ];
     nodeType.prototype.onConfigure.call(node, {});
     return { node, graph };
@@ -194,6 +195,56 @@ describe("TextCatalog: findItemById の id 索引", () => {
         assert.equal(node.outputs[0].name, "Preset 63");
         node._saxCoordinator.applySaveOnly(node._textCatalogState.relations);
         assert.equal(node.outputs[0].name, "Preset 63");
+    });
+});
+
+describe("TextCatalog: merge_outputs", () => {
+    it("merged mode は単一 merged STRING ピンとして復元される", () => {
+        const { node } = buildNode({
+            itemCount: 4,
+            relations: [
+                { item_id: "item-0", on: true },
+                { item_id: "item-1", on: true },
+            ],
+            mergeOutputs: true,
+        });
+        assert.equal(node.outputs.length, 1);
+        assert.equal(node.outputs[0].name, "merged");
+        assert.equal(node.outputs[0].type, "STRING");
+    });
+
+    it("individual → merged → individual の切替で出力構造が復元される", () => {
+        const { node } = buildNode({
+            itemCount: 4,
+            relations: [
+                { item_id: "item-0", on: true },
+                { item_id: "item-1", on: true },
+            ],
+        });
+        const mergeWidget = node.widgets.find(w => w.name === "merge_outputs");
+        assert.deepEqual(node.outputs.map(o => o.name), ["Preset 0", "Preset 1"]);
+
+        mergeWidget.value = true;
+        mergeWidget.callback?.(true);
+        assert.deepEqual(node.outputs.map(o => o.name), ["merged"]);
+
+        mergeWidget.value = false;
+        mergeWidget.callback?.(false);
+        assert.deepEqual(node.outputs.map(o => o.name), ["Preset 0", "Preset 1"]);
+    });
+
+    it("merged 中の relation 更新でも単一ピンを維持する", () => {
+        const { node } = buildNode({
+            itemCount: 4,
+            relations: [{ item_id: "item-0", on: true }],
+            mergeOutputs: true,
+        });
+        node._saxCoordinator.applySaveOnly([
+            ...node._textCatalogState.relations,
+            { item_id: "item-1", on: true },
+        ]);
+        assert.equal(node.outputs.length, 1);
+        assert.equal(node.outputs[0].name, "merged");
     });
 });
 

@@ -910,8 +910,9 @@ applied_loras: {'lora_a'} (1 entries)
 | `items_json` | String (hidden) | Catalog と Relation の JSON。Manager Dialog / ノード UI が自動管理 |
 | `select_to_add_lora` | Combo (hidden) | Manager Editor の LoRA ピッカーが選択肢ソースとして参照する。実行では未使用 |
 | `select_to_add_wildcard` | Combo (hidden) | Manager Editor の Wildcard ピッカーが選択肢ソースとして参照する。実行では未使用 |
+| `merge_outputs` | Boolean | `individual`: Relation ごとに出力 / `merged`: 有効な Relation のテキストを改行結合して単一出力 |
 
-**出力**: Relation ごとに動的生成された STRING 出力
+**出力**: `individual` は Relation ごとの STRING、`merged` は単一の `merged` STRING
 
 #### 4 要素モデル
 
@@ -927,6 +928,7 @@ applied_loras: {'lora_a'} (1 entries)
 **ノード本体ウィジェット**
 - `📖 Manage Texts...` ボタン / 右クリックメニューで Manager Dialog を起動
 - `[+ Add Relation]` で Relation を追加すると同時に出力 Slot も増える
+- `merge_outputs` を `merged` にすると、ON の Relation テキストを strip → 空文字除外 → 改行結合し、単一の `merged` 出力へ集約する
 - Relation を追加 / 削除 / 並べ替えしても、後続ノード（`SAX Prompt Concat` 等の動的入力ノードを含む）への接続は維持される
 - 各 Relation 行に行頭トグル（pill）/ `[✎]`（Item 選択）/ `[↑↓]`（並び替え）/ `[×]`（削除）
 - 行頭トグルを OFF にすると、Item 割当を残したまま Slot 出力を空文字にできる（一時的に出力を止める用途）
@@ -990,6 +992,8 @@ applied_loras: {'lora_a'} (1 entries)
 | Relation が削除済み Item を参照 | `""` |
 
 下流ノード（`SAX Prompt Concat` 等）の空文字スキップ実装と整合します。
+
+`merge_outputs=merged` では上表の判定後に残った文字列を `strip()` し、空文字を除外して改行で結合します。バックエンドでは `out_0` に結合結果、`out_1..31` に空文字を返し、フロントエンドは単一の `merged` ピンだけを表示します。
 
 > **互換性**: 旧ワークフロー（`on` フィールドが存在しない `items_json`）は ON 扱いで読み込まれます（後方互換）。
 

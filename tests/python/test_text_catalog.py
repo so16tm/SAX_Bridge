@@ -389,13 +389,13 @@ class TestNodeIntegration:
         schema = SAX_Bridge_Text_Catalog.GET_SCHEMA()
         assert len(schema.outputs) == MAX_RELATIONS
 
-    def test_is_changed_returns_input_json(self):
-        result = SAX_Bridge_Text_Catalog.IS_CHANGED(items_json="{}")
-        assert result == "{}"
-
-        payload = _make_payload()
-        result = SAX_Bridge_Text_Catalog.IS_CHANGED(items_json=payload)
-        assert result == payload
+    def test_is_changed_includes_merge_mode(self):
+        assert SAX_Bridge_Text_Catalog.IS_CHANGED(
+            items_json="{}", merge_outputs=False
+        ) == "{}\x00merge=False"
+        assert SAX_Bridge_Text_Catalog.IS_CHANGED(
+            items_json="{}", merge_outputs=True
+        ) == "{}\x00merge=True"
 
     def test_execute_returns_node_output(self):
         payload = _make_payload(
@@ -409,3 +409,33 @@ class TestNodeIntegration:
     def test_execute_with_default_input(self):
         output = SAX_Bridge_Text_Catalog.execute()
         assert output.args == tuple([""] * MAX_RELATIONS)
+
+    def test_execute_merge_outputs(self):
+        payload = _make_payload(
+            items=[
+                {"id": "a", "name": "a", "text": "  alpha  ", "tags": []},
+                {"id": "b", "name": "b", "text": "beta", "tags": []},
+                {"id": "c", "name": "c", "text": "   ", "tags": []},
+            ],
+            relations=[
+                {"item_id": "a", "on": True},
+                {"item_id": "b", "on": True},
+                {"item_id": "c", "on": True},
+                {"item_id": "a", "on": False},
+            ],
+        )
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload, merge_outputs=True)
+        assert output.args[0] == "alpha\nbeta"
+        assert output.args[1:] == tuple([""] * (MAX_RELATIONS - 1))
+
+    def test_execute_individual_mode_is_backward_compatible(self):
+        payload = _make_payload(
+            items=[
+                {"id": "a", "name": "a", "text": "alpha", "tags": []},
+                {"id": "b", "name": "b", "text": "beta", "tags": []},
+            ],
+            relations=[{"item_id": "a"}, {"item_id": "b"}],
+        )
+        output = SAX_Bridge_Text_Catalog.execute(items_json=payload, merge_outputs=False)
+        assert output.args[0:2] == ("alpha", "beta")
+        assert len(output.args) == MAX_RELATIONS

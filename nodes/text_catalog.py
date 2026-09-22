@@ -156,6 +156,13 @@ class SAX_Bridge_Text_Catalog(io.ComfyNode):
                     options=get_wildcard_options(),
                     optional=True,
                 ),
+                io.Boolean.Input(
+                    "merge_outputs",
+                    default=False,
+                    label_on="merged",
+                    label_off="individual",
+                    optional=True,
+                ),
             ],
             outputs=[
                 io.String.Output(display_name=f"out_{i}")
@@ -164,10 +171,17 @@ class SAX_Bridge_Text_Catalog(io.ComfyNode):
         )
 
     @classmethod
-    def IS_CHANGED(cls, items_json: str = "{}", **kwargs) -> str:
-        return items_json
+    def IS_CHANGED(cls, items_json: str = "{}", merge_outputs: bool = False, **kwargs) -> str:
+        # 出力モード切替だけでも再実行されるよう cache key に含める。
+        return f"{items_json}\x00merge={bool(merge_outputs)}"
 
     @classmethod
-    def execute(cls, items_json: str = "{}", **kwargs) -> io.NodeOutput:
-        result = _resolve_relations(items_json)
-        return io.NodeOutput(*result)
+    def execute(
+        cls, items_json: str = "{}", merge_outputs: bool = False, **kwargs
+    ) -> io.NodeOutput:
+        resolved = _resolve_relations(items_json)
+        if merge_outputs:
+            # SAX Prompt Concat と同じく strip → 空文字除外 → 改行結合。
+            merged = "\n".join(text.strip() for text in resolved if text.strip())
+            return io.NodeOutput(merged, *([""] * (MAX_RELATIONS - 1)))
+        return io.NodeOutput(*resolved)
