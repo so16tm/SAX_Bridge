@@ -928,7 +928,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 ### SAX Cache
 
-`SAX_Bridge_Cache` — Pipe 内のモデルに DeepCache / TGate をワンタッチ適用し、後段の KSampler・Detailer 全体を高速化するノードです。
+`SAX_Bridge_Cache` — Pipe 内のモデルに DeepCache をワンタッチ適用し、後段の KSampler・Detailer 全体を高速化するノードです。
 
 **入力**
 
@@ -938,12 +938,11 @@ applied_loras: {'lora_a'} (1 entries)
 | `enabled` | Boolean | `False` でキャッシュを適用せずそのまま返す |
 | `deepcache_interval` | Int (1〜10) | N ステップに 1 回だけ深層計算し残りをキャッシュで代替（1 = DeepCache 無効） |
 | `deepcache_start_percent` | Float (0.0〜1.0) | DeepCache を開始するデノイジング進行割合 |
-| `tgate_enabled` | Boolean (optional) | `True` で TGate（cross-attention キャッシュ）も適用 |
-| `tgate_gate_step` | Float (0.0〜1.0, optional) | TGate キャッシュ開始の境界パーセント |
 
 **出力**: `PIPE`
 
 > **配置位置**: SAX Loader の直後（KSampler・Detailer より前）に挿入することで全処理に一括適用できます。
+> **対応モデル**: DeepCache は UNet 系モデル（SD1.5 / SDXL / Illustrious / Pony）専用です。FLUX・SD3.5・Qwen-Image・Chroma・Wan などの DiT 系モデルに挿した場合はキャッシュを適用せず、警告をログに出して Pipe をそのまま通します。
 > **注意**: 蒸留モデル（DMD2 等）との組み合わせでは品質劣化が顕著になる場合があります。
 
 [↑ トップへ](#top)
