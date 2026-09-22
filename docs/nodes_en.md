@@ -682,6 +682,7 @@ output/2026-03-20/001_20260320_153045.webp
 - Automatically detects slot additions, removals, and renames on sources and re-syncs input/output slots (preserving downstream connections)
 - Keeps connections on the same logical slot even when upstream output slots are renamed or reordered
 - Cleans up a source entry only when the upstream node is actually deleted. Transient unavailability (paste / undo / subgraph collapse) does not remove entries
+- Changing a source's slot selection, reordering sources, or adding/removing sources preserves connections to downstream nodes (including dynamic-input nodes such as `SAX Prompt Concat`). Only the deselected slots and removed sources lose their links
 - Show links pill toggle to show/hide connection wires to sources
 - Automatically restores source connections after copy & paste
 

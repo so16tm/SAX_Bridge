@@ -72,7 +72,7 @@ import {
     sourceSignature       as _sourceSignatureImpl,
     reconcileAllRemoved,
     partitionLiveSources,
-    mergeSourceAnchors,
+    adoptSourceIdentity,
 } from "./sax_collector_link.js";
 
 export const PAD             = 8;    // 水平余白（左右パディング）
@@ -1682,8 +1682,9 @@ export function makeSourceListWidget(spec, coordinator) {
     //
     // H-1: oldSource を渡すと、buildSource が fresh 生成したアンカー系フィールド
     // (inputAnchors / slotNames / slotTypes) を旧 source の identity で index 対応に
-    // 引き継ぐ (mergeSourceAnchors)。これにより rebuild でアンカーが fresh に上書きされず、
-    // 上流改名/並べ替えの追従基準 (初回接続時の identity) が保持される。
+    // 引き継ぎ、旧 source オブジェクトへ in-place 取り込みする (adoptSourceIdentity)。
+    // これにより rebuild でアンカーが fresh に上書きされず、上流改名/並べ替えの追従基準
+    // (初回接続時の identity) と Coordinator の entity identity の両方が保持される。
     // 初回 addSource では oldSource=null で fresh のまま (正しい挙動)。
     function _addSourceInner(collectorNode, srcNode, oldSource = null) {
         const offset    = _getTotalSlotCount(collectorNode);
@@ -1699,7 +1700,11 @@ export function makeSourceListWidget(spec, coordinator) {
         }
         if (!src) return;
 
-        if (oldSource) mergeSourceAnchors(oldSource, src);
+        // H-1 + entity identity 維持: アンカーを旧 source から引継ぎつつ、
+        // rebuild 後も **旧 source オブジェクトそのもの** を _remoteSources に戻す。
+        // 新オブジェクトを push すると DynamicSlotCoordinator の WeakMap ベース
+        // entity identity が毎回壊れ、capture 済み下流リンクを 1 本も復元できなくなる。
+        if (oldSource) src = adoptSourceIdentity(oldSource, src);
 
         src.sig = _sourceSignature(srcNode);
 
@@ -1824,10 +1829,33 @@ export function makeSourceListWidget(spec, coordinator) {
         if (autoHints) node._rebuildHints = null;
     }
 
-    function rebuildAllSources(node) {
+    /**
+     * 全ソースを rebuild する。
+     *
+     * `beforeRebuild` は **coordinator.mutate トランザクションの内側・rebuild の直前** に
+     * 実行される。source を書き換えてから rebuild したい呼出元 (modifySource) は必ずこれを
+     * 使うこと。Coordinator の capture は mutate 冒頭で `entityToSlots(entity)` が返すスロット
+     * 数を基準に `node.outputs` を走査するため、トランザクション外で `enabledSlots` 等を
+     * 書き換えるとスロット数だけ先に変わり、capture が実際の出力ピンとずれて下流リンクが
+     * 誤った entity に紐づく (= 復元時に切れる)。
+     *
+     * @param {object} node
+     * @param {(() => void)|null} [beforeRebuild]
+     */
+    function rebuildAllSources(node, beforeRebuild = null) {
         _triggerReconcileIfMissing(node);
         // Coordinator が capture/restore を内蔵するため preDownstream 引数は撤廃。
         coordinator.mutate(() => {
+            if (beforeRebuild) {
+                try {
+                    beforeRebuild();
+                } catch (e) {
+                    // 書き換えに失敗した場合は rebuild せず no-op で抜ける
+                    // (capture/restore は往復するだけで構造は変わらない)。
+                    console.warn(`[${widgetName}] rebuildAllSources beforeRebuild error:`, e);
+                    return;
+                }
+            }
             _rebuildInner(node, [..._getSources(node)]);
         });
     }
@@ -2189,14 +2217,16 @@ export function makeSourceListWidget(spec, coordinator) {
         }, 0);
     }
 
-    // updater は coordinator.mutate トランザクション外で実行される。
-    // capture は rebuildAllSources(→ coordinator.mutate) 先頭で updater 実行後の sources
-    // を基準に取得するため、呼出元で追加の coordinator.mutate ラップは不要 (二重 mutate を避ける)。
+    // updater は rebuildAllSources の beforeRebuild として **トランザクション内側** で実行する。
+    // トランザクション外で実行すると、Coordinator の capture より先に enabledSlots が変わり、
+    // capture が「新しいスロット数」で「古い出力ピン配置」を走査してずれるため、スロット選択を
+    // 変更した瞬間に下流リンクが誤った entity に紐づいて切れる。
     function modifySource(node, srcIdx, updater) {
         const sources = _getSources(node);
         if (srcIdx < 0 || srcIdx >= sources.length) return;
-        try { updater(sources[srcIdx]); } catch (e) { console.warn(`[${widgetName}] modifySource updater error:`, e); return; }
-        rebuildAllSources(node);
+        // updater が throw した場合は rebuildAllSources 側が捕捉して rebuild を中止する
+        // (従来の early return と同義)。
+        rebuildAllSources(node, () => updater(sources[srcIdx]));
     }
 
     // B1: Collector 自身の削除時に pending timer 解除 + 登録解除を行う。
