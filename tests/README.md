@@ -9,6 +9,8 @@ tests/
 │   └── test_*.py    #   ノード単体テスト + V3 スキーマ検証 + legacy-fixture 不変性
 ├── js/              # Level 1: Node.js テスト
 │   └── *.test.mjs   #   JS serialize/deserialize テスト
+├── bench/           # Level 1b: 性能計測 (README.md 参照)
+│   └── *.bench.mjs  #   ComfyUI なしで js/*.js の所要時間を測る
 ├── workflows/       # Level 2: 手動テスト用ワークフロー
 │   ├── *.json       #   MANUAL_TEST.md と対応
 │   └── legacy-fixture/  # Level 3a: リファクタ前 fixture (凍結、編集禁止、Phase 2 migration テスト入力データ)
@@ -29,6 +31,13 @@ cd projects/SAX_Bridge
 cd projects/SAX_Bridge
 node --test "tests/js/*.test.mjs"
 ```
+
+### 性能計測 (Level 1b)
+```bash
+cd projects/SAX_Bridge
+node --import ./tests/bench/register.mjs tests/bench/slot_scaling.bench.mjs
+```
+詳細と数値の読み方は [bench/README.md](bench/README.md) を参照。
 
 ### 手動テスト (Level 2)
 1. `tests/workflows/` のワークフローを ComfyUI にドラッグ&ドロップで読み込む
