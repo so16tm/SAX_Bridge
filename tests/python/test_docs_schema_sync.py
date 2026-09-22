@@ -2,7 +2,8 @@
 
 ノードリファレンスのウィジェット表は手書きなので、実装だけを変えると静かに
 ドリフトする。実際 SAX Cache の docs には実装に存在しない `tgate_enabled` /
-`tgate_gate_step` が長く残っていた。このテストは
+`tgate_gate_step` が長く残り、SAX Guidance と SAX Debug Controller は
+リファレンスに 1 行も載っていなかった。このテストは
 
 * docs にしか無い入力（実装から消えた／最初から無かった記述）
 * 実装にしか無い入力（docs へ未反映の追加）
@@ -33,19 +34,15 @@ from _node_registry import load_registered_nodes
 # 既知のドリフト（意図的な一時例外）
 # ---------------------------------------------------------------------------
 #
+# 現在は空。docs の当該箇所を別 PR が直している最中など、この PR では触れない方が
+# よいドリフトを一時的に通すためだけの逃げ道として残してある。
+#
 # ここに書けるのは「docs にあるが実装に無い入力名」だけ。実装側にしか無い入力を
 # 見逃す抜け道は用意しない（docs に書けば済むため）。
 #
 # 各エントリは test_known_drift_is_still_drifting が検証する。docs が直れば
 # そのテストが「このエントリを消せ」と失敗するので、例外が残り続けることはない。
-_KNOWN_DOC_DRIFT: dict[str, set[str]] = {
-    # SAX Cache の TGate 記述は実装に存在しない（DeepCache のみ実装済み）。
-    # docs 側の削除は PR #5 (https://github.com/so16tm/SAX_Bridge/pull/5) が担当して
-    # いるため、衝突を避けてここで一時的に許容する。#5 がマージされたら
-    # test_known_drift_is_still_drifting が失敗して掃除を促すので、
-    # そのタイミングでこのエントリごと削除すること。
-    "SAX_Bridge_Cache": {"tgate_enabled", "tgate_gate_step"},
-}
+_KNOWN_DOC_DRIFT: dict[str, set[str]] = {}
 
 
 ALL_NODES = load_registered_nodes()
