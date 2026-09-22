@@ -19,6 +19,23 @@ const MAX_RELATIONS = 32;
 const MAX_ITEMS     = 256;
 const MAX_TAGS      = 8;
 
+// -- Manager Dialog のアイテムリスト仮想化パラメータ --
+// 行は絶対配置し、スクロール量から可視インデックスを算出する。そのため
+// 行の高さは CSS 側で固定し、ここの数値と一致させる必要がある。
+/** アイテム行の高さ (px)。row の height と一致させること。 */
+const ITEM_ROW_HEIGHT = 26;
+/** アイテム行どうしの間隔 (px)。 */
+const ITEM_ROW_GAP    = 2;
+/** 1 行あたりの占有高 (px)。i 番目の行の top = i * ITEM_ROW_STRIDE。 */
+const ITEM_ROW_STRIDE = ITEM_ROW_HEIGHT + ITEM_ROW_GAP;
+/** 可視範囲の上下に余分に描画しておく行数（高速スクロール時の白抜け防止）。 */
+const ITEM_ROW_OVERSCAN = 6;
+/**
+ * リストの可視高が測れないとき (clientHeight が 0／未定義。DOM 未アタッチ時や
+ * テスト用 DOM スタブ) のフォールバック。左ペインの min-height 相当。
+ */
+const ITEM_LIST_FALLBACK_VIEWPORT = 440;
+
 const UNSET_LABEL  = "(unset)";
 const ORPHAN_LABEL = "<orphan>";
 
@@ -708,15 +725,39 @@ function showManagerDialog(node, getState, applyDraft) {
     const ROW_SELECTED_BG = "var(--comfy-menu-secondary-bg,#303030)";
 
     // -- レンダリング再構築用ハンドル --
+    /** アイテムリストのスクロールコンテナ。 */
     let leftListEl = null;
+    /** leftListEl の内側で全行分の高さを確保する絶対配置の土台。 */
+    let listCanvasEl = null;
+    /** 該当 0 件のときだけ leftListEl に差し込むメッセージ行。 */
+    let emptyRowEl = null;
     /**
-     * item_id → リスト行 DOM。選択が変わっただけのときに、リスト全体を作り直さず
-     * 旧行／新行のハイライトだけ差し替えるために保持する (renderItemList が毎回張り替える)。
+     * item_id → 現在マウント済みのリスト行 DOM。選択変更 fast path のハイライト
+     * 付け替えと、再描画時のキー付き再利用の両方がこのマップを参照する。
      */
     let rowElsById = new Map();
+    /** アンマウントした行 DOM の再利用プール（行の生成そのものを避ける）。 */
+    const rowPool = [];
+    /** 直近の renderItemList が確定させた表示順。スクロール時の窓計算に使う。 */
+    let visibleItems = [];
+    /** visibleItems と同時に確定する、タグ表示順の索引。 */
+    let rowTagOrder = new Map();
+    /** 現在マウントしている行の範囲 [start, end)。窓が動いたときだけ差分更新する。 */
+    let mountedStart = 0;
+    let mountedEnd   = 0;
+    /** 最後にスクロール位置を合わせた選択 id。選択が外から変わった時だけ追従する。 */
+    let scrolledSelectionId = null;
+    /** リストの可視高の変化（初回レイアウト・ウィンドウリサイズ）を拾う observer。 */
+    let listResizeObserver = null;
     let editorEl   = null;
     let tagFilterRowEl = null;
     let leftTitleEl = null;
+
+    /**
+     * relation の参照数は original.relations から決まり、ダイアログを開いている間は
+     * 変化しない。renderItemList / スクロールのたびに数え直さないよう 1 回だけ作る。
+     */
+    const relationRefCounts = countRelationsByItem(original.relations);
 
     /** 検索クエリ + 選択タグで絞り込んだ items（コンテキスト計算の基準） */
     function getFilteredItems() {
@@ -755,62 +796,211 @@ function showManagerDialog(node, getState, applyDraft) {
         renderTagFilter(tagFilterRowEl, ctxFn, activeTagFilter, favSetGetter, () => renderAll());
     }
 
+    // -----------------------------------------------------------------
+    // アイテムリストの描画（行の再利用 + 仮想化）
+    //
+    // 以前は renderItemList が毎回 leftListEl を空にして全行を作り直していた。
+    // MAX_ITEMS=256 では 256 行 × 約 5 要素 ≈ 1300 ノードの再生成になり、
+    // ダイアログのオープンと検索 1 打鍵がそのままこのコストを負っていた。
+    // 対策は 2 段構え:
+    //   1. 仮想化  — 可視範囲 + overscan の行だけを DOM に載せる
+    //   2. 行再利用 — 行 DOM を item_id でキャッシュし、変化した部分だけ書き換える
+    // これでリスト長に比例する DOM 生成が消え、コストは可視行数に比例する。
+    // -----------------------------------------------------------------
+
+    const REF_BADGE_CSS = "font-size:9px;color:#7a9;background:#234;padding:1px 5px;border-radius:8px;flex-shrink:0;";
+    const TAG_BADGE_CSS = "font-size:9px;color:#aab;background:#334;padding:1px 4px;border-radius:6px;flex-shrink:0;";
+
+    /** 空の行 DOM を 1 つ作る。中身は updateRow が後から流し込む。 */
+    function createRow() {
+        const row = h("div",
+            `position:absolute;left:0;right:0;height:${ITEM_ROW_HEIGHT}px;box-sizing:border-box;`
+            + "padding:0 6px;border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:6px;");
+        // 行は使い回されるので、リスナは生成時の item ではなく row._itemId を見る。
+        row._itemId = null;
+        row._sig    = null;
+        row._badges = [];
+        row._nameEl = h("div", "flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;");
+        row.appendChild(row._nameEl);
+
+        row.addEventListener("click", () => {
+            // 選択が変わるだけならリストの中身 (並び順・参照数・タグ) は不変。
+            // ハイライトの付け替えと Editor 再描画だけで済ませる。
+            if (row._itemId === null || row._itemId === selectedId) return;
+            const prevRow = rowElsById.get(selectedId);
+            if (prevRow) prevRow.style.background = "";
+            selectedId = row._itemId;
+            // 可視行のクリックなので、次の再描画でスクロールを動かす必要はない。
+            scrolledSelectionId = selectedId;
+            row.style.background = ROW_SELECTED_BG;
+            renderEditor();
+        });
+        row.addEventListener("mouseenter", () => {
+            if (row._itemId !== selectedId) row.style.background = "var(--comfy-menu-secondary-bg,#2a2a2a)";
+        });
+        row.addEventListener("mouseleave", () => {
+            if (row._itemId !== selectedId) row.style.background = "";
+        });
+        return row;
+    }
+
+    /** row の badge スロット i を指定の見た目に合わせる（無ければ生成して追加）。 */
+    function setBadge(row, i, css, text) {
+        let badge = row._badges[i];
+        if (!badge) {
+            badge = h("span", css, text);
+            badge._css = css;
+            row._badges[i] = badge;
+            row.appendChild(badge);
+            return;
+        }
+        if (badge._css !== css) {
+            badge.style.cssText = css;
+            badge._css = css;
+        }
+        if (badge.textContent !== text) badge.textContent = text;
+        if (badge.style.display === "none") badge.style.display = "";
+    }
+
+    /** used 個目以降の badge スロットを隠す（DOM からは外さず再利用に残す）。 */
+    function hideBadgesFrom(row, used) {
+        for (let i = used; i < row._badges.length; i++) row._badges[i].style.display = "none";
+    }
+
+    /** 行 DOM を index 番目の item の内容・位置に合わせる。 */
+    function updateRow(row, item, index) {
+        row.style.top = `${index * ITEM_ROW_STRIDE}px`;
+
+        const refs = relationRefCounts.get(item.id) ?? 0;
+        const tags = sortItemTagsByContext(item.tags, rowTagOrder).slice(0, 3);
+        // 名前・参照数・表示タグが全部同じなら子要素の書き換えは丸ごと不要。
+        const sig  = `${item.name ?? ""}\u0000${refs}\u0000${tags.join("\u0001")}`;
+        if (row._itemId !== item.id || row._sig !== sig) {
+            row._itemId = item.id;
+            row._sig    = sig;
+            row._nameEl.textContent = item.name || "(unnamed)";
+            let used = 0;
+            if (refs > 0) setBadge(row, used++, REF_BADGE_CSS, `×${refs}`);
+            for (const tag of tags) setBadge(row, used++, TAG_BADGE_CSS, tag);
+            hideBadgesFrom(row, used);
+        }
+        row.style.background = item.id === selectedId ? ROW_SELECTED_BG : "";
+    }
+
+    /** 現在のスクロール位置から、描画すべき行のインデックス範囲 [start, end) を求める。 */
+    function computeRowWindow() {
+        const total = visibleItems.length;
+        if (total === 0) return { start: 0, end: 0 };
+        // DOM 未アタッチ時 / テスト用スタブでは clientHeight が取れないので既定値に落とす。
+        const viewport  = leftListEl.clientHeight || ITEM_LIST_FALLBACK_VIEWPORT;
+        const scrollTop = leftListEl.scrollTop || 0;
+        const first = Math.floor(scrollTop / ITEM_ROW_STRIDE) - ITEM_ROW_OVERSCAN;
+        const last  = Math.ceil((scrollTop + viewport) / ITEM_ROW_STRIDE) + ITEM_ROW_OVERSCAN;
+        return {
+            start: Math.min(Math.max(0, first), total),
+            end:   Math.min(total, Math.max(0, last)),
+        };
+    }
+
+    /** マウント済みの行をすべて外してプールへ戻す。 */
+    function unmountAllRows() {
+        for (const row of rowElsById.values()) {
+            listCanvasEl.removeChild(row);
+            rowPool.push(row);
+        }
+        rowElsById.clear();
+        mountedStart = 0;
+        mountedEnd   = 0;
+    }
+
+    /**
+     * 可視範囲の行だけを DOM に載せ替える。
+     *
+     * @param {boolean} contentChanged リスト内容（並び順・件数・表示文字列）が変わったか。
+     *   false（純粋なスクロール）で窓が動いていなければ何もしない。
+     */
+    function renderRowWindow(contentChanged) {
+        const { start, end } = computeRowWindow();
+        if (!contentChanged && start === mountedStart && end === mountedEnd) return;
+
+        // 新しい窓に入る item_id。ここに無い行は外してプールへ戻す。
+        const keep = new Set();
+        for (let i = start; i < end; i++) keep.add(visibleItems[i].id);
+        for (const [id, row] of rowElsById) {
+            if (keep.has(id)) continue;
+            listCanvasEl.removeChild(row);
+            rowElsById.delete(id);
+            rowPool.push(row);
+        }
+        for (let i = start; i < end; i++) {
+            const item = visibleItems[i];
+            let row = rowElsById.get(item.id);
+            if (!row) {
+                row = rowPool.pop() ?? createRow();
+                rowElsById.set(item.id, row);
+                listCanvasEl.appendChild(row);
+            }
+            updateRow(row, item, i);
+        }
+        mountedStart = start;
+        mountedEnd   = end;
+    }
+
+    /**
+     * 行クリック以外（+ New / Duplicate / Delete など）で選択が動いたとき、
+     * 選択行が可視範囲に入るようスクロールする。仮想化により選択行が DOM 上に
+     * 存在しないことがあるため、ブラウザ任せにはできない。
+     */
+    function ensureSelectionVisible() {
+        if (selectedId === scrolledSelectionId) return;
+        scrolledSelectionId = selectedId;
+        const index = visibleItems.findIndex(it => it.id === selectedId);
+        if (index < 0) return;
+        const viewport  = leftListEl.clientHeight || ITEM_LIST_FALLBACK_VIEWPORT;
+        const scrollTop = leftListEl.scrollTop || 0;
+        const top    = index * ITEM_ROW_STRIDE;
+        const bottom = top + ITEM_ROW_HEIGHT;
+        if (top < scrollTop) leftListEl.scrollTop = top;
+        else if (bottom > scrollTop + viewport) leftListEl.scrollTop = bottom - viewport;
+    }
+
+    /** 該当 0 件メッセージの表示 / 非表示。 */
+    function setEmptyMessage(text) {
+        if (text === null) {
+            if (emptyRowEl) emptyRowEl.style.display = "none";
+            return;
+        }
+        if (!emptyRowEl) {
+            emptyRowEl = h("div", "color:#666;font-size:11px;padding:8px;text-align:center;");
+            leftListEl.appendChild(emptyRowEl);
+        }
+        if (emptyRowEl.textContent !== text) emptyRowEl.textContent = text;
+        emptyRowEl.style.display = "";
+    }
+
     function renderItemList() {
         if (!leftListEl) return;
-        leftListEl.innerHTML = "";
-        rowElsById = new Map();
         if (leftTitleEl) {
             leftTitleEl.textContent = `Items (${draft.items.length}/${MAX_ITEMS})`;
         }
 
         const { filtered, sortedTags } = computeContext();
-        if (filtered.length === 0) {
-            leftListEl.appendChild(h("div", "color:#666;font-size:11px;padding:8px;text-align:center;",
-                draft.items.length === 0 ? "No items. Click [+ New] to create one." : "No items match the filter."));
+        rowTagOrder  = tagOrderMap(sortedTags);
+        visibleItems = filtered.length === 0 ? [] : sortItemsByTagOrder(filtered, sortedTags);
+
+        if (visibleItems.length === 0) {
+            unmountAllRows();
+            listCanvasEl.style.height = "0px";
+            setEmptyMessage(draft.items.length === 0
+                ? "No items. Click [+ New] to create one."
+                : "No items match the filter.");
             return;
         }
-        const sorted = sortItemsByTagOrder(filtered, sortedTags);
-        // items ループの外で 1 回だけ作る (items 件数に比例した再構築を避ける)。
-        const refCounts = countRelationsByItem(original.relations);
-        const tagOrder  = tagOrderMap(sortedTags);
-
-        for (const it of sorted) {
-            const row = h("div", "padding:5px 6px;border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:6px;");
-            if (it.id === selectedId) {
-                row.style.background = ROW_SELECTED_BG;
-            }
-            row.addEventListener("click", () => {
-                // 選択が変わるだけならリストの中身 (並び順・参照数・タグ) は不変。
-                // MAX_ITEMS=256 では行を全再生成すると 1 クリックが数 ms かかるため、
-                // ハイライトの付け替えと Editor 再描画だけで済ませる。
-                if (it.id === selectedId) return;
-                const prevRow = rowElsById.get(selectedId);
-                if (prevRow) prevRow.style.background = "";
-                selectedId = it.id;
-                row.style.background = ROW_SELECTED_BG;
-                renderEditor();
-            });
-            row.addEventListener("mouseenter", () => {
-                if (it.id !== selectedId) row.style.background = "var(--comfy-menu-secondary-bg,#2a2a2a)";
-            });
-            row.addEventListener("mouseleave", () => {
-                if (it.id !== selectedId) row.style.background = "";
-            });
-
-            const nameEl = h("div", "flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", it.name || "(unnamed)");
-            row.appendChild(nameEl);
-
-            const refs = refCounts.get(it.id) ?? 0;
-            if (refs > 0) {
-                row.appendChild(h("span", "font-size:9px;color:#7a9;background:#234;padding:1px 5px;border-radius:8px;flex-shrink:0;", `×${refs}`));
-            }
-            const tagsForDisplay = sortItemTagsByContext(it.tags, tagOrder).slice(0, 3);
-            for (const tag of tagsForDisplay) {
-                row.appendChild(h("span", "font-size:9px;color:#aab;background:#334;padding:1px 4px;border-radius:6px;flex-shrink:0;", tag));
-            }
-            rowElsById.set(it.id, row);
-            leftListEl.appendChild(row);
-        }
+        setEmptyMessage(null);
+        // 全行分の高さを土台に持たせ、スクロールバーの長さを実件数どおりにする。
+        listCanvasEl.style.height = `${visibleItems.length * ITEM_ROW_STRIDE}px`;
+        ensureSelectionVisible();
+        renderRowWindow(true);
     }
 
     function renderEditor() {
@@ -967,6 +1157,10 @@ function showManagerDialog(node, getState, applyDraft) {
         width: 900,        // テキスト入力エリアを広く確保
         maxHeight: "85vh",
         className: "__sax_text_catalog_manager",
+        onClose() {
+            listResizeObserver?.disconnect();
+            listResizeObserver = null;
+        },
         build(dlg, close) {
             // Wildcard リストを Impact-Pack の API から遅延ロード（define_schema 取得失敗時の補完）。
             // 取得後にボタン無効化を再評価するため、完了時 renderEditor を再実行する。
@@ -1019,7 +1213,20 @@ function showManagerDialog(node, getState, applyDraft) {
             leftHeader.appendChild(newBtn);
             leftPane.appendChild(leftHeader);
 
-            leftListEl = h("div", "flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;");
+            // 仮想化のため、スクロールコンテナ (leftListEl) と全行分の高さを確保する
+            // 土台 (listCanvasEl) を分ける。行は listCanvasEl に絶対配置され、
+            // 行間は ITEM_ROW_STRIDE で表現するので flex の gap は使わない。
+            leftListEl   = h("div", "flex:1;overflow-y:auto;position:relative;");
+            listCanvasEl = h("div", "position:relative;width:100%;");
+            leftListEl.appendChild(listCanvasEl);
+            leftListEl.addEventListener("scroll", () => renderRowWindow(false));
+            // showDialog は build() の後に overlay を document へ追加するため、初回の
+            // renderItemList 時点では clientHeight が 0 で可視高が測れない。レイアウト確定後
+            // (とウィンドウリサイズ後) に窓を測り直す。
+            if (typeof ResizeObserver !== "undefined") {
+                listResizeObserver = new ResizeObserver(() => renderRowWindow(false));
+                listResizeObserver.observe(leftListEl);
+            }
             leftPane.appendChild(leftListEl);
 
             const manageTagsBtn = h("button", STYLE.btn, "Manage Tags…");

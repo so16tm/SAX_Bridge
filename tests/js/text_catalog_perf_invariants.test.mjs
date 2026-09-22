@@ -235,20 +235,28 @@ describe("TextCatalog: Manager Dialog の選択変更 fast path", () => {
         assert.equal(rows[0].style.background, "");
     });
 
-    it("検索で絞り込むとリストは作り直され、新しい行がクリックできる", () => {
+    it("検索で絞り込むと行が再利用され、新しい行がクリックできる", () => {
         const { node } = buildNode({ itemCount: 20, relations: [] });
-        const { searchInput } = openManager(node);
+        const { created, searchInput } = openManager(node);
         assert.ok(searchInput, "検索欄が存在する");
 
+        // 行の再利用 + 仮想化の導入後、絞り込みは行 DOM を作り直さず中身だけ差し替える。
+        // 詳細は tests/js/text_catalog_list_virtualization.test.mjs。
+        const isRow = el => el.tagName === "div"
+            && el._listeners.has("click") && el._listeners.has("mouseenter");
         const rebuilt = captureElements(() => {
             searchInput.value = "Preset 1";
             searchInput.fire("input");
-        }).filter(el => el.tagName === "div"
-            && el._listeners.has("click") && el._listeners.has("mouseenter"));
+        }).filter(isRow);
+        assert.equal(rebuilt.length, 0, "絞り込みで行 DOM を新規生成しない");
 
-        // "Preset 1", "Preset 1x" の 11 件がヒットする。
-        assert.equal(rebuilt.length, 11);
-        rebuilt[2].fire("click");
-        assert.notEqual(rebuilt[2].style.background, "");
+        // "Preset 1", "Preset 1x" の 11 件がヒットし、既存の行に割り当てられる。
+        const listEl = created.find(el => el.tagName === "div"
+            && el.style.cssText === "flex:1;overflow-y:auto;position:relative;");
+        const shown = listEl.children[0].children.filter(isRow)
+            .sort((a, b) => parseInt(a.style.top) - parseInt(b.style.top));
+        assert.equal(shown.length, 11);
+        shown[2].fire("click");
+        assert.notEqual(shown[2].style.background, "");
     });
 });
