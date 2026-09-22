@@ -200,6 +200,13 @@ const SOURCE_SPEC = {
 function buildNodeCollectorSpec(node) {
     return {
         direction:   "output",
+        // 1:N link-repointing の明示 opt-in。NodeCollector は出力スロットが可変し、
+        // rebuildAllSources / swapSources / removeSourceAt が出力ピンを全面再構築するため、
+        // Coordinator に「捕捉済み link をピンから切り離し → 新しい物理位置へ origin_slot を
+        // 付け替える」経路を使わせる。従来の remove-all + connect 復元は下流が動的入力
+        // (SAX Prompt Concat 等の Autogrow) の場合に入力スロットを詰めてしまい、
+        // 陳腐化した targetSlot への再接続が失敗・誤接続していた。
+        linkPreserving: true,
         getEntities: () => node._remoteSources ?? [],
         setEntities: (newSources) => { node._remoteSources = newSources; },
         // hints (entityHints) は sourceId をキーとする Map。framework

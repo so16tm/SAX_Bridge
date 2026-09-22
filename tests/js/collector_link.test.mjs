@@ -25,6 +25,7 @@ import {
     reconcileAllRemoved,
     partitionLiveSources,
     mergeSourceAnchors,
+    adoptSourceIdentity,
 } from "../../js/sax_collector_link.js";
 
 // ---------------------------------------------------------------------------
@@ -396,5 +397,74 @@ describe("partitionLiveSources", () => {
         const { live, missing } = partitionLiveSources(sources, () => null);
         assert.equal(live.length, 0);
         assert.equal(missing.length, 3);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// adoptSourceIdentity — rebuild を跨いだ entity identity の維持
+//
+// DynamicSlotCoordinator は source オブジェクトの「参照」をキーに capture 済み
+// 下流リンクを解決する。rebuild で buildSource の戻り値 (新オブジェクト) を
+// そのまま _remoteSources に戻すと identity が毎回壊れ、下流リンクが 1 本も
+// 復元されなくなる (Node Collector のスロット選択変更・並べ替えで接続が切れる原因)。
+// ---------------------------------------------------------------------------
+
+describe("adoptSourceIdentity", () => {
+    it("旧 source オブジェクトを返し、fresh の内容を in-place で取り込む", () => {
+        const oldSource = {
+            sourceId: 7, slotCount: 2, enabledSlots: [0],
+            slotNames: ["A", "B"], slotTypes: ["STRING", "STRING"],
+        };
+        const fresh = {
+            sourceId: 7, slotCount: 3, enabledSlots: [0, 2],
+            slotNames: ["A", "B", "C"], slotTypes: ["STRING", "STRING", "INT"],
+        };
+
+        const adopted = adoptSourceIdentity(oldSource, fresh);
+
+        assert.equal(adopted, oldSource, "identity の器は旧オブジェクトであるべき");
+        assert.notEqual(adopted, fresh, "fresh をそのまま返してはならない");
+        assert.equal(adopted.slotCount, 3, "fresh の内容が取り込まれる");
+        assert.deepEqual(adopted.enabledSlots, [0, 2]);
+    });
+
+    it("アンカー系フィールドは mergeSourceAnchors 規則で旧を保持し増分のみ fresh", () => {
+        const oldSource = {
+            sourceId: 7, slotCount: 2,
+            slotNames: ["OldA", "OldB"], slotTypes: ["STRING", "STRING"],
+        };
+        const fresh = {
+            sourceId: 7, slotCount: 3,
+            slotNames: ["NewA", "NewB", "NewC"], slotTypes: ["STRING", "STRING", "INT"],
+        };
+
+        const adopted = adoptSourceIdentity(oldSource, fresh);
+
+        assert.deepEqual(adopted.slotNames, ["OldA", "OldB", "NewC"],
+            "既存 index は旧アンカーを保持し、増分だけ fresh を採用するべき");
+        assert.deepEqual(adopted.slotTypes, ["STRING", "STRING", "INT"]);
+    });
+
+    it("fresh が持たないキーは削除され、旧状態が残留しない", () => {
+        const oldSource = { sourceId: 7, slotCount: 1, sig: "stale", _connectRetries: 2 };
+        const fresh = { sourceId: 7, slotCount: 1 };
+
+        const adopted = adoptSourceIdentity(oldSource, fresh);
+
+        assert.ok(!("sig" in adopted), "旧 sig は残らないべき");
+        assert.ok(!("_connectRetries" in adopted), "旧 _connectRetries は残らないべき");
+    });
+
+    it("旧 source が無い初回追加では fresh をそのまま返す", () => {
+        const fresh = { sourceId: 7, slotCount: 1 };
+        assert.equal(adoptSourceIdentity(null, fresh), fresh);
+        assert.equal(adoptSourceIdentity(undefined, fresh), fresh);
+    });
+
+    it("同一オブジェクトを渡しても内容が失われない", () => {
+        const src = { sourceId: 7, slotCount: 2, slotNames: ["A", "B"] };
+        const adopted = adoptSourceIdentity(src, src);
+        assert.equal(adopted, src);
+        assert.deepEqual(adopted.slotNames, ["A", "B"]);
     });
 });
