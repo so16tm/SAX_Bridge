@@ -1550,7 +1550,10 @@ function pickItemForRelation(state, currentItemId, onSelect) {
             };
 
             // 検索
-            const searchInput = h("input", STYLE.input + "width:100%;");
+            // dlg は max-height 付きの縦 flex。高さが足りないとき縮むのはリストだけにし、
+            // 検索欄・タグフィルタ行 (overflow:hidden で min-height が 0 になる)・フッターは
+            // flex-shrink:0 で潰れないようにする。リストの下限も画面高に合わせて抑える。
+            const searchInput = h("input", STYLE.input + "width:100%;box-sizing:border-box;flex-shrink:0;");
             searchInput.type = "text";
             searchInput.placeholder = "Search by name or tag…";
             searchInput.addEventListener("input", () => {
@@ -1560,17 +1563,17 @@ function pickItemForRelation(state, currentItemId, onSelect) {
             dlg.appendChild(searchInput);
 
             // タグフィルタ
-            dlg.appendChild(h("div", STYLE.label, "Filter by tags"));
+            dlg.appendChild(h("div", STYLE.label + "flex-shrink:0;", "Filter by tags"));
             tagFilterRowEl = h("div",
-                "display:flex;gap:4px;align-items:center;overflow:hidden;white-space:nowrap;height:22px;");
+                "display:flex;gap:4px;align-items:center;overflow:hidden;white-space:nowrap;height:22px;flex-shrink:0;");
             dlg.appendChild(tagFilterRowEl);
 
             // リスト
-            listEl = h("div", STYLE.pane + "flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;min-height:300px;");
+            listEl = h("div", STYLE.pane + "flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;min-height:min(300px,30vh);");
             dlg.appendChild(listEl);
 
             // フッター
-            const foot = h("div", "display:flex;justify-content:flex-end;margin-top:4px;");
+            const foot = h("div", "display:flex;justify-content:flex-end;margin-top:4px;flex-shrink:0;");
             const cancelBtn = h("button", STYLE.btn + "padding:6px 14px;", "Cancel");
             cancelBtn.addEventListener("click", close);
             foot.appendChild(cancelBtn);
