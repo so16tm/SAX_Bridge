@@ -27,6 +27,7 @@ import {
     showConfirmDialog,
     showPromptDialog,
     showAlertDialog,
+    nodeCanvasWidth,
 } from "./sax_ui_base.js";
 import {
     getNodesInGroup,
@@ -466,6 +467,7 @@ function makeSceneWidget(node) {
         computeSize: (W) => [W, H - 4],
 
         draw(ctx, node, W, y) {
+            W = nodeCanvasWidth(this, ctx, node, W);
             const t      = getComfyTheme();
             const config = getConfig(node);
             const scenes = Object.keys(config.scenes);
@@ -787,6 +789,7 @@ function makeToggleWidget(node, item, index) {
         computeSize: (W) => [W, H - 4],
 
         draw(ctx, node, W, y) {
+            W = nodeCanvasWidth(this, ctx, node, W);
             this._y = y;
             const t      = getComfyTheme();
             const config = getConfig(node);
