@@ -266,6 +266,27 @@ export function dismissComboMenu() {
 }
 
 /**
+ * ノード上のキャンバスに描くときの幅を返す。
+ *
+ * ComfyUI の Vue 描画 (右サイドパネルの Parameters / Nodes 2.0) は legacy widget の
+ * `widget.width` にパネル側の幅を書き込み、そのまま残す。キャンバス描画と当たり判定は
+ * `widget.width || ノード幅` を使うため、残った値で行がノード枠をはみ出して描かれる。
+ * メインキャンバスへの描画時はその値を消し、ノード幅で描く。
+ * Vue 側の専用 canvas に描くときは渡された幅をそのまま使う。
+ *
+ * @param {object} widget - draw の this (node.widgets の要素)
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {object} node
+ * @param {number} W - LiteGraph から渡された幅
+ * @returns {number}
+ */
+export function nodeCanvasWidth(widget, ctx, node, W) {
+    if (!widget.width || ctx.canvas !== app.canvas?.canvas) return W;
+    widget.width = undefined;
+    return node.size[0];
+}
+
+/**
  * 隠しウィジェットを描画から除外する共通ヘルパー。
  *
  * - `mode: "minimal"` : computeSize=0/-4, draw=noop のみ (type 変更なしで Comfy プロンプト収集を阻害しない)
@@ -1285,6 +1306,7 @@ export function makeItemListWidget(spec) {
         },
 
         draw(ctx, node, W, y) {
+            W = nodeCanvasWidth(this, ctx, node, W);
             this._y = y;
             const items  = getItems();
             const layout = buildLayout(W);
@@ -1905,6 +1927,7 @@ export function makeSourceListWidget(spec, coordinator) {
             },
 
             draw(ctx, drawNode, W, y) {
+                W = nodeCanvasWidth(this, ctx, drawNode, W);
                 _widgetY = y;
             const t = getComfyTheme();
 
