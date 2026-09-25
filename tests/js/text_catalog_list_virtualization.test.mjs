@@ -98,8 +98,8 @@ const isRow = el => el.tagName === "div" && el._listeners.has("click") && el._li
  * ダイアログを開き、リストまわりのハンドルを取り出す。
  * leftListEl は「スクロールコンテナ」、その唯一の子が全行分の高さを持つ土台。
  */
-function openManager(node) {
-    const created = captureElements(() => node._openTextCatalogManager());
+function openManager(node, initialItemId) {
+    const created = captureElements(() => node._openTextCatalogManager(initialItemId));
     const listEl = created.find(el => el.tagName === "div"
         && el.style.cssText === "flex:1;overflow-y:auto;position:relative;");
     assert.ok(listEl, "アイテムリストのスクロールコンテナが存在する");
@@ -390,6 +390,16 @@ describe("TextCatalog: 仮想化と選択・空表示", () => {
         const back = mountedRows(canvasEl).find(r => rowName(r) === selectedName);
         assert.ok(back, "戻ると選択行が再び載る");
         assert.notEqual(back.style.background, "", "選択ハイライトが復元される");
+    });
+
+    it("item を指定して開くと、その item が選択され可視範囲に入る（ノード上の行クリック経路）", () => {
+        const { node } = buildNode({ itemCount: 256 });
+        const { canvasEl, created } = openManager(node, "item-200");
+        const selected = mountedRows(canvasEl).filter(r => r.style.background !== "");
+        assert.equal(selected.length, 1, "選択行がちょうど 1 行、DOM 上に載っている");
+        assert.equal(rowName(selected[0]), "Preset 200");
+        const nameInput = created.find(el => el.tagName === "input" && el.value === "Preset 200");
+        assert.ok(nameInput, "Editor に指定 item が表示される");
     });
 
     it("窓の外の行をクリック扱いしない（再利用時に item の取り違えが起きない）", () => {

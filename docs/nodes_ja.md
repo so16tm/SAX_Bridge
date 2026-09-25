@@ -964,6 +964,7 @@ applied_loras: {'lora_a'} (1 entries)
 - `merge_outputs` を `merged` にすると、ON の Relation テキストを strip → 空文字除外 → 改行結合し、単一の `merged` 出力へ集約する
 - Relation を追加 / 削除 / 並べ替えしても、後続ノード（`SAX Prompt Concat` 等の動的入力ノードを含む）への接続は維持される
 - 各 Relation 行に行頭トグル（pill）/ `[✎]`（Item 選択）/ `[↑↓]`（並び替え）/ `[×]`（削除）
+- Relation 行のラベル部分をクリックすると、その Item を選択した状態で Manager が開き、そのまま編集できる（`(unset)` / `<orphan>` の行は Item 選択を開く）
 - 行頭トグルを OFF にすると、Item 割当を残したまま Slot 出力を空文字にできる（一時的に出力を止める用途）
 - OFF 状態の Relation はテキストが半透明表示になる
 - 未割当 Relation は `(unset)` を灰色で表示（スロットは残存し、接続していれば維持される）

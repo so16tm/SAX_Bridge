@@ -711,7 +711,12 @@ function showAllTagsDialog(computeContext, activeTags, favSetGetter, onChange) {
     });
 }
 
-function showManagerDialog(node, getState, applyDraft) {
+/**
+ * @param {string|null} [initialItemId] 開いた直後に選択する item の id。
+ *   ノード上の Relation 行クリックから該当 item を直接編集するために使う。
+ *   該当 item が無ければ従来どおりリスト先頭を選択する。
+ */
+function showManagerDialog(node, getState, applyDraft, initialItemId = null) {
     // draft は Dialog ローカルの「書き換え可能な作業コピー」として扱う。
     // 設計方針:
     //   - 親 state（node._textCatalogState）はイミュータブル更新を厳守する
@@ -789,8 +794,10 @@ function showManagerDialog(node, getState, applyDraft) {
         return sortItemsByTagOrder(filtered, sortedTags);
     }
 
-    // 初期選択はリスト表示順の先頭
-    selectedId = getVisibleItems()[0]?.id ?? null;
+    // 初期選択は指定 item、無ければリスト表示順の先頭
+    selectedId = draft.items.some(it => it.id === initialItemId)
+        ? initialItemId
+        : getVisibleItems()[0]?.id ?? null;
 
     function renderTagFilterRow() {
         if (!tagFilterRowEl) return;
@@ -1748,7 +1755,7 @@ function makeCatalogWidget(node) {
     const getState = () => node._textCatalogState ?? emptyState();
     const coordinator = ensureCoordinator(node, buildTextCatalogSpec);
 
-    const openManager = () => {
+    const openManager = (initialItemId = null) => {
         showManagerDialog(node, getState, (draftCatalog) => {
             const state = getState();
             const validIds = new Set(draftCatalog.items.map(it => it.id));
@@ -1788,9 +1795,27 @@ function makeCatalogWidget(node) {
                 }
                 throw e;
             }
-        });
+        }, initialItemId);
     };
     node._openTextCatalogManager = openManager;
+
+    const pickItem = (relation) => {
+        // picker 表示時の item_id を渡すが、確定時の relations は picker コールバック内で
+        // 再取得する (picker 表示中に他経路で relations が変わった場合の stale closure 回避)。
+        pickItemForRelation(getState(), relation.item_id, (selectedId) => {
+            // 確定時点の最新 state を再取得 (stale closure 回避、CR/TR レビュー M-2 対応)。
+            const currentState = getState();
+            // picker 表示中に対象 relation が他経路で削除されていた場合は no-op で終わる。
+            if (!currentState.relations.includes(relation)) return;
+            // item_id 変更は slot 数不変・type STRING 固定の「値のみ変更」。
+            // relation を in-place 更新して entity identity を維持し、applySaveOnly で保存する
+            // (PrimitiveStore 同型。capture/restore を通さないため下流リンクは保持される。
+            // 新オブジェクト化すると Coordinator の WeakMap snapshot 解決が壊れ切断する)。
+            relation.item_id = selectedId;
+            if (relation.on === undefined || relation.on === null) relation.on = true;
+            coordinator.applySaveOnly(currentState.relations);
+        });
+    };
 
     return makeItemListWidget({
         widgetName: "__sax_text_catalog_widget",
@@ -1819,29 +1844,19 @@ function makeCatalogWidget(node) {
                 w: 24,
                 get: () => "",
                 format: () => "✎",
-                onPopup: (relation, _idx, _node) => {
-                    // picker 表示時の item_id を渡すが、確定時の relations は picker コールバック内で
-                    // 再取得する (picker 表示中に他経路で relations が変わった場合の stale closure 回避)。
-                    pickItemForRelation(getState(), relation.item_id, (selectedId) => {
-                        // 確定時点の最新 state を再取得 (stale closure 回避、CR/TR レビュー M-2 対応)。
-                        const currentState = getState();
-                        // picker 表示中に対象 relation が他経路で削除されていた場合は no-op で終わる。
-                        if (!currentState.relations.includes(relation)) return;
-                        // item_id 変更は slot 数不変・type STRING 固定の「値のみ変更」。
-                        // relation を in-place 更新して entity identity を維持し、applySaveOnly で保存する
-                        // (PrimitiveStore 同型。capture/restore を通さないため下流リンクは保持される。
-                        // 新オブジェクト化すると Coordinator の WeakMap snapshot 解決が壊れ切断する)。
-                        relation.item_id = selectedId;
-                        if (relation.on === undefined || relation.on === null) relation.on = true;
-                        coordinator.applySaveOnly(currentState.relations);
-                    });
-                },
+                onPopup: (relation) => pickItem(relation),
             },
         ],
 
         content: {
             draw(ctx, relation, x, y, w, rowH, on) {
                 drawRelationContent(ctx, getState(), relation, x, y, w, rowH, on);
+            },
+            // 行のラベル部分クリック: 参照先 item があれば Manager でその item を開いて編集する。
+            // (unset)/<orphan> は編集対象が無いため ✎ と同じ item 選択 picker を開く。
+            onClick(relation) {
+                if (relationStatus(getState(), relation) === "ok") openManager(relation.item_id);
+                else pickItem(relation);
             },
         },
 
