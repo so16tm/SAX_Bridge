@@ -75,6 +75,11 @@ class TestEmptyLatent:
         assert latent["samples"].device.type == "cpu"
         assert torch.count_nonzero(latent["samples"]) == 0
 
+    def test_declares_downscale_ratio(self):
+        """1/16 のモデル (Qwen-Image 2.1 等) で KSampler が latent を縮小できるよう、
+        縮小率 8 を明示する（無いと指定の 2 倍の解像度で生成される）。"""
+        assert loader_common.empty_latent(512, 512, 1)["downscale_ratio_spacial"] == 8
+
 
 class TestBuildPipe:
     def _pipe(self, **overrides):

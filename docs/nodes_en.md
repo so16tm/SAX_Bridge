@@ -17,7 +17,7 @@
 | [Loader](#loader) | Model and LoRA loading | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX Lora Loader](#sax-lora-loader) |
 | [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
 | [Pipe](#pipe) | Pipe construction and switching | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
-| [Prompt](#prompt) | Prompt encoding and concatenation | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
+| [Prompt](#prompt) | Prompt encoding and concatenation | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) / [SAX Qwen Image Prompt](#sax-qwen-image-prompt) |
 | [Enhance](#enhance) | Guidance / Detailer / Upscaler / Finisher | [SAX Guidance](#sax-guidance) / [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
 | [Option](#option) | Standalone utilities (noise injection etc.) | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | Segmentation via SAM3 | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
@@ -72,7 +72,7 @@
 
 ### SAX Diffusion Loader
 
-`SAX_Bridge_Loader_Diffusion` — Loads a UNET (diffusion model), CLIP (text encoder), and VAE from separate folders and initializes the `PIPE_LINE` context. Intended for split-distribution models (such as Anima) where model/clip/vae are not baked into a checkpoint. The output pipe shares the same structure as SAX Loader, so downstream nodes work unchanged.
+`SAX_Bridge_Loader_Diffusion` — Loads a UNET (diffusion model), CLIP (text encoder), and VAE from separate folders and initializes the `PIPE_LINE` context. Intended for split-distribution models (such as Anima and Qwen-Image 2.1) where model/clip/vae are not baked into a checkpoint. The output pipe shares the same structure as SAX Loader, so downstream nodes work unchanged.
 
 **Inputs**
 
@@ -97,8 +97,8 @@
 
 **Behavior**:
 - `model` is loaded from `diffusion_models` via `load_diffusion_model`, `clip` from `text_encoders` via `load_clip`, and `vae` from the `vae` folder, each independently
-- The CLIP type is auto-detected from the state_dict (e.g. Anima's Qwen3 0.6B)
-- The empty latent is created with 4 channels; KSampler's `fix_empty_latent_channels` adapts it to the model's latent_channels / latent_dimensions automatically (16-channel / 3-dimensional models need no extra setup)
+- The text encoder model is auto-detected from the state_dict (e.g. Anima's Qwen3 0.6B). The type that CLIPLoader's `type` selects is chosen automatically from the loaded UNET (`qwen_image` for Qwen-Image / Qwen-Image 2.1, `stable_diffusion` otherwise)
+- The empty latent is created with 4 channels at 1/8 scale; KSampler's `fix_empty_latent_channels` adapts it to the model's latent_channels / latent_dimensions / downscale ratio automatically (16-channel / 3-dimensional models and the 64-channel, 1/16 Qwen-Image 2.1 need no extra setup)
 - The `weight_dtype` fp8 options apply the same dtype mapping as ComfyUI's built-in UNETLoader
 - `lora_model_strength` applies the same value to both the LoRA model strength and clip strength
 - Unlike SAX Loader, it has no `clip_skip` / `v_pred` (not applicable to diffusion models' flow-based sampling and non-CLIP text encoders)
@@ -255,6 +255,39 @@ In the normal flow (Loader → Pipe → KSampler), `loader_settings` is always p
 **Outputs**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
 
 Use `target_positive` to choose whether the result is stored in Positive or Negative.
+
+[↑ Back to top](#top)
+
+---
+
+### SAX Qwen Image Prompt
+
+`SAX_Bridge_Prompt_Qwen_Image` — Prompt node dedicated to Qwen-Image 2.1. With no reference images it works as text-to-image; with images connected it works as image-to-image (multi-image editing with up to 10 images). Positive and negative are encoded together and stored in the Pipe.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `pipe` | PIPE_LINE | Pipe from SAX Diffusion Loader with Qwen-Image 2.1 loaded |
+| `wildcard_text` | String | Prompt / edit instruction. Refer to reference images as `<image1>`, `<image2>`, ... Wildcard and LoRA syntax supported |
+| `negative_text` | String | Negative prompt (no effect with the official cfg=1 setting) |
+| `resolution` | Int (0–4096, step 32) | Reference images are resized to about resolution × resolution pixels (aspect ratio kept, multiples of 32). 0 keeps the original size |
+| `images` | Autogrow | Reference images (grows from `image_1` up to 10 ports). `image_1` is the edit target |
+
+**Outputs**: `PIPE`, `POPULATED_TEXT`
+
+**Behavior**:
+- Encoding is delegated to ComfyUI's built-in `TextEncodeQwenImage21` (requires a ComfyUI version with Qwen-Image 2.1 support)
+- Without reference images: the latent keeps the Loader's `width` / `height` (text-to-image)
+- With reference images: the latent is replaced with the resized size of `image_1`, with the Loader's `batch_size` (a different size shifts the edit)
+- LoRA syntax is applied from `wildcard_text` only (LoRA tags in `negative_text` are just removed)
+
+**Recommended settings** (following the official workflow): on SAX Diffusion Loader set `cfg=1`, `sampler_name=euler`, `scheduler_name=simple`, `steps=25`–`50`.
+
+```
+t2i: SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output
+i2i: same; just connect images to image_1, image_2, ... of SAX Qwen Image Prompt
+```
 
 [↑ Back to top](#top)
 

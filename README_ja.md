@@ -7,7 +7,7 @@
 **少ないノードで高度な生成を。管理ノードで試行錯誤をスマートに。**
 
 SAX_Bridge は、ComfyUI のワークフローに「足りなかったピース」を補うカスタムノード集です。
-Checkpoint（または Anima 等の分割配布 diffusion model: UNET + text encoder + VAE）・CLIP・LoRA のロードからプロンプト処理・サンプリング・詳細化・出力までを少数のノードで完結させ、複雑な構成を組まずに高品質な生成を実現します。
+Checkpoint（または Anima・Qwen-Image 2.1 等の分割配布 diffusion model: UNET + text encoder + VAE）・CLIP・LoRA のロードからプロンプト処理・サンプリング・詳細化・出力までを少数のノードで完結させ、複雑な構成を組まずに高品質な生成を実現します。
 また、ノードやグループをシーン単位で一括管理する独自のコントロール機能により、設定の切り替えや比較を素早く行い、試行錯誤のサイクルを短縮します。
 
 ---
@@ -147,6 +147,18 @@ SAM3 側の `mask_grow` と本ノードの `grow` は加算的に効くため、
 
 **SAX Pipe Collector** は複数の Pipe 経路から有効な Pipe を選択するスイッチとして機能し、条件分岐を配線だけで表現できます。
 **SAX Image Collector** は複数の IMAGE 出力をバッチ結合し、SAX Image Preview に渡すことで生成結果の一括比較を実現します。
+
+[↑ トップへ](#sax_bridge)
+
+---
+
+<a id="qwen-image"></a>
+
+### Qwen-Image 2.1 の t2i・複数画像 i2i — Qwen Image Prompt
+
+**SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output** の 4 ノードで Qwen-Image 2.1 の生成と編集ができます。
+参照画像を繋がなければ t2i、`image_1` 〜 `image_10` に画像を繋げば i2i（複数画像の合成・編集）になり、プロンプトでは `<image1>` `<image2>` … で画像を指します。
+SAX Diffusion Loader はテキストエンコーダの種別をモデルから自動判定するため、追加の設定は不要です（推奨: `cfg=1`・`euler`・`simple`）。
 
 [↑ トップへ](#sax_bridge)
 

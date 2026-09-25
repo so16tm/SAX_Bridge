@@ -71,12 +71,17 @@ def apply_single_lora(
 
 
 def empty_latent(width: int, height: int, batch_size: int) -> dict:
-    """4ch 全ゼロの空 latent を作る。
+    """4ch 全ゼロ・1/8 縮小の空 latent を作る（ComfyUI 標準 EmptyLatentImage と同形）。
 
-    latent_channels / latent_dimensions はモデル依存だが、KSampler 側の
-    `fix_empty_latent_channels` が実行時に自動適応するため 4ch 固定でよい。
+    latent_channels / latent_dimensions / 縮小率はモデル依存だが、KSampler 側の
+    `fix_empty_latent_channels` が実行時に自動適応するため 4ch・1/8 固定でよい。
+    `downscale_ratio_spacial` を付けないと 1/16 のモデル (Qwen-Image 2.1 等) で
+    latent が縮小されず、指定の 2 倍の解像度で生成されてしまう。
     """
-    return {"samples": torch.zeros([batch_size, 4, height // 8, width // 8], device="cpu")}
+    return {
+        "samples": torch.zeros([batch_size, 4, height // 8, width // 8], device="cpu"),
+        "downscale_ratio_spacial": 8,
+    }
 
 
 def build_pipe(
