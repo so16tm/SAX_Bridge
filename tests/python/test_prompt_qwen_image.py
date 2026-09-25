@@ -76,3 +76,9 @@ def test_i2i_without_vae_raises():
     pipe["vae"] = None
     with pytest.raises(ValueError, match="VAE"):
         _run(pipe, _encoder(), wildcard_text="x", images={"image_1": torch.rand(1, 8, 8, 3)})
+
+
+def test_empty_pipe_raises_clear_error():
+    """上流 Loader のバイパス等で pipe が None のとき、配線を指すエラーにする。"""
+    with pytest.raises(ValueError, match="pipe input is empty"):
+        _run(None, _encoder(), wildcard_text="x", images={})

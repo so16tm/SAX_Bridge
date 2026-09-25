@@ -16,6 +16,22 @@ class AnyType(io.ComfyTypeIO):
 _APPLIED_LORAS_KEY = "_applied_loras"
 
 
+def require_pipe(pipe, node_label: str) -> dict:
+    """pipe が空 (None) で届いたときに、原因の分かるエラーにする。
+
+    ComfyUI は入力のない上流ノード (Loader 等) がバイパスされると出力を None にし、
+    SAX Pipe Collector も有効なソースが無ければ None を返す。そのまま `pipe.get`
+    すると AttributeError になり、配線の問題だと分からないため先に弾く。
+    """
+    if pipe is None:
+        raise ValueError(
+            f"[SAX_Bridge] {node_label}: the pipe input is empty. "
+            "The upstream Loader may be bypassed or muted (e.g. by Toggle Manager), "
+            "or SAX Pipe Collector has no active source. Check the pipe wiring."
+        )
+    return pipe
+
+
 def basename_no_ext(name: str) -> str:
     """パス末尾のファイル名を拡張子なしで返す（実行 OS に依存しない）。
 

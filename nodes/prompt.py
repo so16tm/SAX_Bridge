@@ -8,7 +8,7 @@ from nodes import ConditioningConcat
 from comfy_api.latest import io
 
 from .picker_options import get_lora_options, get_wildcard_options
-from .io_types import PipeLine, filter_new_loras, record_applied_loras
+from .io_types import PipeLine, filter_new_loras, record_applied_loras, require_pipe
 
 
 logger = logging.getLogger("SAX_Bridge")
@@ -299,6 +299,7 @@ class SAX_Bridge_Prompt(io.ComfyNode):
 
     @classmethod
     def execute(cls, pipe, wildcard_text, **kwargs) -> io.NodeOutput:
+        require_pipe(pipe, "SAX Prompt")
         new_pipe, _conditioning, populated = _process_prompt(pipe, wildcard_text, "positive")
         return io.NodeOutput(new_pipe, populated)
 
@@ -346,6 +347,7 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         target_positive,
         texts: io.Autogrow.Type,
     ) -> io.NodeOutput:
+        require_pipe(pipe, "SAX Prompt Concat")
         target_type = "positive" if target_positive else "negative"
 
         text_values = []
