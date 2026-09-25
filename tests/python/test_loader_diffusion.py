@@ -4,6 +4,7 @@ import pytest
 import torch
 from unittest.mock import MagicMock, patch
 from nodes.loader_diffusion import SAX_Bridge_Loader_Diffusion, _unet_model_options
+from nodes import loader_diffusion as loader_diffusion_mod
 from nodes.io_types import _APPLIED_LORAS_KEY, _normalize_lora_name
 
 
@@ -253,3 +254,31 @@ class TestLoaderDiffusionLora:
         assert pipe["clip"] is new_clip
         applied = pipe.get(_APPLIED_LORAS_KEY, set())
         assert _normalize_lora_name("my_lora.safetensors") in applied
+
+
+class TestLoaderDiffusionClipType:
+    """テキストエンコーダの CLIPType を UNET から自動判定する。"""
+
+    @staticmethod
+    def _model_with_config(class_name):
+        model = MagicMock(name="model")
+        model.model.model_config = type(class_name, (), {})()
+        return model
+
+    def _loaded_clip_type(self, model):
+        clip, vae = MagicMock(), MagicMock()
+        with patch("nodes.loader_diffusion.comfy.sd.load_diffusion_model", return_value=model), \
+             patch("nodes.loader_diffusion.comfy.sd.load_clip", return_value=clip) as mock_load_clip, \
+             patch("nodes.loader_diffusion.comfy.sd.VAE", return_value=vae), \
+             patch("nodes.loader_diffusion.comfy.utils.load_torch_file", return_value={}):
+            SAX_Bridge_Loader_Diffusion.execute(**_default_kwargs())
+        return mock_load_clip.call_args.kwargs["clip_type"]
+
+    def test_qwen_image_21_uses_qwen_image(self):
+        clip_type = self._loaded_clip_type(self._model_with_config("QwenImage21"))
+        assert clip_type is loader_diffusion_mod.comfy.sd.CLIPType.QWEN_IMAGE
+
+    def test_other_models_keep_stable_diffusion(self):
+        """Anima 等、従来通りの読み込みを変えない。"""
+        clip_type = self._loaded_clip_type(self._model_with_config("Anima"))
+        assert clip_type is loader_diffusion_mod.comfy.sd.CLIPType.STABLE_DIFFUSION

@@ -17,7 +17,7 @@
 | [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX Lora Loader](#sax-lora-loader) |
 | [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
 | [Pipe](#pipe) | Pipe の構築・切替 | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
-| [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
+| [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) / [SAX Qwen Image Prompt](#sax-qwen-image-prompt) |
 | [Enhance](#enhance) | Guidance / Detailer / Upscaler / Finisher | [SAX Guidance](#sax-guidance) / [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
 | [Option](#option) | 独立ユーティリティ（ノイズ注入等） | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | SAM3 によるセグメンテーション | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
@@ -72,7 +72,7 @@
 
 ### SAX Diffusion Loader
 
-`SAX_Bridge_Loader_Diffusion` — UNET（diffusion model）単体・CLIP（text encoder）単体・VAE を個別フォルダから読み込み、`PIPE_LINE` コンテキストを初期化します。Checkpoint に model/clip/vae が baked されていない分割配布モデル（Anima など）向けです。出力 pipe は SAX Loader と同一構造のため、下流ノードは無改修で利用できます。
+`SAX_Bridge_Loader_Diffusion` — UNET（diffusion model）単体・CLIP（text encoder）単体・VAE を個別フォルダから読み込み、`PIPE_LINE` コンテキストを初期化します。Checkpoint に model/clip/vae が baked されていない分割配布モデル（Anima・Qwen-Image 2.1 など）向けです。出力 pipe は SAX Loader と同一構造のため、下流ノードは無改修で利用できます。
 
 **入力**
 
@@ -97,8 +97,8 @@
 
 **動作**:
 - `model` は `load_diffusion_model` で `diffusion_models` から、`clip` は `load_clip` で `text_encoders` から、`vae` は `vae` フォルダからそれぞれ個別にロードする
-- CLIP の種別は state_dict から自動判別される（Anima の Qwen3 0.6B 等）
-- 空 latent は 4ch で生成し、KSampler 側の `fix_empty_latent_channels` がモデルの latent_channels / latent_dimensions へ自動適応する（16ch・3次元モデルも追加設定不要）
+- テキストエンコーダのモデルは state_dict から自動判別される（Anima の Qwen3 0.6B 等）。CLIPLoader の `type` に当たる種別は読み込んだ UNET から自動で決まる（Qwen-Image / Qwen-Image 2.1 は `qwen_image`、それ以外は `stable_diffusion`）
+- 空 latent は 4ch・1/8 で生成し、KSampler 側の `fix_empty_latent_channels` がモデルの latent_channels / latent_dimensions / 縮小率へ自動適応する（16ch・3次元モデル、64ch・1/16 の Qwen-Image 2.1 も追加設定不要）
 - `weight_dtype` の fp8 指定は ComfyUI 本体 UNETLoader と同一の dtype マッピングを適用する
 - `lora_model_strength` は LoRA の model strength と clip strength の両方に同じ値を適用する
 - SAX Loader と異なり `clip_skip` / `v_pred` は持たない（diffusion model の flow 系サンプリング・非 CLIP テキストエンコーダに非該当のため）
@@ -255,6 +255,39 @@
 **出力**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
 
 `target_positive` で Positive / Negative のどちらに結果を格納するか選択します。
+
+[↑ トップへ](#top)
+
+---
+
+### SAX Qwen Image Prompt
+
+`SAX_Bridge_Prompt_Qwen_Image` — Qwen-Image 2.1 専用のプロンプトノード。参照画像を繋がなければ t2i、繋げば i2i（最大 10 枚の複数画像編集）として動作します。positive / negative を同時にエンコードして Pipe に格納します。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | SAX Diffusion Loader で Qwen-Image 2.1 を読み込んだ Pipe |
+| `wildcard_text` | String | プロンプト／編集指示。参照画像は `<image1>`, `<image2>` … で指す。Wildcard・LoRA 構文対応 |
+| `negative_text` | String | ネガティブプロンプト（cfg=1 の公式設定では効果なし） |
+| `resolution` | Int (0〜4096, 32 刻み) | 参照画像を約 resolution × resolution ピクセルへ縮小（縦横比維持・32 の倍数）。0 は元サイズのまま |
+| `images` | Autogrow | 参照画像（`image_1` から最大 10 ポートまで自動増減）。`image_1` が編集対象 |
+
+**出力**: `PIPE`, `POPULATED_TEXT`
+
+**動作**:
+- エンコードは ComfyUI 本体の `TextEncodeQwenImage21` に委ねる（Qwen-Image 2.1 対応版の ComfyUI が必要）
+- 参照画像なし: latent は Loader の `width` / `height` のまま（t2i）
+- 参照画像あり: latent を `image_1` の縮小後サイズに置き換え、Loader の `batch_size` 枚ぶん用意する（別サイズだと編集結果がずれるため）
+- LoRA 構文は `wildcard_text` 側だけを適用する（`negative_text` 内の LoRA タグは除去のみ）
+
+**推奨設定**（公式ワークフロー準拠）: SAX Diffusion Loader で `cfg=1`、`sampler_name=euler`、`scheduler_name=simple`、`steps=25`〜`50`。
+
+```
+t2i: SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output
+i2i: 同上。SAX Qwen Image Prompt の image_1, image_2 … に画像を繋ぐだけ
+```
 
 [↑ トップへ](#top)
 

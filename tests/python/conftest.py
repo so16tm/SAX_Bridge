@@ -145,6 +145,10 @@ class _AutogrowFactory:
         def __init__(self, *args, **kwargs):
             pass
 
+    class TemplateNames:
+        def __init__(self, *args, **kwargs):
+            pass
+
 class _HiddenEnum:
     unique_id = "UNIQUE_ID"
     prompt = "PROMPT"

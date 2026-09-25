@@ -18,6 +18,7 @@ from .nodes.schedulers import register_schedulers
 register_schedulers()
 
 from .nodes import prompt as prompt_node  # noqa: E402
+from .nodes import prompt_qwen_image as prompt_qwen_image_node  # noqa: E402
 from .nodes import pipe as pipe_node  # noqa: E402
 from .nodes import loader as loader_node  # noqa: E402
 from .nodes import loader_diffusion as loader_diffusion_node  # noqa: E402
@@ -65,6 +66,7 @@ for v3_node in [
     # Prompt
     prompt_node.SAX_Bridge_Prompt,
     prompt_node.SAX_Bridge_Prompt_Concat,
+    prompt_qwen_image_node.SAX_Bridge_Prompt_Qwen_Image,
     # Sampler
     sampler_node.SAX_Bridge_KSampler,
     # Segment
