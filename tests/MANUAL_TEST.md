@@ -447,6 +447,7 @@
 任意のワークフローで TextCatalog の出力スロットを後続ノードに接続した状態で以下を確認する。
 
 - [ ] **onPopup（Item 再割当）**: Relation 行の `[✎]` で Item を別のものに変更 → 下流接続が維持される
+- [ ] **行クリック編集**: Relation 行のラベル部分をクリック → その Item が選択された状態で Manager が開く。`(unset)` / `<orphan>` 行では Item 選択が開く
 - [ ] **Manager Save（item 削除）**: Manager Dialog で参照中 Item を削除して `[Save]` → 当該 Relation が `(unset)` 表示になり、かつ下流接続が維持される
 - [ ] **孤立スロット表示**: `<orphan>` 表示の Relation も出力スロット自体は残存し、接続されていれば維持される
 

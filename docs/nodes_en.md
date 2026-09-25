@@ -964,6 +964,7 @@ applied_loras: {'lora_a'} (1 entries)
 - Setting `merge_outputs` to `merged` strips enabled Relation texts, skips empty strings, newline-joins the rest, and exposes one `merged` output
 - Adding, removing, or reordering Relations preserves connections to downstream nodes (including dynamic-input nodes such as `SAX Prompt Concat`)
 - Each Relation row has a leading toggle (pill) / `[✎]` (item picker) / `[↑↓]` (reorder) / `[×]` (delete)
+- Clicking a Relation row's label opens the Manager with that item selected for editing (`(unset)` / `<orphan>` rows open the item picker instead)
 - Toggling OFF keeps the Item assignment but emits `""` from the Slot (use to silence outputs temporarily)
 - OFF rows render their text with reduced opacity
 - Unset Relations show `(unset)` in gray (the slot remains and any connection to it is preserved)
