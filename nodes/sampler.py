@@ -2,7 +2,7 @@ from typing import Any
 
 import nodes
 from comfy_api.latest import io
-from .io_types import PipeLine
+from .io_types import PipeLine, require_pipe
 from .vae_utils import decode_image
 
 
@@ -42,6 +42,7 @@ class SAX_Bridge_KSampler(io.ComfyNode):
 
     @classmethod
     def execute(cls, pipe: dict, decode_vae: bool) -> io.NodeOutput:
+        require_pipe(pipe, "SAX KSampler")
         model = pipe.get("model")
         positive = pipe.get("positive")
         negative = pipe.get("negative")

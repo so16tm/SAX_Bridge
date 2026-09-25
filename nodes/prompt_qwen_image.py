@@ -12,7 +12,7 @@ from typing import Any
 import torch
 from comfy_api.latest import io
 
-from .io_types import PipeLine, filter_new_loras, record_applied_loras
+from .io_types import PipeLine, filter_new_loras, record_applied_loras, require_pipe
 from .prompt import _apply_loras, _get_impact_wildcards
 
 # Qwen-Image 2.1 が公式に受け付ける参照画像の上限
@@ -122,6 +122,7 @@ class SAX_Bridge_Prompt_Qwen_Image(io.ComfyNode):
         resolution: int = 1024,
         images: io.Autogrow.Type = None,
     ) -> io.NodeOutput:
+        require_pipe(pipe, "SAX Qwen Image Prompt")
         model = pipe.get("model")
         clip = pipe.get("clip")
         vae = pipe.get("vae")
