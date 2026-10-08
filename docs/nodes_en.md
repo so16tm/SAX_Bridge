@@ -14,8 +14,8 @@
 
 | Category | Description | Nodes |
 |---------|------|-------|
-| [Loader](#loader) | Model and LoRA loading | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX Lora Loader](#sax-lora-loader) |
-| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
+| [Loader](#loader) | Model and LoRA loading | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX MiniMax H3 Loader](#sax-minimax-h3-loader) / [SAX Lora Loader](#sax-lora-loader) |
+| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) / [SAX MiniMax H3 Sampler](#sax-minimax-h3-sampler) |
 | [Pipe](#pipe) | Pipe construction and switching | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | Prompt encoding and concatenation | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) / [SAX Qwen Image Prompt](#sax-qwen-image-prompt) |
 | [Enhance](#enhance) | Guidance / Detailer / Upscaler / Finisher | [SAX Guidance](#sax-guidance) / [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
@@ -107,6 +107,39 @@
 
 ---
 
+### SAX MiniMax H3 Loader
+
+`SAX_Bridge_Loader_MiniMax_H3` — Loads the diffusion model, text encoder, video VAE, and audio VAE of MiniMax H3 (a joint video + audio model) in one node. Outputs individual connections that go straight into [MiniMaxH3-Director](https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director), plus a `PIPE_LINE` for SAX MiniMax H3 Sampler. Requires ComfyUI 0.30.0 or later.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `unet_name` | Combo | FL2VA checkpoint (text-to-video and first/last-frame image-to-video; Director with Refs OFF). `None` skips loading |
+| `ref_unet_name` | Combo | REF2VA checkpoint (reference images / videos / audio; Director with Refs ON). Defaults to `None`; selecting one loads a second ~20GB model |
+| `clip_name` | Combo | Text encoder (Qwen3-VL 32B) from the `text_encoders` folder |
+| `vae_name` | Combo | Video VAE from the `vae` folder |
+| `audio_vae_name` | Combo | Audio VAE from the `vae` folder (swapping it with the video VAE puts noise in the video) |
+| `seed` | Int | Seed value |
+| `steps` | Int | Sampling steps (default 20) |
+| `sampler_name` | Combo | Sampler selection (default `res_multistep`) |
+| `scheduler_name` | Combo | Scheduler selection (default `simple`) |
+
+**Outputs**: `PIPE`, `MODEL`, `MODEL_REF2VA`, `CLIP`, `VAE`, `AUDIO_VAE`
+
+**Behavior**:
+- Each Combo's initial value is the first file whose name contains `fl2va` / `qwen3vl` + `minimax` / `video_vae` / `audio_vae`, so placing the files is enough
+- The text encoder type (CLIPLoader `type=minimax`) is set automatically
+- Either `unet_name` or `ref_unet_name` alone is fine; both `None` is an error
+- Connect `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` to the same-named Director inputs. An unselected model outputs `None`
+- The `PIPE` carries `MODEL` (or `MODEL_REF2VA` when that is the only one) as `model` and the audio VAE as `audio_vae`; sampling settings go to `loader_settings` (`cfg` is fixed at 1.0 and `denoise` at 1.0, the official H3 setup)
+- Resolution, length, latent, and conditioning are decided by the Director, so this loader has no `width` / `height` / `batch_size`
+- LoRAs are not loaded
+
+[↑ Back to top](#top)
+
+---
+
 ### SAX Lora Loader
 
 `SAX_Bridge_Loader_Lora` — Applies multiple LoRAs to the model/clip in the Pipe. Each LoRA can be individually toggled, strength-adjusted, and reordered.
@@ -177,6 +210,38 @@ In the normal flow (Loader → Pipe → KSampler), `loader_settings` is always p
 | `scheduler` | `"normal"` |
 | `denoise` | `1.0` |
 | `seed` (`pipe.seed`) | `0` |
+
+[↑ Back to top](#top)
+
+---
+
+### SAX MiniMax H3 Sampler
+
+`SAX_Bridge_Sampler_MiniMax_H3` — Samples the MiniMaxH3-Director output (`model` / `positive` / `latent`), decodes video and audio, and produces a `VIDEO`. It folds the standard RandomNoise → KSamplerSelect → BasicScheduler → BasicGuider → SamplerCustomAdvanced → VAEDecode / VAEDecodeAudio → CreateVideo chain into one node.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | PIPE from SAX MiniMax H3 Loader (uses the VAE, audio VAE, seed, and sampling settings) |
+| `model` | MODEL | The Director's `model` output (sigma shift applied) |
+| `positive` | CONDITIONING | The Director's `positive` output |
+| `latent` | LATENT | The Director's `latent` output |
+| `fps` | Float (1 to 240, optional) | Output frame rate. Defaults to 24 (H3 is fixed at 24fps and the Director's `fps` is always 24) |
+
+**Outputs**: `PIPE`, `VIDEO`, `IMAGE`, `AUDIO`
+
+**Behavior**:
+- Sampling and video creation are delegated to ComfyUI core nodes (`comfy_extras.nodes_custom_sampler` / `nodes_audio` / `nodes_video`)
+- `seed` / `steps` / `sampler_name` / `scheduler` come from the pipe; guidance is BasicGuider (no CFG) and denoise is fixed at 1.0
+- Video and audio are decoded from the same joint latent, with the video VAE and the audio VAE respectively
+- The output `PIPE` has `samples` / `images` updated, and `loader_settings` `clip_width` / `clip_height` set to the actual frame size
+
+```
+SAX MiniMax H3 Loader → MiniMax H3 Director → SAX MiniMax H3 Sampler → Save Video
+```
+
+Connect the Loader's `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` to the Director, and the Loader's `PIPE` plus the Director's `model` / `positive` / `latent` to the Sampler.
 
 [↑ Back to top](#top)
 

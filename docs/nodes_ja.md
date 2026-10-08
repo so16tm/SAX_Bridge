@@ -14,8 +14,8 @@
 
 | カテゴリ | 概要 | ノード |
 |---------|------|--------|
-| [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX Lora Loader](#sax-lora-loader) |
-| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
+| [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX MiniMax H3 Loader](#sax-minimax-h3-loader) / [SAX Lora Loader](#sax-lora-loader) |
+| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) / [SAX MiniMax H3 Sampler](#sax-minimax-h3-sampler) |
 | [Pipe](#pipe) | Pipe の構築・切替 | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) / [SAX Qwen Image Prompt](#sax-qwen-image-prompt) |
 | [Enhance](#enhance) | Guidance / Detailer / Upscaler / Finisher | [SAX Guidance](#sax-guidance) / [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
@@ -107,6 +107,39 @@
 
 ---
 
+### SAX MiniMax H3 Loader
+
+`SAX_Bridge_Loader_MiniMax_H3` — MiniMax H3（動画＋音声を同時生成するモデル）の diffusion model・text encoder・映像 VAE・音声 VAE を 1 ノードで読み込みます。[MiniMaxH3-Director](https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director) の入力へそのまま繋げる個別出力と、SAX MiniMax H3 Sampler 用の `PIPE_LINE` を出力します。ComfyUI 0.30.0 以降が必要です。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `unet_name` | Combo | FL2VA checkpoint（t2v・先頭／末尾フレーム指定の i2v。Director の Refs OFF 用）。`None` で読み込まない |
+| `ref_unet_name` | Combo | REF2VA checkpoint（参照画像・動画・音声。Director の Refs ON 用）。既定は `None`。選ぶと約 20GB のモデルをもう 1 つ読み込む |
+| `clip_name` | Combo | text encoder（Qwen3-VL 32B）。`text_encoders` フォルダ |
+| `vae_name` | Combo | 映像 VAE。`vae` フォルダ |
+| `audio_vae_name` | Combo | 音声 VAE。`vae` フォルダ（映像 VAE と取り違えると映像にノイズが乗る） |
+| `seed` | Int | シード値 |
+| `steps` | Int | サンプリングステップ数（既定 20） |
+| `sampler_name` | Combo | サンプラー選択（既定 `res_multistep`） |
+| `scheduler_name` | Combo | スケジューラー選択（既定 `simple`） |
+
+**出力**: `PIPE`, `MODEL`, `MODEL_REF2VA`, `CLIP`, `VAE`, `AUDIO_VAE`
+
+**動作**:
+- 各 Combo の初期値は、ファイル名に `fl2va` / `qwen3vl` + `minimax` / `video_vae` / `audio_vae` を含む最初の候補が自動で選ばれる（配置しただけで設定済みになる）
+- text encoder の種別（CLIPLoader の `type=minimax`）は自動で設定する
+- `unet_name` と `ref_unet_name` はどちらか一方だけでも使える。両方 `None` はエラー
+- `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` を Director の同名入力へ繋ぐ。未選択の model は `None` を出力する
+- `PIPE` の `model` は `MODEL`（なければ `MODEL_REF2VA`）、`audio_vae` は音声 VAE。サンプリング設定は `loader_settings` に格納する（`cfg` は H3 公式設定の 1.0 固定、`denoise` は 1.0）
+- 解像度・長さ・latent・conditioning は Director が決めるため、この Loader には `width` / `height` / `batch_size` を持たない
+- LoRA は読み込まない
+
+[↑ トップへ](#top)
+
+---
+
 ### SAX Lora Loader
 
 `SAX_Bridge_Loader_Lora` — Pipe 内の model / clip に複数の LoRA を一括適用するノードです。各 LoRA を個別に ON/OFF・強度調整・並び替えできます。
@@ -177,6 +210,38 @@
 | `scheduler` | `"normal"` |
 | `denoise` | `1.0` |
 | `seed`（`pipe.seed`） | `0` |
+
+[↑ トップへ](#top)
+
+---
+
+### SAX MiniMax H3 Sampler
+
+`SAX_Bridge_Sampler_MiniMax_H3` — MiniMaxH3-Director の出力（`model` / `positive` / `latent`）をサンプリングし、映像と音声を復号して `VIDEO` まで仕上げます。標準ワークフローの RandomNoise → KSamplerSelect → BasicScheduler → BasicGuider → SamplerCustomAdvanced → VAEDecode / VAEDecodeAudio → CreateVideo を 1 ノードに畳んだものです。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | SAX MiniMax H3 Loader の PIPE（VAE・音声 VAE・シード・サンプリング設定を使う） |
+| `model` | MODEL | Director の `model` 出力（sigma shift 適用済み） |
+| `positive` | CONDITIONING | Director の `positive` 出力 |
+| `latent` | LATENT | Director の `latent` 出力 |
+| `fps` | Float (1〜240, optional) | 動画のフレームレート。既定 24（H3 は 24fps 固定で、Director の `fps` も常に 24） |
+
+**出力**: `PIPE`, `VIDEO`, `IMAGE`, `AUDIO`
+
+**動作**:
+- サンプリングと動画化は ComfyUI 本体のノード（`comfy_extras.nodes_custom_sampler` / `nodes_audio` / `nodes_video`）に委ねる
+- `seed` / `steps` / `sampler_name` / `scheduler` は pipe の設定を使い、ガイダンスは BasicGuider（CFG なし）、denoise は 1.0 固定
+- 映像と音声は同じ joint latent から、映像 VAE と音声 VAE でそれぞれ復号する
+- 出力 `PIPE` の `samples` / `images` を更新し、`loader_settings` の `clip_width` / `clip_height` を実際のフレームサイズに更新する
+
+```
+SAX MiniMax H3 Loader → MiniMax H3 Director → SAX MiniMax H3 Sampler → Save Video
+```
+
+Loader の `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` を Director へ、Loader の `PIPE` と Director の `model` / `positive` / `latent` を Sampler へ繋ぐ。
 
 [↑ トップへ](#top)
 

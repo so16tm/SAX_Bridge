@@ -164,6 +164,18 @@ SAX Diffusion Loader detects the text encoder type from the model automatically,
 
 ---
 
+<a id="minimax-h3"></a>
+
+### MiniMax H3 video + audio generation — MiniMax H3 Loader / Sampler
+
+Generate with MiniMax H3 through [MiniMaxH3-Director](https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director) in 4 nodes: **SAX MiniMax H3 Loader → MiniMax H3 Director → SAX MiniMax H3 Sampler → Save Video** (requires ComfyUI 0.30.0 or later).
+The Loader loads the diffusion model, text encoder (type set automatically), video VAE, and audio VAE together, and pre-selects the files by name. The Sampler does noise, scheduler, guider, sampling, video / audio decoding, and video creation in one node, defaulting to the official `res_multistep` / `simple` / 20 steps.
+To use reference images / videos / audio, select the REF2VA checkpoint in `ref_unet_name` and turn Refs ON in the Director.
+
+[↑ Back to top](#sax_bridge)
+
+---
+
 ## Installation
 
 ### ComfyUI Manager (Recommended)

@@ -417,6 +417,17 @@
 - [ ] **batch**: Loader の `batch_size=2` で i2i → 2 枚生成される
 - [ ] **rgba**: 「This is an RGBA format image with transparency. ... transparent background.」形式のプロンプトで t2i、PNG 保存 → アルファ付きで保存される
 
+### L-6. MiniMax H3 (workflows/21_minimax_h3.json)
+
+事前準備: ComfyUI 0.30.0 以降と [MiniMaxH3-Director](https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director) を導入し、[Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) の FL2VA（diffusion_models）・Qwen3-VL 32B（text_encoders）・映像 VAE / 音声 VAE（vae）を配置する。ファイル名が違う場合は SAX MiniMax H3 Loader で選び直す。
+
+- [ ] **defaults**: ファイルを配置してノードを新規追加 → `unet_name` / `clip_name` / `vae_name` / `audio_vae_name` が H3 のファイルに初期選択される
+- [ ] **t2v**: Director のタイムラインにプロンプトを入れて実行 → 音声付きの動画が保存され、映像にノイズが乗っていない
+- [ ] **i2v**: Director のメイントラックに画像を置き（Refs OFF）実行 → 画像が先頭フレームになる
+- [ ] **ref2va**: `ref_unet_name` に REF2VA を選び Director の Refs を ON、参照画像を置いて実行 → 参照が反映される
+- [ ] **single model**: `ref_unet_name=None` のまま Refs OFF で実行 → 警告なく生成できる（REF2VA は読み込まれない）
+- [ ] **pipe**: Sampler の `PIPE` に SAX Output 等を繋ぐ → 生成後のフレームサイズが `loader_settings` に反映される
+
 ## M. UI Phase 1.2.A 検証 (TextCatalog Coordinator 移行)
 
 ### M-1. TextCatalog clone smoke (workflows/text_catalog_clone_smoke.json)
