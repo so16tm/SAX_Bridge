@@ -27,7 +27,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { DynamicSlotCoordinator } from "../../js/sax_dynamic_slot_coordinator.js";
-import { rebuildLiveSources } from "../../js/sax_collector_link.js";
+import { rebuildLiveSources, resolveLocalSlotBySlotName } from "../../js/sax_collector_link.js";
 
 // ---------------------------------------------------------------------------
 // LiteGraph モック
@@ -180,12 +180,7 @@ function buildNodeCollectorSpec(node) {
             return enabled.map((gi, li) => ({ name: slotNames[gi] || `out_${li}`, type: slotTypes[gi] || "*" }));
         },
         syncSlotStructure: () => {},
-        resolveLocalSlotBySlotName: (entity, slotName) => {
-            const globalIdx = entity?.slotNames?.indexOf(slotName) ?? -1;
-            if (globalIdx < 0) return null;
-            const localIdx = entity?.enabledSlots?.indexOf(globalIdx) ?? -1;
-            return localIdx >= 0 ? localIdx : null;
-        },
+        resolveLocalSlotBySlotName,
         resolveLocalSlotByGlobalIdx: (entity, globalSlotIdx) => {
             const localIdx = entity?.enabledSlots?.indexOf(globalSlotIdx) ?? -1;
             return localIdx >= 0 ? localIdx : null;
@@ -377,6 +372,68 @@ describe("Node Collector → 下流ノード: rebuild を挟んでも接続が�
             "link は作り直されない");
         assert.equal(ag.inputs.length, 5, "下流 Autogrow は縮小しないべき");
         assertGraphIntegrity(graph, node, ag, "swap-rebuild");
+    });
+
+    // 回帰: 上流が同名の出力を複数持つ (例: IMAGE が 2 つ) と、段階1 が常に最初の一致へ
+    // 解決するため、並べ替え/再構築で 2 本目以降の link が 1 本目のピンへ寄って誤接続・断線した。
+    describe("同名出力を持つ上流", () => {
+        function setupDup(downstream) {
+            const node = makeCollectorNode(graph);
+            graph.registerNode(node);
+            graph.registerNode(downstream);
+            const up1 = makeUpstreamNode(10, [{ name: "IMAGE", type: "IMAGE" }, { name: "IMAGE", type: "IMAGE" }]);
+            const up2 = makeUpstreamNode(20, [{ name: "C", type: "STRING" }, { name: "D", type: "STRING" }]);
+            graph.registerNode(up1);
+            graph.registerNode(up2);
+            node._remoteSources = [];
+            for (const up of [up1, up2]) {
+                const src = collectorBuildSource(up, node);
+                for (const gi of src.enabledSlots) node.addOutput(src.slotNames[gi], src.slotTypes[gi]);
+                node._remoteSources.push(src);
+            }
+            for (let i = 0; i < 4; i++) node.connect(i, downstream, i);
+            const coordinator = new DynamicSlotCoordinator(node, buildNodeCollectorSpec(node));
+            return { node, coordinator };
+        }
+
+        it("ソース並べ替え: 同名出力ごとに別々の下流端へ追従し、1 本も寄らない", () => {
+            const ag = makeAutogrowNode(910, graph, { initialInputs: 1 });
+            const { node, coordinator } = setupDup(ag);
+            const before = downstreamLinks(graph, node, ag.id);
+
+            rebuildAllSources(node, graph, coordinator, () => {
+                const s = node._remoteSources;
+                [s[0], s[1]] = [s[1], s[0]];
+            });
+
+            const after = downstreamLinks(graph, node, ag.id);
+            assert.deepEqual(after.map(l => l.pin), [0, 1, 2, 3], "4 本とも別々のピンに付く (同一ピンへ集中しない)");
+            assert.deepEqual(after.map(l => l.targetSlot), [2, 3, 0, 1],
+                "IMAGE#0 は下流 0、IMAGE#1 は下流 1 の端を保ったまま新しいピン 2 / 3 へ付け替わる");
+            assert.deepEqual(after.map(l => l.id).sort(), before.map(l => l.id).sort(), "link は作り直されない");
+            assertGraphIntegrity(graph, node, ag, "dup-swap");
+        });
+
+        it("スロット選択解除: 同名の片方だけ解除すると、解除した方の link だけが切れる", () => {
+            const target = {
+                id: 911, outputs: [],
+                inputs: Array.from({ length: 4 }, (_, i) => ({ name: `in${i}`, type: "*", link: null })),
+            };
+            const { node, coordinator } = setupDup(target);
+            const before = downstreamLinks(graph, node, target.id);
+            const keptId = before.find(l => l.pin === 1).id;
+
+            rebuildAllSources(node, graph, coordinator, () => {
+                node._remoteSources[0].enabledSlots = [1]; // 2 つ目の IMAGE だけ残す
+            });
+
+            const after = downstreamLinks(graph, node, target.id);
+            assert.equal(after.length, 3, "解除した 1 本だけが切れる");
+            const imageLink = after.find(l => l.pin === 0);
+            assert.equal(imageLink.id, keptId, "残した 2 つ目の IMAGE の link が先頭ピンへ追従する");
+            assert.equal(imageLink.targetSlot, 1);
+            assertGraphIntegrity(graph, node, target, "dup-deselect");
+        });
     });
 
     it("静的入力下流でも rebuild で接続が維持される (下流種別に依存しない)", () => {

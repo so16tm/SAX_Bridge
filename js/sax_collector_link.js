@@ -21,6 +21,7 @@
  *   partitionLiveSources(sources, getNodeById)        — sig rebuild の一時 null 温存分割
  *   mergeSourceAnchors(oldSource, newSource)          — H-1 rebuild 時の identity アンカー引継ぎ
  *   rebuildLiveSources({...})                         — H-1/H-3 rebuild の app 非依存中核 (live 再構築 + anchor 引継ぎ + missing 温存)
+ *   resolveLocalSlotBySlotName(entity, name, gi)      — NodeCollector 下流リンク復元の段階1 resolver (同名出力を globalSlotIdx で判別)
  */
 
 /**
@@ -331,4 +332,34 @@ export function rebuildLiveSources({ savedSources, getNodeById, buildSourceFn, g
         offset += getSlotCount(adopted);
     }
     return { rebuilt, missing };
+}
+
+/**
+ * NodeCollector 出力リンク復元の段階1 resolver: 出力名 → entity 内 localSlotIdx。
+ *
+ * 上流ノードは同名の出力を複数持ちうる (例: 2 つの "IMAGE")。`slotNames.indexOf` だけだと
+ * 常に最初の一致へ解決され、同名の 2 本目以降のリンクが 1 本目のピンへ寄って
+ * 並べ替え/再構築のたびに下流が誤接続・断線する。capture 時に記録した globalSlotIdx
+ * (= その出力が元いた entity 内の位置) が分かる場合は、同名一致のうちそれに最も近いものを選ぶ。
+ * globalSlotIdx が一致候補に含まれていればそれ自身が選ばれる。
+ *
+ * 選んだ global index が enabledSlots に無い (スロット選択で解除された) 場合は null を返し、
+ * 呼出側 (Coordinator) は段階2 → 段階3 (リンク除去) へ進む。
+ *
+ * @param {{ slotNames?: string[], enabledSlots?: number[] }} entity
+ * @param {string} slotName
+ * @param {number | null} [globalSlotIdx]  capture 時の entity 内 global index (任意)
+ * @returns {number | null}
+ */
+export function resolveLocalSlotBySlotName(entity, slotName, globalSlotIdx = null) {
+    const names = entity?.slotNames ?? [];
+    let best = -1;
+    for (let i = 0; i < names.length; i++) {
+        if (names[i] !== slotName) continue;
+        if (best < 0) { best = i; continue; }
+        if (globalSlotIdx != null && Math.abs(i - globalSlotIdx) < Math.abs(best - globalSlotIdx)) best = i;
+    }
+    if (best < 0) return null;
+    const localIdx = entity?.enabledSlots?.indexOf(best) ?? -1;
+    return localIdx >= 0 ? localIdx : null;
 }

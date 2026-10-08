@@ -62,7 +62,7 @@
  * @property {(newEntities: object[]) => void} [setEntities]
  *           commitState / applyAfterCapture / applySaveOnly で entity 配列全体を差し替えるための setter。
  *           利用側で `node._primitiveItems = newEntities` のような差し替えを行う。
- * @property {(entity: object, slotName: string) => (number | null)} [resolveLocalSlotBySlotName]
+ * @property {(entity: object, slotName: string, globalSlotIdx?: (number | null)) => (number | null)} [resolveLocalSlotBySlotName]
  *           Phase 1.2.B 追加 (output 1:N 段階1 fallback)。entity と slotName から localSlotIdx を返す。
  *           NodeCollector では `slotNames.indexOf(slotName) → enabledSlots.indexOf(globalIdx) → localIdx` を実装。
  *           1:1 ノード (PrimitiveStore / TextCatalog) や enabledSlots 編集機能なしの Collector (Image / Pipe) では
@@ -723,7 +723,7 @@ export class DynamicSlotCoordinator {
      */
     #resolveLocalSlot(entity, ds) {
         if (ds.slotName != null && typeof this.#spec.resolveLocalSlotBySlotName === "function") {
-            const resolved = this.#spec.resolveLocalSlotBySlotName(entity, ds.slotName);
+            const resolved = this.#spec.resolveLocalSlotBySlotName(entity, ds.slotName, ds.globalSlotIdx);
             if (typeof resolved === "number" && resolved >= 0) return resolved;
         }
         if (ds.globalSlotIdx != null && typeof this.#spec.resolveLocalSlotByGlobalIdx === "function") {
