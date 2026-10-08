@@ -2,7 +2,7 @@ import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
 import { ensureRenderLinkPatch, showDialog, h, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
-import { resolveAnchorToOutputSlot } from "./sax_collector_link.js";
+import { resolveAnchorToOutputSlot, resolveLocalSlotBySlotName } from "./sax_collector_link.js";
 
 const EXT_NAME  = "SAX.NodeCollector";
 const NODE_TYPE = "SAX_Bridge_Node_Collector";
@@ -230,13 +230,9 @@ function buildNodeCollectorSpec(node) {
         // 構造同期は makeSourceListWidget 内 (action 内 _syncSlotLabels) で完結。
         syncSlotStructure: () => {},
 
-        // 段階1: slotName → globalSlotIdx (slotNames.indexOf) → enabledSlots.indexOf → localSlotIdx
-        resolveLocalSlotBySlotName: (entity, slotName) => {
-            const globalIdx = entity?.slotNames?.indexOf(slotName) ?? -1;
-            if (globalIdx < 0) return null;
-            const localIdx = entity?.enabledSlots?.indexOf(globalIdx) ?? -1;
-            return localIdx >= 0 ? localIdx : null;
-        },
+        // 段階1: slotName → globalSlotIdx (slotNames 内の一致) → enabledSlots.indexOf → localSlotIdx。
+        // 同名出力 (例: IMAGE が 2 つ) は capture 時の globalSlotIdx で判別する。
+        resolveLocalSlotBySlotName,
         // 段階2: globalSlotIdx → enabledSlots.indexOf → localSlotIdx
         resolveLocalSlotByGlobalIdx: (entity, globalSlotIdx) => {
             const localIdx = entity?.enabledSlots?.indexOf(globalSlotIdx) ?? -1;
