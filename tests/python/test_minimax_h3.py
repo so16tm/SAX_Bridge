@@ -208,12 +208,16 @@ def test_sampler_wires_upstream_nodes_with_pipe_settings():
     pipe = _pipe()
     (out_pipe, video, out_images, audio), nodes, decode, latent, sampled, images = _run_sampler(pipe)
 
-    nodes["RandomNoise"].execute.assert_called_once_with(42)
-    nodes["KSamplerSelect"].execute.assert_called_once_with("euler")
+    nodes["RandomNoise"].execute.assert_called_once_with(noise_seed=42)
+    nodes["KSamplerSelect"].execute.assert_called_once_with(sampler_name="euler")
     # steps / scheduler は Loader の設定、model は Director のパッチ済みモデルを使う。denoise は常に 1
-    nodes["BasicScheduler"].execute.assert_called_once_with("PATCHED_MODEL", "beta", 12, 1.0)
-    nodes["BasicGuider"].execute.assert_called_once_with("PATCHED_MODEL", "COND")
-    nodes["SamplerCustomAdvanced"].execute.assert_called_once_with("NOISE", "GUIDER", "SAMPLER", "SIGMAS", latent)
+    nodes["BasicScheduler"].execute.assert_called_once_with(
+        model="PATCHED_MODEL", scheduler="beta", steps=12, denoise=1.0
+    )
+    nodes["BasicGuider"].execute.assert_called_once_with(model="PATCHED_MODEL", conditioning="COND")
+    nodes["SamplerCustomAdvanced"].execute.assert_called_once_with(
+        noise="NOISE", guider="GUIDER", sampler="SAMPLER", sigmas="SIGMAS", latent_image=latent
+    )
 
 
 def test_sampler_decodes_video_and_audio_from_the_same_latent_with_separate_vaes():
@@ -221,10 +225,11 @@ def test_sampler_decodes_video_and_audio_from_the_same_latent_with_separate_vaes
     (out_pipe, video, out_images, audio), nodes, decode, latent, sampled, images = _run_sampler(pipe)
 
     decode.assert_called_once_with(pipe["vae"], sampled["samples"])
-    nodes["VAEDecodeAudio"].execute.assert_called_once_with(sampled, pipe["audio_vae"])
+    # 本体 VAEDecodeAudio.execute は (vae, samples) の順なので、必ずキーワードで渡す
+    nodes["VAEDecodeAudio"].execute.assert_called_once_with(samples=sampled, vae=pipe["audio_vae"])
     # 動画は 24fps 既定で、映像と音声を mux して作る
-    args, kwargs = nodes["CreateVideo"].execute.call_args
-    assert args == (images, 24.0)
+    _, kwargs = nodes["CreateVideo"].execute.call_args
+    assert kwargs["images"] is images and kwargs["fps"] == 24.0
     assert kwargs["audio"] == {"waveform": "WAV", "sample_rate": 44100}
     assert video == "VIDEO"
     assert out_images is images
@@ -233,7 +238,7 @@ def test_sampler_decodes_video_and_audio_from_the_same_latent_with_separate_vaes
 
 def test_sampler_passes_custom_fps():
     _, nodes, *_ = _run_sampler(_pipe(), fps=30.0)
-    assert nodes["CreateVideo"].execute.call_args.args[1] == 30.0
+    assert nodes["CreateVideo"].execute.call_args.kwargs["fps"] == 30.0
 
 
 def test_sampler_updates_pipe_without_mutating_input():

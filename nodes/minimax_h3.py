@@ -273,18 +273,21 @@ class SAX_Bridge_Sampler_MiniMax_H3(io.ComfyNode):
             "comfy_extras.nodes_custom_sampler",
             "RandomNoise", "KSamplerSelect", "BasicScheduler", "BasicGuider", "SamplerCustomAdvanced",
         )
-        noise = _first(random_noise.execute(seed))
-        sampler = _first(sampler_select.execute(sampler_name))
-        sigmas = _first(basic_scheduler.execute(model, scheduler, steps, 1.0))
-        guider = _first(basic_guider.execute(model, positive))
-        sampled = _first(sampler_advanced.execute(noise, guider, sampler, sigmas, latent))
+        # 本体の V3 ノードは execute の引数順が入力の宣言順と一致するとは限らないため、必ずキーワードで渡す
+        noise = _first(random_noise.execute(noise_seed=seed))
+        sampler = _first(sampler_select.execute(sampler_name=sampler_name))
+        sigmas = _first(basic_scheduler.execute(model=model, scheduler=scheduler, steps=steps, denoise=1.0))
+        guider = _first(basic_guider.execute(model=model, conditioning=positive))
+        sampled = _first(sampler_advanced.execute(
+            noise=noise, guider=guider, sampler=sampler, sigmas=sigmas, latent_image=latent
+        ))
 
         # 映像と音声は同じ joint latent から別々の VAE で復号する（本体の標準ワークフローと同じ）
         images = decode_image(vae, sampled["samples"])
         (vae_decode_audio,) = _upstream("comfy_extras.nodes_audio", "VAEDecodeAudio")
-        audio = _first(vae_decode_audio.execute(sampled, audio_vae))
+        audio = _first(vae_decode_audio.execute(samples=sampled, vae=audio_vae))
         (create_video,) = _upstream("comfy_extras.nodes_video", "CreateVideo")
-        video = _first(create_video.execute(images, fps, audio=audio))
+        video = _first(create_video.execute(images=images, fps=fps, audio=audio))
 
         new_pipe = {**pipe, "samples": sampled, "images": images}
         new_settings = dict(settings)
