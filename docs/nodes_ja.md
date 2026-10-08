@@ -116,7 +116,10 @@
 | パラメータ | 型 | 説明 |
 |-----------|-----|------|
 | `unet_name` | Combo | FL2VA checkpoint（t2v・先頭／末尾フレーム指定の i2v。Director の Refs OFF 用）。`None` で読み込まない |
+| `lora_name` | Combo | FL2VA 用 LoRA（turbo 4-step / 8-step LoRA 等）。`None` でスキップ。steps を 4 / 8 に合わせる |
 | `ref_unet_name` | Combo | REF2VA checkpoint（参照画像・動画・音声。Director の Refs ON 用）。既定は `None`。選ぶと約 20GB のモデルをもう 1 つ読み込む |
+| `ref_lora_name` | Combo | REF2VA 用 LoRA（REF2V turbo 4-step LoRA 等）。`None` でスキップ |
+| `lora_strength` | Float (-10.0〜10.0) | LoRA の強度（両方に同じ値を適用） |
 | `clip_name` | Combo | text encoder（Qwen3-VL 32B）。`text_encoders` フォルダ |
 | `vae_name` | Combo | 映像 VAE。`vae` フォルダ |
 | `audio_vae_name` | Combo | 音声 VAE。`vae` フォルダ（映像 VAE と取り違えると映像にノイズが乗る） |
@@ -124,9 +127,6 @@
 | `steps` | Int | サンプリングステップ数（既定 20） |
 | `sampler_name` | Combo | サンプラー選択（既定 `res_multistep`） |
 | `scheduler_name` | Combo | スケジューラー選択（既定 `simple`） |
-| `lora_name` | Combo | FL2VA 用 LoRA（turbo 4-step / 8-step LoRA 等）。`None` でスキップ。steps を 4 / 8 に合わせる |
-| `ref_lora_name` | Combo | REF2VA 用 LoRA（REF2V turbo 4-step LoRA 等）。`None` でスキップ |
-| `lora_strength` | Float (-10.0〜10.0) | LoRA の強度（両方に同じ値を適用） |
 
 **出力**: `PIPE`, `MODEL`, `MODEL_REF2VA`, `CLIP`, `VAE`, `AUDIO_VAE`
 

@@ -40,7 +40,10 @@ def test_pick_default_requires_all_keywords_and_falls_back():
 def _loader_kwargs(**overrides):
     kwargs = {
         "unet_name": "minimax_h3_fl2va.safetensors",
+        "lora_name": "None",
         "ref_unet_name": "None",
+        "ref_lora_name": "None",
+        "lora_strength": 1.0,
         "clip_name": "qwen3vl_32b_minimax_h3.safetensors",
         "vae_name": "minimax_h3_video_vae.safetensors",
         "audio_vae_name": "minimax_h3_audio_vae.safetensors",

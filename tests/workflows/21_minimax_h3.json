@@ -69,6 +69,9 @@
       "widgets_values": [
         "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
         "None",
+        "None",
+        "None",
+        1,
         "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
         "minimax_h3_video_vae_fp16.safetensors",
         "minimax_h3_audio_vae_fp32.safetensors",
@@ -76,10 +79,7 @@
         "fixed",
         20,
         "res_multistep",
-        "simple",
-        "None",
-        "None",
-        1
+        "simple"
       ]
     },
     {

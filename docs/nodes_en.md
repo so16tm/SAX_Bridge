@@ -116,7 +116,10 @@
 | Parameter | Type | Description |
 |-----------|-----|------|
 | `unet_name` | Combo | FL2VA checkpoint (text-to-video and first/last-frame image-to-video; Director with Refs OFF). `None` skips loading |
+| `lora_name` | Combo | LoRA for the FL2VA model (e.g. the turbo 4-step / 8-step LoRA). `None` skips. Set `steps` to 4 / 8 to match |
 | `ref_unet_name` | Combo | REF2VA checkpoint (reference images / videos / audio; Director with Refs ON). Defaults to `None`; selecting one loads a second ~20GB model |
+| `ref_lora_name` | Combo | LoRA for the REF2VA model (e.g. the REF2V turbo 4-step LoRA). `None` skips |
+| `lora_strength` | Float (-10.0 to 10.0) | LoRA strength (the same value for both) |
 | `clip_name` | Combo | Text encoder (Qwen3-VL 32B) from the `text_encoders` folder |
 | `vae_name` | Combo | Video VAE from the `vae` folder |
 | `audio_vae_name` | Combo | Audio VAE from the `vae` folder (swapping it with the video VAE puts noise in the video) |
@@ -124,9 +127,6 @@
 | `steps` | Int | Sampling steps (default 20) |
 | `sampler_name` | Combo | Sampler selection (default `res_multistep`) |
 | `scheduler_name` | Combo | Scheduler selection (default `simple`) |
-| `lora_name` | Combo | LoRA for the FL2VA model (e.g. the turbo 4-step / 8-step LoRA). `None` skips. Set `steps` to 4 / 8 to match |
-| `ref_lora_name` | Combo | LoRA for the REF2VA model (e.g. the REF2V turbo 4-step LoRA). `None` skips |
-| `lora_strength` | Float (-10.0 to 10.0) | LoRA strength (the same value for both) |
 
 **Outputs**: `PIPE`, `MODEL`, `MODEL_REF2VA`, `CLIP`, `VAE`, `AUDIO_VAE`
 

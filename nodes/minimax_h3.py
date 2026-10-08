@@ -91,6 +91,13 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
                             "(Director with Refs OFF).",
                 ),
                 io.Combo.Input(
+                    "lora_name",
+                    options=[NONE_OPTION] + loras,
+                    default=NONE_OPTION,
+                    tooltip="LoRA for the FL2VA model, e.g. the turbo 4-step / 8-step LoRA. "
+                            "Set steps to match (4 or 8).",
+                ),
+                io.Combo.Input(
                     "ref_unet_name",
                     options=[NONE_OPTION] + unets,
                     default=NONE_OPTION,
@@ -98,6 +105,14 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
                             "(Director with Refs ON). Leave None unless you use references; "
                             "selecting it loads a second ~20GB model.",
                 ),
+                io.Combo.Input(
+                    "ref_lora_name",
+                    options=[NONE_OPTION] + loras,
+                    default=NONE_OPTION,
+                    tooltip="LoRA for the REF2VA model, e.g. the REF2V turbo 4-step LoRA.",
+                ),
+                io.Float.Input("lora_strength", default=1.0, min=-10.0, max=10.0, step=0.01,
+                               tooltip="Strength applied to both LoRAs."),
                 io.Combo.Input(
                     "clip_name",
                     options=clips,
@@ -124,21 +139,6 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
                 io.Combo.Input("scheduler_name", options=schedulers,
                                default=_combo_default(schedulers, DEFAULT_SCHEDULER),
                                tooltip="simple is the reference. beta / normal can suit reference-heavy prompts."),
-                io.Combo.Input(
-                    "lora_name",
-                    options=[NONE_OPTION] + loras,
-                    default=NONE_OPTION,
-                    tooltip="LoRA for the FL2VA model, e.g. the turbo 4-step / 8-step LoRA. "
-                            "Set steps to match (4 or 8).",
-                ),
-                io.Combo.Input(
-                    "ref_lora_name",
-                    options=[NONE_OPTION] + loras,
-                    default=NONE_OPTION,
-                    tooltip="LoRA for the REF2VA model, e.g. the REF2V turbo 4-step LoRA.",
-                ),
-                io.Float.Input("lora_strength", default=1.0, min=-10.0, max=10.0, step=0.01,
-                               tooltip="Strength applied to both LoRAs."),
             ],
             outputs=[
                 PipeLine.Output("PIPE"),
@@ -154,7 +154,10 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
     def execute(
         cls,
         unet_name: str,
+        lora_name: str,
         ref_unet_name: str,
+        ref_lora_name: str,
+        lora_strength: float,
         clip_name: str,
         vae_name: str,
         audio_vae_name: str,
@@ -162,9 +165,6 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
         steps: int,
         sampler_name: str,
         scheduler_name: str,
-        lora_name: str = NONE_OPTION,
-        ref_lora_name: str = NONE_OPTION,
-        lora_strength: float = 1.0,
     ) -> io.NodeOutput:
         if unet_name == NONE_OPTION and ref_unet_name == NONE_OPTION:
             raise ValueError(
