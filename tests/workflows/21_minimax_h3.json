@@ -76,7 +76,10 @@
         "fixed",
         20,
         "res_multistep",
-        "simple"
+        "simple",
+        "None",
+        "None",
+        1
       ]
     },
     {

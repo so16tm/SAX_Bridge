@@ -124,6 +124,9 @@
 | `steps` | Int | Sampling steps (default 20) |
 | `sampler_name` | Combo | Sampler selection (default `res_multistep`) |
 | `scheduler_name` | Combo | Scheduler selection (default `simple`) |
+| `lora_name` | Combo | LoRA for the FL2VA model (e.g. the turbo 4-step / 8-step LoRA). `None` skips. Set `steps` to 4 / 8 to match |
+| `ref_lora_name` | Combo | LoRA for the REF2VA model (e.g. the REF2V turbo 4-step LoRA). `None` skips |
+| `lora_strength` | Float (-10.0 to 10.0) | LoRA strength (the same value for both) |
 
 **Outputs**: `PIPE`, `MODEL`, `MODEL_REF2VA`, `CLIP`, `VAE`, `AUDIO_VAE`
 
@@ -134,7 +137,8 @@
 - Connect `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` to the same-named Director inputs. An unselected model outputs `None`
 - The `PIPE` carries `MODEL` (or `MODEL_REF2VA` when that is the only one) as `model` and the audio VAE as `audio_vae`; sampling settings go to `loader_settings` (`cfg` is fixed at 1.0 and `denoise` at 1.0, the official H3 setup)
 - Resolution, length, latent, and conditioning are decided by the Director, so this loader has no `width` / `height` / `batch_size`
-- LoRAs are not loaded
+- LoRAs are applied to the model only. `lora_name` goes to the FL2VA model and `ref_lora_name` to the REF2VA model (a mismatched LoRA has no effect). It is an error if the matching model is `None`
+- With a turbo LoRA, set `steps` to match (4 / 8) and adjust the Director's `shift_video` if needed
 
 [↑ Back to top](#top)
 

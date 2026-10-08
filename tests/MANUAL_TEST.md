@@ -426,6 +426,7 @@
 - [ ] **i2v**: Director のメイントラックに画像を置き（Refs OFF）実行 → 画像が先頭フレームになる
 - [ ] **ref2va**: `ref_unet_name` に REF2VA を選び Director の Refs を ON、参照画像を置いて実行 → 参照が反映される
 - [ ] **single model**: `ref_unet_name=None` のまま Refs OFF で実行 → 警告なく生成できる（REF2VA は読み込まれない）
+- [ ] **turbo lora**: `lora_name` に FL2V turbo 4-step LoRA、`steps=4` で実行 → 4 ステップで生成できる（`ref_lora_name` は REF2VA 側に別途指定）
 - [ ] **pipe**: Sampler の `PIPE` に SAX Output 等を繋ぐ → 生成後のフレームサイズが `loader_settings` に反映される
 
 ## M. UI Phase 1.2.A 検証 (TextCatalog Coordinator 移行)

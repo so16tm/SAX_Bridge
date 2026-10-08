@@ -123,6 +123,63 @@ def test_loader_ref2va_only_uses_it_as_pipe_model(loader_env):
     assert pipe["model"] is model_ref
 
 
+@pytest.fixture
+def lora_env():
+    """apply_single_lora を差し替え、どのモデルにどの LoRA が掛かったかを記録する。"""
+    calls = []
+
+    def fake_apply(model, clip, lora_name, strength, label):
+        calls.append((model, clip, lora_name, strength, label))
+        return MagicMock(name=f"patched:{lora_name}"), None, [lora_name]
+
+    with patch("nodes.minimax_h3.apply_single_lora", side_effect=fake_apply):
+        yield calls
+
+
+def test_loader_applies_lora_to_matching_model_only(loader_env, lora_env):
+    pipe, model, model_ref, *_ = SAX_Bridge_Loader_MiniMax_H3.execute(
+        **_loader_kwargs(
+            ref_unet_name="minimax_h3_ref2va.safetensors",
+            lora_name="fl2v_turbo_4step.safetensors",
+            lora_strength=0.8,
+        )
+    ).args
+
+    assert len(lora_env) == 1
+    original, clip, name, strength, _ = lora_env[0]
+    assert original is loader_env.models["/m/diffusion_models/minimax_h3_fl2va.safetensors"]
+    assert clip is None and name == "fl2v_turbo_4step.safetensors" and strength == 0.8
+    # FL2VA だけがパッチ済みで、REF2VA は元のまま。pipe には掛かった側が載る
+    assert model is not original
+    assert model_ref is loader_env.models["/m/diffusion_models/minimax_h3_ref2va.safetensors"]
+    assert pipe["model"] is model
+    assert "fl2v_turbo_4step" in pipe["_applied_loras"]
+
+
+def test_loader_applies_ref_lora_to_ref2va(loader_env, lora_env):
+    pipe, model, model_ref, *_ = SAX_Bridge_Loader_MiniMax_H3.execute(
+        **_loader_kwargs(
+            unet_name="None",
+            ref_unet_name="minimax_h3_ref2va.safetensors",
+            ref_lora_name="ref2v_turbo_4step.safetensors",
+        )
+    ).args
+
+    assert [c[2] for c in lora_env] == ["ref2v_turbo_4step.safetensors"]
+    assert model is None
+    assert pipe["model"] is model_ref
+
+
+def test_loader_without_lora_leaves_models_untouched(loader_env, lora_env):
+    SAX_Bridge_Loader_MiniMax_H3.execute(**_loader_kwargs())
+    assert lora_env == []
+
+
+def test_loader_lora_without_its_model_raises(loader_env, lora_env):
+    with pytest.raises(ValueError, match="REF2VA LoRA"):
+        SAX_Bridge_Loader_MiniMax_H3.execute(**_loader_kwargs(ref_lora_name="ref2v_turbo.safetensors"))
+
+
 def test_loader_requires_at_least_one_model(loader_env):
     with pytest.raises(ValueError, match="unet_name"):
         SAX_Bridge_Loader_MiniMax_H3.execute(**_loader_kwargs(unet_name="None"))

@@ -124,6 +124,9 @@
 | `steps` | Int | サンプリングステップ数（既定 20） |
 | `sampler_name` | Combo | サンプラー選択（既定 `res_multistep`） |
 | `scheduler_name` | Combo | スケジューラー選択（既定 `simple`） |
+| `lora_name` | Combo | FL2VA 用 LoRA（turbo 4-step / 8-step LoRA 等）。`None` でスキップ。steps を 4 / 8 に合わせる |
+| `ref_lora_name` | Combo | REF2VA 用 LoRA（REF2V turbo 4-step LoRA 等）。`None` でスキップ |
+| `lora_strength` | Float (-10.0〜10.0) | LoRA の強度（両方に同じ値を適用） |
 
 **出力**: `PIPE`, `MODEL`, `MODEL_REF2VA`, `CLIP`, `VAE`, `AUDIO_VAE`
 
@@ -134,7 +137,8 @@
 - `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` を Director の同名入力へ繋ぐ。未選択の model は `None` を出力する
 - `PIPE` の `model` は `MODEL`（なければ `MODEL_REF2VA`）、`audio_vae` は音声 VAE。サンプリング設定は `loader_settings` に格納する（`cfg` は H3 公式設定の 1.0 固定、`denoise` は 1.0）
 - 解像度・長さ・latent・conditioning は Director が決めるため、この Loader には `width` / `height` / `batch_size` を持たない
-- LoRA は読み込まない
+- LoRA は model のみに適用する。`lora_name` は FL2VA、`ref_lora_name` は REF2VA の model にだけ掛かる（取り違えると効かない）。対応する model が `None` のときはエラー
+- turbo LoRA を使うときは `steps` を LoRA に合わせて 4 / 8 にし、必要なら Director の `shift_video` も調整する
 
 [↑ トップへ](#top)
 

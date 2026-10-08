@@ -19,8 +19,8 @@ import comfy.sd
 import folder_paths
 from comfy_api.latest import io
 
-from .io_types import PipeLine, require_pipe
-from .loader_common import build_pipe, load_vae_file, pick_default, resolve_path
+from .io_types import PipeLine, record_applied_loras, require_pipe
+from .loader_common import apply_single_lora, build_pipe, load_vae_file, pick_default, resolve_path
 from .vae_utils import decode_image
 
 # Loader が「未選択」を表す値。fl2va / ref2va はどちらか一方だけでも使える。
@@ -61,6 +61,8 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
     - ファイル名に `fl2va` / `ref2va` / `qwen3vl` / `video_vae` / `audio_vae` を含む候補が、
       それぞれの初期値として自動選択される
     - テキストエンコーダの種別（CLIPLoader の type=minimax）は自動で設定する
+    - n-step（turbo）LoRA は FL2VA 用・REF2VA 用を別々に選び、対応するモデルにだけ適用する
+      （LoRA は FL2VA / REF2VA のどちらかに専用で、取り違えると効かない）
     """
 
     @classmethod
@@ -68,6 +70,7 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
         unets = folder_paths.get_filename_list("diffusion_models")
         clips = folder_paths.get_filename_list("text_encoders")
         vaes = folder_paths.get_filename_list("vae")
+        loras = folder_paths.get_filename_list("loras")
         samplers = comfy.samplers.KSampler.SAMPLERS
         schedulers = comfy.samplers.KSampler.SCHEDULERS
         return io.Schema(
@@ -121,6 +124,21 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
                 io.Combo.Input("scheduler_name", options=schedulers,
                                default=_combo_default(schedulers, DEFAULT_SCHEDULER),
                                tooltip="simple is the reference. beta / normal can suit reference-heavy prompts."),
+                io.Combo.Input(
+                    "lora_name",
+                    options=[NONE_OPTION] + loras,
+                    default=NONE_OPTION,
+                    tooltip="LoRA for the FL2VA model, e.g. the turbo 4-step / 8-step LoRA. "
+                            "Set steps to match (4 or 8).",
+                ),
+                io.Combo.Input(
+                    "ref_lora_name",
+                    options=[NONE_OPTION] + loras,
+                    default=NONE_OPTION,
+                    tooltip="LoRA for the REF2VA model, e.g. the REF2V turbo 4-step LoRA.",
+                ),
+                io.Float.Input("lora_strength", default=1.0, min=-10.0, max=10.0, step=0.01,
+                               tooltip="Strength applied to both LoRAs."),
             ],
             outputs=[
                 PipeLine.Output("PIPE"),
@@ -144,6 +162,9 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
         steps: int,
         sampler_name: str,
         scheduler_name: str,
+        lora_name: str = NONE_OPTION,
+        ref_lora_name: str = NONE_OPTION,
+        lora_strength: float = 1.0,
     ) -> io.NodeOutput:
         if unet_name == NONE_OPTION and ref_unet_name == NONE_OPTION:
             raise ValueError(
@@ -158,6 +179,24 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
 
         model = load_unet(unet_name, "FL2VA")
         model_ref2va = load_unet(ref_unet_name, "REF2VA")
+
+        applied_loras: list[str] = []
+        for label, lora in (("FL2VA", lora_name), ("REF2VA", ref_lora_name)):
+            if lora == NONE_OPTION:
+                continue
+            target = model if label == "FL2VA" else model_ref2va
+            if target is None:
+                raise ValueError(
+                    f"[SAX_Bridge] MiniMax H3 Loader: a {label} LoRA is selected but the {label} model is None."
+                )
+            patched, _clip, names = apply_single_lora(
+                target, None, lora, lora_strength, f"MiniMax H3 Loader ({label})"
+            )
+            if label == "FL2VA":
+                model = patched
+            else:
+                model_ref2va = patched
+            applied_loras += names
 
         clip_path = resolve_path("text_encoders", clip_name, "MiniMax H3 Loader: text encoder")
         clip = comfy.sd.load_clip(
@@ -186,6 +225,7 @@ class SAX_Bridge_Loader_MiniMax_H3(io.ComfyNode):
             batch_size=1,
         )
         pipe["audio_vae"] = audio_vae
+        record_applied_loras(pipe, applied_loras)
 
         return io.NodeOutput(pipe, model, model_ref2va, clip, vae, audio_vae)
 
