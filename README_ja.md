@@ -164,6 +164,18 @@ SAX Diffusion Loader はテキストエンコーダの種別をモデルから�
 
 ---
 
+<a id="minimax-h3"></a>
+
+### MiniMax H3 の動画＋音声生成 — MiniMax H3 Loader / Sampler
+
+**SAX MiniMax H3 Loader → MiniMax H3 Director → SAX MiniMax H3 Sampler → Save Video** の 4 ノードで、[MiniMaxH3-Director](https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director) を使った MiniMax H3 の生成ができます（ComfyUI 0.30.0 以降が必要）。
+Loader が diffusion model・text encoder（種別は自動設定）・映像 VAE・音声 VAE をまとめて読み込み、ファイル名から初期値も自動選択します。Sampler がノイズ・スケジューラー・ガイダー・サンプリング・映像／音声の復号・動画化を 1 ノードで行い、`res_multistep` / `simple` / 20 steps の公式設定が既定です。
+参照画像・動画・音声を使うときは `ref_unet_name` に REF2VA を選び、Director の Refs を ON にします。
+
+[↑ トップへ](#sax_bridge)
+
+---
+
 ## インストール
 
 ### ComfyUI Manager（推奨）

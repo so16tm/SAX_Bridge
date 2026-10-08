@@ -36,6 +36,36 @@ def sampling_inputs() -> list:
     ]
 
 
+def pick_default(options: list[str], *keywords: str, fallback: str | None = None) -> str | None:
+    """options の中から、全キーワードをファイル名に含む最初の候補を返す（大文字小文字は区別しない）。
+
+    分割配布モデルの Loader で、ComboBox の初期値を「それらしいファイル」にして
+    設定の手間を減らすために使う。該当がなければ fallback（未指定なら先頭候補）を返す。
+    """
+    lowered = [k.lower() for k in keywords]
+    for option in options:
+        name = option.lower()
+        if all(k in name for k in lowered):
+            return option
+    if fallback is not None:
+        return fallback
+    return options[0] if options else None
+
+
+def load_vae_file(path: str) -> Any:
+    """VAE ファイルを読み込む（ComfyUI 本体 VAELoader と同じく metadata を渡す）。
+
+    量子化 VAE など metadata に依存する形式があるため、`sd` だけで読む
+    Diffusion Loader の経路とは分けている。
+    """
+    sd, metadata = comfy.utils.load_torch_file(path, return_metadata=True)
+    vae = comfy.sd.VAE(sd=sd, metadata=metadata)
+    check = getattr(vae, "throw_exception_if_invalid", None)
+    if callable(check):
+        check()
+    return vae
+
+
 def resolve_path(folder: str, name: str, label: str) -> str:
     """`folder_paths.get_full_path` の結果を検証して返す。
 
