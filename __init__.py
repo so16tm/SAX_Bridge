@@ -19,9 +19,11 @@ from .nodes.schedulers import register_schedulers
 register_schedulers()
 
 from .nodes import prompt as prompt_node  # noqa: E402
+from .nodes import prompt_qwen_image as prompt_qwen_image_node  # noqa: E402
 from .nodes import pipe as pipe_node  # noqa: E402
 from .nodes import loader as loader_node  # noqa: E402
 from .nodes import loader_diffusion as loader_diffusion_node  # noqa: E402
+from .nodes import minimax_h3 as minimax_h3_node  # noqa: E402
 from .nodes import sampler as sampler_node  # noqa: E402
 from .nodes import cache as cache_node  # noqa: E402
 from .nodes import noise as noise_node  # noqa: E402
@@ -54,6 +56,7 @@ for v3_node in [
     loader_node.SAX_Bridge_Loader,
     loader_node.SAX_Bridge_Loader_Lora,
     loader_diffusion_node.SAX_Bridge_Loader_Diffusion,
+    minimax_h3_node.SAX_Bridge_Loader_MiniMax_H3,
     # Mask
     mask_adjust_node.SAX_Bridge_Mask_Adjust,
     # Option
@@ -68,8 +71,10 @@ for v3_node in [
     # Prompt
     prompt_node.SAX_Bridge_Prompt,
     prompt_node.SAX_Bridge_Prompt_Concat,
+    prompt_qwen_image_node.SAX_Bridge_Prompt_Qwen_Image,
     # Sampler
     sampler_node.SAX_Bridge_KSampler,
+    minimax_h3_node.SAX_Bridge_Sampler_MiniMax_H3,
     # Segment
     sam3_node.SAX_Bridge_Loader_SAM3,
     sam3_node.SAX_Bridge_Segmenter_Multi,

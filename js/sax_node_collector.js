@@ -2,7 +2,7 @@ import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
 import { ensureRenderLinkPatch, showDialog, h, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
-import { resolveAnchorToOutputSlot } from "./sax_collector_link.js";
+import { resolveAnchorToOutputSlot, resolveLocalSlotBySlotName } from "./sax_collector_link.js";
 
 const EXT_NAME  = "SAX.NodeCollector";
 const NODE_TYPE = "SAX_Bridge_Node_Collector";
@@ -209,6 +209,13 @@ const SOURCE_SPEC = {
 function buildNodeCollectorSpec(node) {
     return {
         direction:   "output",
+        // 1:N link-repointing の明示 opt-in。NodeCollector は出力スロットが可変し、
+        // rebuildAllSources / swapSources / removeSourceAt が出力ピンを全面再構築するため、
+        // Coordinator に「捕捉済み link をピンから切り離し → 新しい物理位置へ origin_slot を
+        // 付け替える」経路を使わせる。従来の remove-all + connect 復元は下流が動的入力
+        // (SAX Prompt Concat 等の Autogrow) の場合に入力スロットを詰めてしまい、
+        // 陳腐化した targetSlot への再接続が失敗・誤接続していた。
+        linkPreserving: true,
         getEntities: () => node._remoteSources ?? [],
         setEntities: (newSources) => { node._remoteSources = newSources; },
         // hints (entityHints) は sourceId をキーとする Map。framework
@@ -232,15 +239,9 @@ function buildNodeCollectorSpec(node) {
         // 構造同期は makeSourceListWidget 内 (action 内 _syncSlotLabels) で完結。
         syncSlotStructure: () => {},
 
-        // 段階1: slotName → globalSlotIdx (slotNames.indexOf) → enabledSlots.indexOf → localSlotIdx
-        resolveLocalSlotBySlotName: (entity, slotName) => {
-            const globalIdx = entity?.slotNames?.indexOf(slotName) ?? -1;
-            if (globalIdx < 0) return null;
-            // 同名ピンは名前だけでは識別できない。保存 global index で解決する。
-            if (entity.slotNames.lastIndexOf(slotName) !== globalIdx) return null;
-            const localIdx = entity?.enabledSlots?.indexOf(globalIdx) ?? -1;
-            return localIdx >= 0 ? localIdx : null;
-        },
+        // 段階1: slotName → globalSlotIdx (slotNames 内の一致) → enabledSlots.indexOf → localSlotIdx。
+        // 同名出力 (例: IMAGE が 2 つ) は capture 時の globalSlotIdx で判別する。
+        resolveLocalSlotBySlotName,
         // 段階2: globalSlotIdx → enabledSlots.indexOf → localSlotIdx
         resolveLocalSlotByGlobalIdx: (entity, globalSlotIdx) => {
             const localIdx = entity?.enabledSlots?.indexOf(globalSlotIdx) ?? -1;

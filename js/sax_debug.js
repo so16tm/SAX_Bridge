@@ -1,5 +1,5 @@
 import { app } from "../../scripts/app.js";
-import { getComfyTheme, rrect, txt, PAD, BOTTOM_PAD } from "./sax_ui_base.js";
+import { getComfyTheme, rrect, txt, PAD, BOTTOM_PAD, nodeCanvasWidth } from "./sax_ui_base.js";
 
 const EXT_NAME = "SAX.Debug";
 const NODE_TYPES = [
@@ -34,6 +34,7 @@ function makeDebugTextWidget() {
         },
 
         draw(ctx, node, W, y) {
+            W = nodeCanvasWidth(this, ctx, node, W);
             const t = getComfyTheme();
             const lines = widget._text ? widget._text.split("\n") : ["(no output yet)"];
             const boxH  = lines.length * LINE_H + INNER_PAD * 2;

@@ -393,6 +393,7 @@ class TestNodeIntegration:
         # merge_outputs 既定 (False) の識別子。items_json をそのまま含む。
         result = SAX_Bridge_Text_Catalog.IS_CHANGED(items_json="{}")
         assert result == "{}\x00merge=False"
+        assert SAX_Bridge_Text_Catalog.IS_CHANGED(items_json="{}", merge_outputs=True) == "{}\x00merge=True"
 
         payload = _make_payload()
         result = SAX_Bridge_Text_Catalog.IS_CHANGED(items_json=payload)

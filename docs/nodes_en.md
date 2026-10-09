@@ -4,24 +4,28 @@
 
 [← Back to README](../README.md)
 
+> The node IDs, display names, categories and **Inputs** (widget) lists on this page are checked
+> against each node's `define_schema()` in CI by `tests/python/test_docs_schema_sync.py`.
+> When you change the implementation, update this page and `docs/nodes_ja.md` as well.
+
 ---
 
 ## Category List
 
 | Category | Description | Nodes |
 |---------|------|-------|
-| [Loader](#loader) | Model and LoRA loading | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX Lora Loader](#sax-lora-loader) |
-| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
+| [Loader](#loader) | Model and LoRA loading | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX MiniMax H3 Loader](#sax-minimax-h3-loader) / [SAX Lora Loader](#sax-lora-loader) |
+| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) / [SAX MiniMax H3 Sampler](#sax-minimax-h3-sampler) |
 | [Pipe](#pipe) | Pipe construction and switching | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
-| [Prompt](#prompt) | Prompt encoding and concatenation | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
-| [Enhance](#enhance) | Detailer / Upscaler / Finisher | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
+| [Prompt](#prompt) | Prompt encoding and concatenation | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) / [SAX Qwen Image Prompt](#sax-qwen-image-prompt) |
+| [Enhance](#enhance) | Guidance / Detailer / Upscaler / Finisher | [SAX Guidance](#sax-guidance) / [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
 | [Control](#control) | ControlNet structure constraint | [SAX Structure Lock (SDXL)](#sax-structure-lock-sdxl) |
 | [Option](#option) | Standalone utilities (noise injection etc.) | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | Segmentation via SAM3 | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | [Mask](#mask) | Mask post-processing | [SAX Mask Adjust](#sax-mask-adjust) |
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
-| [Debug](#debug) | Debugging & testing | [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
+| [Debug](#debug) | Debugging & testing | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
 | [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
@@ -69,7 +73,7 @@
 
 ### SAX Diffusion Loader
 
-`SAX_Bridge_Loader_Diffusion` — Loads a UNET (diffusion model), CLIP (text encoder), and VAE from separate folders and initializes the `PIPE_LINE` context. Intended for split-distribution models (such as Anima and Krea 2) where model/clip/vae are not baked into a checkpoint. The output pipe shares the same structure as SAX Loader, so downstream nodes work unchanged.
+`SAX_Bridge_Loader_Diffusion` — Loads a UNET (diffusion model), CLIP (text encoder), and VAE from separate folders and initializes the `PIPE_LINE` context. Intended for split-distribution models (such as Anima, Krea 2, and Qwen-Image 2.1) where model/clip/vae are not baked into a checkpoint. The output pipe shares the same structure as SAX Loader, so downstream nodes work unchanged.
 
 **Inputs**
 
@@ -94,8 +98,8 @@
 
 **Behavior**:
 - `model` is loaded from `diffusion_models` via `load_diffusion_model`, `clip` from `text_encoders` via `load_clip`, and `vae` from the `vae` folder, each independently
-- `clip_type` is auto-detected from the UNET's model_config type (Krea 2 → `KREA2`; unregistered models fall back to `STABLE_DIFFUSION`, and Anima's Qwen3 0.6B keeps working via state_dict detection)
-- The empty latent is created with 4 channels; KSampler's `fix_empty_latent_channels` adapts it to the model's latent_channels / latent_dimensions automatically (16-channel / 3-dimensional models need no extra setup)
+- `clip_type` is auto-detected from the UNET model_config (Krea 2 → `KREA2`; Qwen-Image / Qwen-Image 2.1 → `QWEN_IMAGE`; unregistered models fall back to `STABLE_DIFFUSION`). Anima's Qwen3 0.6B is detected from the text encoder state_dict.
+- The empty latent is created with 4 channels at 1/8 scale; KSampler's `fix_empty_latent_channels` adapts it to the model's latent_channels / latent_dimensions / downscale ratio automatically (16-channel / 3-dimensional models and the 64-channel, 1/16 Qwen-Image 2.1 need no extra setup)
 - The `weight_dtype` fp8 options apply the same dtype mapping as ComfyUI's built-in UNETLoader
 - `lora_model_strength` applies the same value to both the LoRA model strength and clip strength
 - Unlike SAX Loader, it has no `clip_skip` / `v_pred` (not applicable to diffusion models' flow-based sampling and non-CLIP text encoders)
@@ -104,6 +108,43 @@
 - Required files: `diffusion_models/krea2_*.safetensors` + `text_encoders/qwen3vl_4b_*.safetensors` + `vae/qwen_image_vae.safetensors`
 - The text encoder **must be Qwen3VL-4B** (anything else does not enter ComfyUI's KREA2-specific encoder branch and produces invalid conditioning)
 - Unsupported features: `structure_control` (SDXL only) / `ays_sd1`, `ays_sdxl` schedulers (SD1/SDXL only) / SAX_Cache TGate and DeepCache (UNet-based, not applicable to DiT)
+
+[↑ Back to top](#top)
+
+---
+
+### SAX MiniMax H3 Loader
+
+`SAX_Bridge_Loader_MiniMax_H3` — Loads the diffusion model, text encoder, video VAE, and audio VAE of MiniMax H3 (a joint video + audio model) in one node. Outputs individual connections that go straight into [MiniMaxH3-Director](https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director), plus a `PIPE_LINE` for SAX MiniMax H3 Sampler. Requires ComfyUI 0.30.0 or later.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `unet_name` | Combo | FL2VA checkpoint (text-to-video and first/last-frame image-to-video; Director with Refs OFF). `None` skips loading |
+| `lora_name` | Combo | LoRA for the FL2VA model (e.g. the turbo 4-step / 8-step LoRA). `None` skips. Set `steps` to 4 / 8 to match |
+| `ref_unet_name` | Combo | REF2VA checkpoint (reference images / videos / audio; Director with Refs ON). Defaults to `None`; selecting one loads a second ~20GB model |
+| `ref_lora_name` | Combo | LoRA for the REF2VA model (e.g. the REF2V turbo 4-step LoRA). `None` skips |
+| `lora_strength` | Float (-10.0 to 10.0) | LoRA strength (the same value for both) |
+| `clip_name` | Combo | Text encoder (Qwen3-VL 32B) from the `text_encoders` folder |
+| `vae_name` | Combo | Video VAE from the `vae` folder |
+| `audio_vae_name` | Combo | Audio VAE from the `vae` folder (swapping it with the video VAE puts noise in the video) |
+| `seed` | Int | Seed value |
+| `steps` | Int | Sampling steps (default 20) |
+| `sampler_name` | Combo | Sampler selection (default `res_multistep`) |
+| `scheduler_name` | Combo | Scheduler selection (default `simple`) |
+
+**Outputs**: `PIPE`, `MODEL`, `MODEL_REF2VA`, `CLIP`, `VAE`, `AUDIO_VAE`
+
+**Behavior**:
+- Each Combo's initial value is the first file whose name contains `fl2va` / `qwen3vl` + `minimax` / `video_vae` / `audio_vae`, so placing the files is enough
+- The text encoder type (CLIPLoader `type=minimax`) is set automatically
+- Either `unet_name` or `ref_unet_name` alone is fine; both `None` is an error
+- Connect `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` to the same-named Director inputs. An unselected model outputs `None`
+- The `PIPE` carries `MODEL` (or `MODEL_REF2VA` when that is the only one) as `model` and the audio VAE as `audio_vae`; sampling settings go to `loader_settings` (`cfg` is fixed at 1.0 and `denoise` at 1.0, the official H3 setup)
+- Resolution, length, latent, and conditioning are decided by the Director, so this loader has no `width` / `height` / `batch_size`
+- LoRAs are applied to the model only. `lora_name` goes to the FL2VA model and `ref_lora_name` to the REF2VA model (a mismatched LoRA has no effect). It is an error if the matching model is `None`
+- With a turbo LoRA, set `steps` to match (4 / 8) and adjust the Director's `shift_video` if needed
 
 [↑ Back to top](#top)
 
@@ -184,6 +225,38 @@ In the normal flow (Loader → Pipe → KSampler), `loader_settings` is always p
 
 ---
 
+### SAX MiniMax H3 Sampler
+
+`SAX_Bridge_Sampler_MiniMax_H3` — Samples the MiniMaxH3-Director output (`model` / `positive` / `latent`), decodes video and audio, and produces a `VIDEO`. It folds the standard RandomNoise → KSamplerSelect → BasicScheduler → BasicGuider → SamplerCustomAdvanced → VAEDecode / VAEDecodeAudio → CreateVideo chain into one node.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | PIPE from SAX MiniMax H3 Loader (uses the VAE, audio VAE, seed, and sampling settings) |
+| `model` | MODEL | The Director's `model` output (sigma shift applied) |
+| `positive` | CONDITIONING | The Director's `positive` output |
+| `latent` | LATENT | The Director's `latent` output |
+| `fps` | Float (1 to 240, optional) | Output frame rate. Defaults to 24 (H3 is fixed at 24fps and the Director's `fps` is always 24) |
+
+**Outputs**: `PIPE`, `VIDEO`, `IMAGE`, `AUDIO`
+
+**Behavior**:
+- Sampling and video creation are delegated to ComfyUI core nodes (`comfy_extras.nodes_custom_sampler` / `nodes_audio` / `nodes_video`)
+- `seed` / `steps` / `sampler_name` / `scheduler` come from the pipe; guidance is BasicGuider (no CFG) and denoise is fixed at 1.0
+- Video and audio are decoded from the same joint latent, with the video VAE and the audio VAE respectively
+- The output `PIPE` has `samples` / `images` updated, and `loader_settings` `clip_width` / `clip_height` set to the actual frame size
+
+```
+SAX MiniMax H3 Loader → MiniMax H3 Director → SAX MiniMax H3 Sampler → Save Video
+```
+
+Connect the Loader's `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` to the Director, and the Loader's `PIPE` plus the Director's `model` / `positive` / `latent` to the Sampler.
+
+[↑ Back to top](#top)
+
+---
+
 ## Pipe
 
 ### SAX Pipe
@@ -232,6 +305,8 @@ In the normal flow (Loader → Pipe → KSampler), `loader_settings` is always p
 |-----------|-----|------|
 | `pipe` | PIPE_LINE | Input pipe |
 | `wildcard_text` | String (multiline) | Prompt text. Supports wildcards (`__tag__`), LoRA tags (`<lora:name:weight>`), and `BREAK` syntax |
+| `select_to_add_lora` | Combo | LoRA picker. Selecting an entry appends `<lora:name>` to `wildcard_text` (the value itself is unused at execution) |
+| `select_to_add_wildcard` | Combo | Wildcard picker. Selecting an entry appends `__tag__` to `wildcard_text` (the value itself is unused at execution) |
 
 **Outputs**: `PIPE`, `POPULATED_TEXT` (expanded text)
 
@@ -250,7 +325,7 @@ In the normal flow (Loader → Pipe → KSampler), `loader_settings` is always p
 
 `SAX_Bridge_Prompt_Concat` — Concatenates multiple text inputs (up to 32 ports) and processes them together.
 
-**Inputs**: `pipe`, `target_positive` (Boolean), `text_1` to `text_N` (variable, up to 32)
+**Inputs**: `pipe`, `target_positive` (Boolean), `texts` (Autogrow; grows from `text1` up to 32 ports)
 
 **Outputs**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
 
@@ -260,7 +335,75 @@ Use `target_positive` to choose whether the result is stored in Positive or Nega
 
 ---
 
+### SAX Qwen Image Prompt
+
+`SAX_Bridge_Prompt_Qwen_Image` — Prompt node dedicated to Qwen-Image 2.1. With no reference images it works as text-to-image; with images connected it works as image-to-image (multi-image editing with up to 10 images). Positive and negative are encoded together and stored in the Pipe.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `pipe` | PIPE_LINE | Pipe from SAX Diffusion Loader with Qwen-Image 2.1 loaded |
+| `wildcard_text` | String | Prompt / edit instruction. Refer to reference images as `<image1>`, `<image2>`, ... Wildcard and LoRA syntax supported |
+| `negative_text` | String | Negative prompt (no effect with the official cfg=1 setting) |
+| `resolution` | Int (0–4096, step 32) | Reference images are resized to about resolution × resolution pixels (aspect ratio kept, multiples of 32). 0 keeps the original size |
+| `images` | Autogrow | Reference images (grows from `image_1` up to 10 ports). `image_1` is the edit target |
+
+**Outputs**: `PIPE`, `POPULATED_TEXT`
+
+**Behavior**:
+- Encoding is delegated to ComfyUI's built-in `TextEncodeQwenImage21` (requires a ComfyUI version with Qwen-Image 2.1 support)
+- Without reference images: the latent keeps the Loader's `width` / `height` (text-to-image)
+- With reference images: the latent is replaced with the resized size of `image_1`, with the Loader's `batch_size` (a different size shifts the edit)
+- LoRA syntax is applied from `wildcard_text` only (LoRA tags in `negative_text` are just removed)
+
+**Recommended settings** (following the official workflow): on SAX Diffusion Loader set `cfg=1`, `sampler_name=euler`, `scheduler_name=simple`, `steps=25`–`50`.
+
+```
+t2i: SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output
+i2i: same; just connect images to image_1, image_2, ... of SAX Qwen Image Prompt
+```
+
+[↑ Back to top](#top)
+
+---
+
 ## Enhance
+
+### SAX Guidance
+
+`SAX_Bridge_Guidance` — Applies AGC / FDG / PAG guidance enhancement to the model in the Pipe. Insert it before KSampler, Detailer, or Upscaler.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | Input pipe |
+| `mode` | Combo | `off` / `agc` / `fdg` / `agc+fdg` (default) / `post_fdg` |
+| `strength` | Float (0.0 to 1.0) | AGC / FDG intensity. `0.0` = disabled, `0.5` = moderate, `1.0` = maximum |
+| `pag_strength` | Float (0.0 to 1.0) | PAG (Perturbed Attention Guidance) intensity. `0.0` = disabled. Can be combined with any `mode` |
+
+**Outputs**: `PIPE` (with the model replaced)
+
+**Modes**
+
+| mode | Hook | Purpose |
+|------|------|---------|
+| `off` | — | Guidance disabled (`pag_strength` can still apply) |
+| `agc` | `sampler_cfg_function` | Soft-clips high-CFG spikes with tanh to avoid blowouts |
+| `fdg` | `sampler_cfg_function` | Splits frequency bands and boosts the high band for detail (for high CFG) |
+| `agc+fdg` | `sampler_cfg_function` | Both of the above |
+| `post_fdg` | `sampler_post_cfg_function` | Band splitting that also works at low CFG / low-step LoRA |
+
+**Behavior**:
+- Returns the Pipe unchanged when `mode` is `off` or `strength` is `0.0`, and `pag_strength` is also `0.0`
+- Returns the Pipe unchanged (no error) when the Pipe has no `model`
+- PAG is added as a post_cfg_function, so it composes with the `mode` guidance
+- When PAG is active, one extra forward pass per step is performed
+
+[↑ Back to top](#top)
+
+---
 
 ### SAX Detailer
 
@@ -486,7 +629,7 @@ If all effects are disabled (0 / False) and `reference_image` is not connected, 
 
 **Inputs**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
 
-**Outputs**: `LATENT`
+**Outputs**: `SAMPLES` (LATENT)
 
 > **No value clamping**: Latent-space noise injection does not clamp values (the image-space `SAX Image Noise` clamps to `[0, 1]`). At high `intensity`, latent values may exceed ±1.0 — this is intentional by design.
 
@@ -507,7 +650,7 @@ If all effects are disabled (0 / False) and `reference_image` is not connected, 
 | `model_name` | Combo | Checkpoint file in the `models/sam3/` directory |
 | `precision` | Combo | `fp32` (best quality, recommended) / `bf16` (lower VRAM, Ampere+) / `fp16` (lower VRAM, Volta+) / `auto` (automatically selected based on GPU) |
 
-**Outputs**: `CSAM3_MODEL`
+**Outputs**: `SAM3_MODEL` (type: `CSAM3_MODEL`)
 
 > **Model placement**: Place `.pt` / `.pth` files in `ComfyUI/models/sam3/`.
 
@@ -725,12 +868,17 @@ output/2026-03-20/001_20260320_153045.webp
 
 > Unlike Set/Get nodes, this uses actual wiring connections and runs on ComfyUI's normal execution graph.
 
+**Inputs**: `slot_0` to `slot_31` (ANY, optional) — Registered source outputs are wired here in order (slots are managed by the UI)
+
+**Outputs**: `out_0` to `out_31` (ANY) — Forwards the value of the input slot with the same index downstream
+
 #### Key Features
 
 - Open picker with `+ Add Source` button to select and add multiple nodes (up to 32 slots)
 - Automatically detects slot additions, removals, and renames on sources and re-syncs input/output slots (preserving downstream connections)
 - Keeps connections on the same logical slot even when upstream output slots are renamed or reordered
 - Cleans up a source entry only when the upstream node is actually deleted. Transient unavailability (paste / undo / subgraph collapse) does not remove entries
+- Changing a source's slot selection, reordering sources, or adding/removing sources preserves connections to downstream nodes (including dynamic-input nodes such as `SAX Prompt Concat`). Only the deselected slots and removed sources lose their links
 - Show links pill toggle to show/hide connection wires to sources
 - Automatically restores source connections after copy & paste
 
@@ -765,6 +913,26 @@ output/2026-03-20/001_20260320_153045.webp
 
 ## Debug
 
+### SAX Debug Controller
+
+`SAX_Bridge_Debug_Controller` — A debug switch that emits an execution report for every SAX node in the workflow. Drop one anywhere in the graph and turn it ON.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `enabled` | Boolean (ON / OFF) | `ON` requests report output for this workflow run |
+
+**Outputs**: None (`Debug logging: ON` / `OFF` shown in the node UI)
+
+**Behavior**:
+- Every SAX node's execute is always wrapped and keeps recording, so this node only toggles whether those records are reported. The Controller's position in the execution order therefore does not matter
+- On workflow completion, a flow report is logged and a JSONL file is written to `sax_debug/sax_debug_<UTC timestamp>.jsonl` (under the non-HTTP-exposed system user directory; up to 20 files are kept)
+- `OFF` both withdraws the report and stops record accumulation entirely
+- Caching is always bypassed so the node executes every run, guaranteeing the toggle takes effect
+
+[↑ Back to top](#top)
+
 ### SAX Debug Inspector
 
 `SAX_Bridge_Debug_Inspector` — Inspects a `PIPE_LINE` and displays its internal fields (model/clip/vae existence, seed, loader_settings values, images/samples shape, applied_loras, etc.) in the node UI.
@@ -793,7 +961,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Debug_Text` — Displays an arbitrary string value in the node UI. Useful for checking `POPULATED_TEXT`, intermediate prompts, metadata, or any other string value.
 
-**Inputs**: `text` (STRING, multiline)
+**Inputs**: `value` (ANY)
 
 **Outputs**: None (text displayed in node UI)
 
@@ -863,6 +1031,8 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Primitive_Store` — Defines and manages shared primitive variables used throughout the workflow in one place. Adding items dynamically creates output slots that distribute values to downstream nodes.
 
+**Inputs**: `items_json` (String, hidden) — JSON array of item definitions, managed automatically by the node UI
+
 **Outputs**: Dynamically generated per item (INT / FLOAT / STRING / BOOLEAN)
 
 #### Supported Types
@@ -884,7 +1054,16 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Text_Catalog` — Manages named texts (prompts, etc.) as an in-node catalog and assigns them to output slots via Relations. Lets you maintain multiple prompts as a binder and switch between them without rewiring the workflow.
 
-**Outputs**: STRING outputs dynamically generated per Relation (when `merge_outputs` is OFF) / a single STRING output joining all Relations with newlines (when `merge_outputs` is ON)
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|------|
+| `items_json` | String (hidden) | JSON of the Catalog and its Relations, managed automatically by the Manager Dialog and node UI |
+| `select_to_add_lora` | Combo (hidden) | Option source for the Manager Editor's LoRA picker. Unused at execution |
+| `select_to_add_wildcard` | Combo (hidden) | Option source for the Manager Editor's Wildcard picker. Unused at execution |
+| `merge_outputs` | Boolean | `individual`: one output per Relation / `merged`: newline-join enabled Relation texts into one output |
+
+**Outputs**: per-Relation STRING outputs in `individual` mode; one `merged` STRING output in `merged` mode
 
 #### Four-Element Model
 
@@ -900,8 +1079,10 @@ applied_loras: {'lora_a'} (1 entries)
 **Node Body Widget**
 - `📖 Manage Texts...` button / right-click menu opens the Manager Dialog
 - `[+ Add Relation]` adds a Relation and a corresponding output Slot
+- Setting `merge_outputs` to `merged` strips enabled Relation texts, skips empty strings, newline-joins the rest, and exposes one `merged` output
 - Adding, removing, or reordering Relations preserves connections to downstream nodes (including dynamic-input nodes such as `SAX Prompt Concat`)
 - Each Relation row has a leading toggle (pill) / `[✎]` (item picker) / `[↑↓]` (reorder) / `[×]` (delete)
+- Clicking a Relation row's label opens the Manager with that item selected for editing (`(unset)` / `<orphan>` rows open the item picker instead)
 - Toggling OFF keeps the Item assignment but emits `""` from the Slot (use to silence outputs temporarily)
 - OFF rows render their text with reduced opacity
 - Unset Relations show `(unset)` in gray (the slot remains and any connection to it is preserved)
@@ -965,7 +1146,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 This aligns with the empty-string skip behavior of downstream nodes such as `SAX Prompt Concat`.
 
-When `merge_outputs` is ON, the Relations that are not emptied above have their text `strip()`-ed and joined with newlines (`\n`) into a single string on the `merged` pin (or `""` if all Relations are empty). This is equivalent to how `SAX Prompt Concat` strips and newline-joins its multiple inputs before processing, so it produces the same result as wiring the individual outputs into Prompt Concat directly (BREAK syntax is also split independently of newlines, hence identical behavior).
+With `merge_outputs` ON (`merged`), surviving texts are stripped, empty strings are dropped, and the remainder is joined with newlines. The backend returns the result in `out_0` and empty strings in `out_1..31`; the frontend exposes a single `merged` pin. This matches the normalization of `SAX Prompt Concat`, including independent BREAK processing.
 
 > **Compatibility**: Older workflows whose `items_json` lacks the `on` field are loaded as ON (backward compatible).
 
@@ -978,7 +1159,7 @@ When `merge_outputs` is ON, the Relations that are not emptied above have their 
 
 ### SAX Cache
 
-`SAX_Bridge_Cache` — Applies DeepCache / TGate to the model in the Pipe with one touch, accelerating all downstream KSampler and Detailer processing.
+`SAX_Bridge_Cache` — Applies DeepCache to the model in the Pipe with one touch, accelerating all downstream KSampler and Detailer processing.
 
 **Inputs**
 
@@ -988,12 +1169,11 @@ When `merge_outputs` is ON, the Relations that are not emptied above have their 
 | `enabled` | Boolean | When `False`, returns the pipe unchanged without applying cache |
 | `deepcache_interval` | Int (1 to 10) | Performs full computation only once every N steps and uses cached values for the rest (1 = DeepCache disabled) |
 | `deepcache_start_percent` | Float (0.0 to 1.0) | Denoising progress percentage at which DeepCache begins |
-| `tgate_enabled` | Boolean (optional) | When `True`, also applies TGate (cross-attention caching) |
-| `tgate_gate_step` | Float (0.0 to 1.0, optional) | Boundary percentage at which TGate caching begins |
 
 **Outputs**: `PIPE`
 
 > **Placement**: Insert immediately after SAX Loader (before KSampler and Detailer) to apply to all processing in one step.
+> **Supported models**: DeepCache is for UNet models only (SD1.5 / SDXL / Illustrious / Pony). With DiT models such as FLUX, SD3.5, Qwen-Image, Chroma or Wan, no cache is applied: a warning is logged and the pipe passes through unchanged.
 > **Note**: May cause noticeable quality degradation when combined with distilled models (DMD2, etc.).
 
 [↑ Back to top](#top)
@@ -1005,6 +1185,10 @@ When `merge_outputs` is ON, the Relations that are not emptied above have their 
 `SAX_Bridge_Toggle_Manager` — A control node that batch-manages the bypass state and widget values of groups, subgraphs, nodes, and Boolean widgets on a per-scene basis.
 
 > **No execution required**: Scene switching and toggle operations take effect immediately on the frontend. No queue addition needed.
+
+**Inputs**: `config_json` (String, hidden) — Scene configuration JSON, managed by the frontend; no direct editing needed
+
+**Outputs**: None (frontend-only control node)
 
 #### Key Features
 

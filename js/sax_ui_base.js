@@ -72,7 +72,7 @@ import {
     sourceSignature       as _sourceSignatureImpl,
     reconcileAllRemoved,
     partitionLiveSources,
-    mergeSourceAnchors,
+    adoptSourceIdentity,
 } from "./sax_collector_link.js";
 
 export const PAD             = 8;    // 水平余白（左右パディング）
@@ -263,6 +263,27 @@ export function initSourceBase(srcNode) {
  */
 export function dismissComboMenu() {
     document.querySelectorAll(".litecontextmenu").forEach(e => e.remove());
+}
+
+/**
+ * ノード上のキャンバスに描くときの幅を返す。
+ *
+ * ComfyUI の Vue 描画 (右サイドパネルの Parameters / Nodes 2.0) は legacy widget の
+ * `widget.width` にパネル側の幅を書き込み、そのまま残す。キャンバス描画と当たり判定は
+ * `widget.width || ノード幅` を使うため、残った値で行がノード枠をはみ出して描かれる。
+ * メインキャンバスへの描画時はその値を消し、ノード幅で描く。
+ * Vue 側の専用 canvas に描くときは渡された幅をそのまま使う。
+ *
+ * @param {object} widget - draw の this (node.widgets の要素)
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {object} node
+ * @param {number} W - LiteGraph から渡された幅
+ * @returns {number}
+ */
+export function nodeCanvasWidth(widget, ctx, node, W) {
+    if (!widget.width || ctx.canvas !== app.canvas?.canvas) return W;
+    widget.width = undefined;
+    return node.size[0];
 }
 
 /**
@@ -1285,6 +1306,7 @@ export function makeItemListWidget(spec) {
         },
 
         draw(ctx, node, W, y) {
+            W = nodeCanvasWidth(this, ctx, node, W);
             this._y = y;
             const items  = getItems();
             const layout = buildLayout(W);
@@ -1455,6 +1477,10 @@ export function makeItemListWidget(spec) {
 
                 const onMove = (e) => {
                     if (endCalled) return;
+                    // `set` を持たない param (onPopup 専用の ✎ など) はドラッグで値を変えられない。
+                    // ここで弾かないと p.set が例外になり、さらに _dragged が立って
+                    // endDrag の onPopup 経路まで塞がれる (= ボタンが無反応になる)。
+                    if (typeof p.set !== "function") return;
                     const dy = startY - e.clientY; // 上方向が正
                     if (!_dragged && Math.abs(dy) < 3) return;
                     _dragged = true;
@@ -1682,8 +1708,9 @@ export function makeSourceListWidget(spec, coordinator) {
     //
     // H-1: oldSource を渡すと、buildSource が fresh 生成したアンカー系フィールド
     // (inputAnchors / slotNames / slotTypes) を旧 source の identity で index 対応に
-    // 引き継ぐ (mergeSourceAnchors)。これにより rebuild でアンカーが fresh に上書きされず、
-    // 上流改名/並べ替えの追従基準 (初回接続時の identity) が保持される。
+    // 引き継ぎ、旧 source オブジェクトへ in-place 取り込みする (adoptSourceIdentity)。
+    // これにより rebuild でアンカーが fresh に上書きされず、上流改名/並べ替えの追従基準
+    // (初回接続時の identity) と Coordinator の entity identity の両方が保持される。
     // 初回 addSource では oldSource=null で fresh のまま (正しい挙動)。
     function _addSourceInner(collectorNode, srcNode, oldSource = null) {
         const offset    = _getTotalSlotCount(collectorNode);
@@ -1699,12 +1726,11 @@ export function makeSourceListWidget(spec, coordinator) {
         }
         if (!src) return;
 
-        if (oldSource) {
-            mergeSourceAnchors(oldSource, src);
-            // Coordinator が記録した source identity を rebuild 後も保持する。
-            Object.assign(oldSource, src);
-            src = oldSource;
-        }
+        // H-1 + entity identity 維持: アンカーを旧 source から引継ぎつつ、
+        // rebuild 後も **旧 source オブジェクトそのもの** を _remoteSources に戻す。
+        // 新オブジェクトを push すると DynamicSlotCoordinator の WeakMap ベース
+        // entity identity が毎回壊れ、capture 済み下流リンクを 1 本も復元できなくなる。
+        if (oldSource) src = adoptSourceIdentity(oldSource, src);
 
         src.sig = _sourceSignature(srcNode);
 
@@ -1796,6 +1822,7 @@ export function makeSourceListWidget(spec, coordinator) {
             );
         }
 
+        try {
         unhideSourceLinks(node);
         for (let i = (node.inputs?.length ?? 0) - 1; i >= 0; i--) {
             const linkId = node.inputs[i]?.link;
@@ -1826,13 +1853,40 @@ export function makeSourceListWidget(spec, coordinator) {
         }
 
         _syncSlotLabels(node);
-        if (autoHints) node._rebuildHints = null;
+        } finally {
+            // 途中で例外が出ても必ず消す。残すと以後の capture/restore が古い
+            // enabledSlots で baseOffset を計算し、下流リンクが誤った出力ピンに付く。
+            if (autoHints) node._rebuildHints = null;
+        }
     }
 
-    function rebuildAllSources(node) {
+    /**
+     * 全ソースを rebuild する。
+     *
+     * `beforeRebuild` は **coordinator.mutate トランザクションの内側・rebuild の直前** に
+     * 実行される。source を書き換えてから rebuild したい呼出元 (modifySource) は必ずこれを
+     * 使うこと。Coordinator の capture は mutate 冒頭で `entityToSlots(entity)` が返すスロット
+     * 数を基準に `node.outputs` を走査するため、トランザクション外で `enabledSlots` 等を
+     * 書き換えるとスロット数だけ先に変わり、capture が実際の出力ピンとずれて下流リンクが
+     * 誤った entity に紐づく (= 復元時に切れる)。
+     *
+     * @param {object} node
+     * @param {(() => void)|null} [beforeRebuild]
+     */
+    function rebuildAllSources(node, beforeRebuild = null) {
         _triggerReconcileIfMissing(node);
         // Coordinator が capture/restore を内蔵するため preDownstream 引数は撤廃。
         coordinator.mutate(() => {
+            if (beforeRebuild) {
+                try {
+                    beforeRebuild();
+                } catch (e) {
+                    // 書き換えに失敗した場合は rebuild せず no-op で抜ける
+                    // (capture/restore は往復するだけで構造は変わらない)。
+                    console.warn(`[${widgetName}] rebuildAllSources beforeRebuild error:`, e);
+                    return;
+                }
+            }
             _rebuildInner(node, [..._getSources(node)]);
         });
     }
@@ -1873,6 +1927,7 @@ export function makeSourceListWidget(spec, coordinator) {
             },
 
             draw(ctx, drawNode, W, y) {
+                W = nodeCanvasWidth(this, ctx, drawNode, W);
                 _widgetY = y;
             const t = getComfyTheme();
 
@@ -2194,15 +2249,16 @@ export function makeSourceListWidget(spec, coordinator) {
         }, 0);
     }
 
+    // updater は rebuildAllSources の beforeRebuild として **トランザクション内側** で実行する。
+    // トランザクション外で実行すると、Coordinator の capture より先に enabledSlots が変わり、
+    // capture が「新しいスロット数」で「古い出力ピン配置」を走査してずれるため、スロット選択を
+    // 変更した瞬間に下流リンクが誤った entity に紐づいて切れる。
     function modifySource(node, srcIdx, updater) {
         const sources = _getSources(node);
         if (srcIdx < 0 || srcIdx >= sources.length) return;
-        _triggerReconcileIfMissing(node);
-        // enabledSlots を変更する前の物理ピン対応で capture する。
-        coordinator.mutate(() => {
-            updater(sources[srcIdx]);
-            _rebuildInner(node, [...sources]);
-        });
+        // updater が throw した場合は rebuildAllSources 側が捕捉して rebuild を中止する
+        // (従来の early return と同義)。
+        rebuildAllSources(node, () => updater(sources[srcIdx]));
     }
 
     // B1: Collector 自身の削除時に pending timer 解除 + 登録解除を行う。

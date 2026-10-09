@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  # ブランチへの push と、その PR の両方で発火すると同じコミットを 2 回検証してしまう。
+  # push は main だけに絞り、作業ブランチは PR 側で検証する
+  # (PR を出す前に回したいときは workflow_dispatch で手動実行できる)。
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  js:
+    name: JS tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 引数なしの `node --test` はリポジトリ直下を再帰探索するため、
+      # tests/js · tests/unit · tests/integration を取りこぼさない。
+      - name: Run node --test
+        run: node --test
+
+  python:
+    name: Python tests (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+
+      - name: Install torch (CPU build)
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Run pytest
+        run: python -m pytest tests/python -q
+
+  lint:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff==0.15.8
+
+      - name: Run ruff
+        run: ruff check .

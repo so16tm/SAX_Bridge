@@ -4,24 +4,28 @@
 
 [← README に戻る](../README_ja.md)
 
+> このページのノード ID・表示名・カテゴリ・**入力**（ウィジェット）一覧は、
+> `tests/python/test_docs_schema_sync.py` が各ノードの `define_schema()` と CI で突き合わせています。
+> 実装を変えたらこのページと `docs/nodes_en.md` も合わせて更新してください。
+
 ---
 
 ## カテゴリ一覧
 
 | カテゴリ | 概要 | ノード |
 |---------|------|--------|
-| [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX Lora Loader](#sax-lora-loader) |
-| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) |
+| [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX MiniMax H3 Loader](#sax-minimax-h3-loader) / [SAX Lora Loader](#sax-lora-loader) |
+| [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) / [SAX MiniMax H3 Sampler](#sax-minimax-h3-sampler) |
 | [Pipe](#pipe) | Pipe の構築・切替 | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
-| [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) |
-| [Enhance](#enhance) | Detailer / Upscaler / Finisher | [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
+| [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) / [SAX Qwen Image Prompt](#sax-qwen-image-prompt) |
+| [Enhance](#enhance) | Guidance / Detailer / Upscaler / Finisher | [SAX Guidance](#sax-guidance) / [SAX Detailer](#sax-detailer) / [SAX Enhanced Detailer](#sax-enhanced-detailer) / [SAX Upscaler](#sax-upscaler) / [SAX Finisher](#sax-finisher) |
 | [Control](#control) | ControlNet 構造拘束 | [SAX Structure Lock (SDXL)](#sax-structure-lock-sdxl) |
 | [Option](#option) | 独立ユーティリティ（ノイズ注入等） | [SAX Image Noise](#sax-image-noise) / [SAX Latent Noise](#sax-latent-noise) |
 | [Segment](#segment) | SAM3 によるセグメンテーション | [SAX SAM3 Loader](#sax-sam3-loader) / [SAX SAM3 Multi Segmenter](#sax-sam3-multi-segmenter) |
 | [Mask](#mask) | マスクの後処理 | [SAX Mask Adjust](#sax-mask-adjust) |
 | [Output](#output) | 出力・プレビュー | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | ノード・画像・Pipe の集約 | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
-| [Debug](#debug) | デバッグ・テスト用 | [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
+| [Debug](#debug) | デバッグ・テスト用 | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
 | [Utility](#utility) | Pipe 内部ヘルパー | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
@@ -69,7 +73,7 @@
 
 ### SAX Diffusion Loader
 
-`SAX_Bridge_Loader_Diffusion` — UNET（diffusion model）単体・CLIP（text encoder）単体・VAE を個別フォルダから読み込み、`PIPE_LINE` コンテキストを初期化します。Checkpoint に model/clip/vae が baked されていない分割配布モデル（Anima・Krea 2 など）向けです。出力 pipe は SAX Loader と同一構造のため、下流ノードは無改修で利用できます。
+`SAX_Bridge_Loader_Diffusion` — UNET（diffusion model）単体・CLIP（text encoder）単体・VAE を個別フォルダから読み込み、`PIPE_LINE` コンテキストを初期化します。Checkpoint に model/clip/vae が baked されていない分割配布モデル（Anima・Krea 2・Qwen-Image 2.1 など）向けです。出力 pipe は SAX Loader と同一構造のため、下流ノードは無改修で利用できます。
 
 **入力**
 
@@ -94,8 +98,8 @@
 
 **動作**:
 - `model` は `load_diffusion_model` で `diffusion_models` から、`clip` は `load_clip` で `text_encoders` から、`vae` は `vae` フォルダからそれぞれ個別にロードする
-- `clip_type` は UNET の model_config 型から自動判別される（Krea 2 → `KREA2`。未登録モデルは `STABLE_DIFFUSION` フォールバックで、Anima の Qwen3 0.6B は state_dict 判別により従来どおり動作）
-- 空 latent は 4ch で生成し、KSampler 側の `fix_empty_latent_channels` がモデルの latent_channels / latent_dimensions へ自動適応する（16ch・3次元モデルも追加設定不要）
+- `clip_type` は UNET の model_config から自動判別される（Krea 2 → `KREA2`、Qwen-Image / Qwen-Image 2.1 → `QWEN_IMAGE`、未登録モデルは `STABLE_DIFFUSION` フォールバック）。Anima の Qwen3 0.6B は text encoder の state_dict から判別される。
+- 空 latent は 4ch・1/8 で生成し、KSampler 側の `fix_empty_latent_channels` がモデルの latent_channels / latent_dimensions / 縮小率へ自動適応する（16ch・3次元モデル、64ch・1/16 の Qwen-Image 2.1 も追加設定不要）
 - `weight_dtype` の fp8 指定は ComfyUI 本体 UNETLoader と同一の dtype マッピングを適用する
 - `lora_model_strength` は LoRA の model strength と clip strength の両方に同じ値を適用する
 - SAX Loader と異なり `clip_skip` / `v_pred` は持たない（diffusion model の flow 系サンプリング・非 CLIP テキストエンコーダに非該当のため）
@@ -104,6 +108,43 @@
 - 必要ファイル: `diffusion_models/krea2_*.safetensors` + `text_encoders/qwen3vl_4b_*.safetensors` + `vae/qwen_image_vae.safetensors`
 - text encoder は **Qwen3VL-4B が必須**（それ以外は本体の KREA2 専用エンコーダ分岐に入らず conditioning が不正になる）
 - 非対応機能: `structure_control`（SDXL 専用）/ `ays_sd1`・`ays_sdxl` スケジューラ（SD1/SDXL 専用）/ SAX_Cache の TGate・DeepCache（UNet 前提のため DiT 非対応）
+
+[↑ トップへ](#top)
+
+---
+
+### SAX MiniMax H3 Loader
+
+`SAX_Bridge_Loader_MiniMax_H3` — MiniMax H3（動画＋音声を同時生成するモデル）の diffusion model・text encoder・映像 VAE・音声 VAE を 1 ノードで読み込みます。[MiniMaxH3-Director](https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director) の入力へそのまま繋げる個別出力と、SAX MiniMax H3 Sampler 用の `PIPE_LINE` を出力します。ComfyUI 0.30.0 以降が必要です。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `unet_name` | Combo | FL2VA checkpoint（t2v・先頭／末尾フレーム指定の i2v。Director の Refs OFF 用）。`None` で読み込まない |
+| `lora_name` | Combo | FL2VA 用 LoRA（turbo 4-step / 8-step LoRA 等）。`None` でスキップ。steps を 4 / 8 に合わせる |
+| `ref_unet_name` | Combo | REF2VA checkpoint（参照画像・動画・音声。Director の Refs ON 用）。既定は `None`。選ぶと約 20GB のモデルをもう 1 つ読み込む |
+| `ref_lora_name` | Combo | REF2VA 用 LoRA（REF2V turbo 4-step LoRA 等）。`None` でスキップ |
+| `lora_strength` | Float (-10.0〜10.0) | LoRA の強度（両方に同じ値を適用） |
+| `clip_name` | Combo | text encoder（Qwen3-VL 32B）。`text_encoders` フォルダ |
+| `vae_name` | Combo | 映像 VAE。`vae` フォルダ |
+| `audio_vae_name` | Combo | 音声 VAE。`vae` フォルダ（映像 VAE と取り違えると映像にノイズが乗る） |
+| `seed` | Int | シード値 |
+| `steps` | Int | サンプリングステップ数（既定 20） |
+| `sampler_name` | Combo | サンプラー選択（既定 `res_multistep`） |
+| `scheduler_name` | Combo | スケジューラー選択（既定 `simple`） |
+
+**出力**: `PIPE`, `MODEL`, `MODEL_REF2VA`, `CLIP`, `VAE`, `AUDIO_VAE`
+
+**動作**:
+- 各 Combo の初期値は、ファイル名に `fl2va` / `qwen3vl` + `minimax` / `video_vae` / `audio_vae` を含む最初の候補が自動で選ばれる（配置しただけで設定済みになる）
+- text encoder の種別（CLIPLoader の `type=minimax`）は自動で設定する
+- `unet_name` と `ref_unet_name` はどちらか一方だけでも使える。両方 `None` はエラー
+- `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` を Director の同名入力へ繋ぐ。未選択の model は `None` を出力する
+- `PIPE` の `model` は `MODEL`（なければ `MODEL_REF2VA`）、`audio_vae` は音声 VAE。サンプリング設定は `loader_settings` に格納する（`cfg` は H3 公式設定の 1.0 固定、`denoise` は 1.0）
+- 解像度・長さ・latent・conditioning は Director が決めるため、この Loader には `width` / `height` / `batch_size` を持たない
+- LoRA は model のみに適用する。`lora_name` は FL2VA、`ref_lora_name` は REF2VA の model にだけ掛かる（取り違えると効かない）。対応する model が `None` のときはエラー
+- turbo LoRA を使うときは `steps` を LoRA に合わせて 4 / 8 にし、必要なら Director の `shift_video` も調整する
 
 [↑ トップへ](#top)
 
@@ -184,6 +225,38 @@
 
 ---
 
+### SAX MiniMax H3 Sampler
+
+`SAX_Bridge_Sampler_MiniMax_H3` — MiniMaxH3-Director の出力（`model` / `positive` / `latent`）をサンプリングし、映像と音声を復号して `VIDEO` まで仕上げます。標準ワークフローの RandomNoise → KSamplerSelect → BasicScheduler → BasicGuider → SamplerCustomAdvanced → VAEDecode / VAEDecodeAudio → CreateVideo を 1 ノードに畳んだものです。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | SAX MiniMax H3 Loader の PIPE（VAE・音声 VAE・シード・サンプリング設定を使う） |
+| `model` | MODEL | Director の `model` 出力（sigma shift 適用済み） |
+| `positive` | CONDITIONING | Director の `positive` 出力 |
+| `latent` | LATENT | Director の `latent` 出力 |
+| `fps` | Float (1〜240, optional) | 動画のフレームレート。既定 24（H3 は 24fps 固定で、Director の `fps` も常に 24） |
+
+**出力**: `PIPE`, `VIDEO`, `IMAGE`, `AUDIO`
+
+**動作**:
+- サンプリングと動画化は ComfyUI 本体のノード（`comfy_extras.nodes_custom_sampler` / `nodes_audio` / `nodes_video`）に委ねる
+- `seed` / `steps` / `sampler_name` / `scheduler` は pipe の設定を使い、ガイダンスは BasicGuider（CFG なし）、denoise は 1.0 固定
+- 映像と音声は同じ joint latent から、映像 VAE と音声 VAE でそれぞれ復号する
+- 出力 `PIPE` の `samples` / `images` を更新し、`loader_settings` の `clip_width` / `clip_height` を実際のフレームサイズに更新する
+
+```
+SAX MiniMax H3 Loader → MiniMax H3 Director → SAX MiniMax H3 Sampler → Save Video
+```
+
+Loader の `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` を Director へ、Loader の `PIPE` と Director の `model` / `positive` / `latent` を Sampler へ繋ぐ。
+
+[↑ トップへ](#top)
+
+---
+
 ## Pipe
 
 ### SAX Pipe
@@ -232,6 +305,8 @@
 |-----------|-----|------|
 | `pipe` | PIPE_LINE | 入力パイプ |
 | `wildcard_text` | String (multiline) | プロンプトテキスト。Wildcard (`__tag__`)・LoRA タグ (`<lora:name:weight>`)・`BREAK` 構文に対応 |
+| `select_to_add_lora` | Combo | LoRA ピッカー。選ぶと `wildcard_text` の末尾へ `<lora:名前>` を挿入する（値自体は実行に使われない） |
+| `select_to_add_wildcard` | Combo | Wildcard ピッカー。選ぶと `wildcard_text` の末尾へ `__タグ__` を挿入する（値自体は実行に使われない） |
 
 **出力**: `PIPE`, `POPULATED_TEXT`（展開後テキスト）
 
@@ -250,7 +325,7 @@
 
 `SAX_Bridge_Prompt_Concat` — 複数のテキスト入力（最大 32 ポート）を連結して一括処理します。
 
-**入力**: `pipe`, `target_positive` (Boolean), `text_1`〜`text_N`（可変、最大 32）
+**入力**: `pipe`, `target_positive` (Boolean), `texts`（Autogrow。`text1` から最大 32 ポートまで自動増減）
 
 **出力**: `PIPE`, `CONDITIONING`, `POPULATED_TEXT`
 
@@ -260,7 +335,75 @@
 
 ---
 
+### SAX Qwen Image Prompt
+
+`SAX_Bridge_Prompt_Qwen_Image` — Qwen-Image 2.1 専用のプロンプトノード。参照画像を繋がなければ t2i、繋げば i2i（最大 10 枚の複数画像編集）として動作します。positive / negative を同時にエンコードして Pipe に格納します。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | SAX Diffusion Loader で Qwen-Image 2.1 を読み込んだ Pipe |
+| `wildcard_text` | String | プロンプト／編集指示。参照画像は `<image1>`, `<image2>` … で指す。Wildcard・LoRA 構文対応 |
+| `negative_text` | String | ネガティブプロンプト（cfg=1 の公式設定では効果なし） |
+| `resolution` | Int (0〜4096, 32 刻み) | 参照画像を約 resolution × resolution ピクセルへ縮小（縦横比維持・32 の倍数）。0 は元サイズのまま |
+| `images` | Autogrow | 参照画像（`image_1` から最大 10 ポートまで自動増減）。`image_1` が編集対象 |
+
+**出力**: `PIPE`, `POPULATED_TEXT`
+
+**動作**:
+- エンコードは ComfyUI 本体の `TextEncodeQwenImage21` に委ねる（Qwen-Image 2.1 対応版の ComfyUI が必要）
+- 参照画像なし: latent は Loader の `width` / `height` のまま（t2i）
+- 参照画像あり: latent を `image_1` の縮小後サイズに置き換え、Loader の `batch_size` 枚ぶん用意する（別サイズだと編集結果がずれるため）
+- LoRA 構文は `wildcard_text` 側だけを適用する（`negative_text` 内の LoRA タグは除去のみ）
+
+**推奨設定**（公式ワークフロー準拠）: SAX Diffusion Loader で `cfg=1`、`sampler_name=euler`、`scheduler_name=simple`、`steps=25`〜`50`。
+
+```
+t2i: SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output
+i2i: 同上。SAX Qwen Image Prompt の image_1, image_2 … に画像を繋ぐだけ
+```
+
+[↑ トップへ](#top)
+
+---
+
 ## Enhance
+
+### SAX Guidance
+
+`SAX_Bridge_Guidance` — Pipe 内のモデルに AGC / FDG / PAG のガイダンス強化を適用するノードです。KSampler・Detailer・Upscaler より前に挿入して使います。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `pipe` | PIPE_LINE | 入力パイプ |
+| `mode` | Combo | `off` / `agc` / `fdg` / `agc+fdg`（既定）/ `post_fdg` |
+| `strength` | Float (0.0〜1.0) | AGC / FDG の効き。`0.0` で無効、`0.5` で標準、`1.0` で最大 |
+| `pag_strength` | Float (0.0〜1.0) | PAG (Perturbed Attention Guidance) の強度。`0.0` で無効。`mode` と併用可能 |
+
+**出力**: `PIPE`（model を差し替え）
+
+**mode 一覧**
+
+| mode | 適用フック | 用途 |
+|------|-----------|------|
+| `off` | — | ガイダンス無効（`pag_strength` のみ適用可能） |
+| `agc` | `sampler_cfg_function` | 高 CFG のスパイクを tanh でソフトクリップして破綻を抑える |
+| `fdg` | `sampler_cfg_function` | 帯域分離して高域ゲインを上げ、ディテールを強調（高 CFG 向け） |
+| `agc+fdg` | `sampler_cfg_function` | 上記の併用 |
+| `post_fdg` | `sampler_post_cfg_function` | 低 CFG・低ステップ LoRA でも効く帯域分離 |
+
+**動作**:
+- `mode` が `off` か `strength` が `0.0` で、かつ `pag_strength` も `0.0` の場合は Pipe をそのまま返す
+- Pipe に `model` が無い場合もそのまま返す（エラーにしない）
+- PAG は post_cfg_function として追加されるため、`mode` のガイダンスと同時に使える
+- PAG 有効時は 1 ステップあたり 1 回分の追加 forward が発生する
+
+[↑ トップへ](#top)
+
+---
 
 ### SAX Detailer
 
@@ -486,7 +629,7 @@ color_correction → smooth → sharpen → bloom → vignette → color_temp �
 
 **入力**: `samples` (LATENT), `intensity`, `noise_type` (`gaussian` / `uniform`), `seed`, `mask` (optional), `mask_shrink`, `mask_blur`
 
-**出力**: `LATENT`
+**出力**: `SAMPLES` (LATENT)
 
 > **値域クランプなし**: Latent 空間のノイズ注入は値域クランプを行いません（画像空間の `SAX Image Noise` は `[0, 1]` にクランプします）。強い `intensity` では latent 値が ±1.0 を超える場合がありますが、これは設計上の意図です。
 
@@ -507,7 +650,7 @@ color_correction → smooth → sharpen → bloom → vignette → color_temp �
 | `model_name` | Combo | `models/sam3/` ディレクトリ内のチェックポイントファイル |
 | `precision` | Combo | `fp32`（最高品質・推奨）/ `bf16`（Ampere+ 省 VRAM）/ `fp16`（Volta+ 省 VRAM）/ `auto`（GPU に応じて自動選択） |
 
-**出力**: `CSAM3_MODEL`
+**出力**: `SAM3_MODEL`（型: `CSAM3_MODEL`）
 
 > **モデルの配置**: `ComfyUI/models/sam3/` に `.pt` / `.pth` ファイルを配置してください。
 
@@ -725,12 +868,17 @@ output/2026-03-20/001_20260320_153045.webp
 
 > Set/Get ノードと異なり実際の配線で接続するため、ComfyUI の通常の実行グラフに乗ります。
 
+**入力**: `slot_0` 〜 `slot_31` (ANY, optional) — 登録したソースの出力が順に接続される（スロットは UI が自動管理）
+
+**出力**: `out_0` 〜 `out_31` (ANY) — 同じ番号の入力スロットの値をそのまま下流へ転送
+
 #### 主な機能
 
 - `+ Add Source` ボタンでピッカーを開き、複数のノードを選択・追加（最大 32 スロット）
 - ソースのスロット追加・削除・リネームを自動検知して入出力スロットを再同期（下流接続を維持）
 - 上流ノードの出力スロットを改名 / 並べ替えても、同一の論理スロットへ接続を維持する
 - 上流ノードを実削除した場合のみ該当 source エントリを自動クリーンアップ。貼付け / undo / サブグラフ折畳の過渡では削除しない
+- ソースのスロット選択変更 / 並べ替え / 追加・削除を行っても、後続ノード（`SAX Prompt Concat` 等の動的入力ノードを含む）への接続は維持される。切れるのは選択を外したスロットと削除したソースの分だけ
 - Show links pill トグルでソースとの接続ワイヤーを表示 / 非表示
 - コピー＆ペースト後にソースとの接続を自動復元
 
@@ -765,6 +913,26 @@ output/2026-03-20/001_20260320_153045.webp
 
 ## Debug
 
+### SAX Debug Controller
+
+`SAX_Bridge_Debug_Controller` — ワークフロー内の全 SAX ノードの実行記録をレポート出力するデバッグスイッチです。ワークフローのどこかに 1 つ置いて ON にするだけで使えます。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `enabled` | Boolean (ON / OFF) | `ON` でこのワークフロー分のレポート出力を要求する |
+
+**出力**: なし（ノード UI に `Debug logging: ON` / `OFF` を表示）
+
+**動作**:
+- 全 SAX ノードの execute は常にラップされて実行記録を蓄積しており、このノードは「その記録をレポートとして出すかどうか」だけを切り替える。そのため Controller の実行順序に関係なく、ワークフロー内の全ノードの記録が取れる
+- ワークフロー完了時にフローレポートをログへ出力し、併せて JSONL を `sax_debug/sax_debug_<UTC時刻>.jsonl` に書き出す（HTTP 非公開の system user ディレクトリ配下。最大 20 ファイルを保持）
+- `OFF` にするとレポート出力の取り下げに加え、記録の蓄積自体を停止する
+- キャッシュを常に外して毎回 execute されるため、トグルの状態が必ず反映される
+
+[↑ トップへ](#top)
+
 ### SAX Debug Inspector
 
 `SAX_Bridge_Debug_Inspector` — `PIPE_LINE` の内部フィールド（model/clip/vae の有無、seed、loader_settings の各値、images/samples の shape、applied_loras 等）を整形してノード UI に表示するデバッグノードです。
@@ -793,7 +961,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Debug_Text` — 任意の文字列値をノード UI に表示するノードです。`POPULATED_TEXT` の確認や、中間プロンプト・メタデータ・任意の文字列値の確認に利用します。
 
-**入力**: `text` (STRING, multiline)
+**入力**: `value` (ANY)
 
 **出力**: なし（ノード UI にテキスト表示）
 
@@ -863,6 +1031,8 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Primitive_Store` — ワークフロー内で利用する共通プリミティブ変数を一か所で定義・管理するノードです。アイテムを追加するたびに出力スロットが増え、下流ノードへ値を配布します。
 
+**入力**: `items_json` (String, hidden) — アイテム定義の JSON 配列。ノード UI が自動管理
+
 **出力**: アイテムごとに動的生成（INT / FLOAT / STRING / BOOLEAN）
 
 #### 対応型
@@ -884,7 +1054,16 @@ applied_loras: {'lora_a'} (1 entries)
 
 `SAX_Bridge_Text_Catalog` — 名前付きテキスト（プロンプト等）をノード内のカタログとして保管し、Relation 経由で出力スロットに割り当てるノードです。複数のプロンプトをバインダー的に管理し、ワークフロー側を書き換えずに切替できます。
 
-**出力**: Relation ごとに動的生成された STRING 出力（`merge_outputs` OFF 時）／ 全 Relation を改行結合した単一 STRING 出力（`merge_outputs` ON 時）
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `items_json` | String (hidden) | Catalog と Relation の JSON。Manager Dialog / ノード UI が自動管理 |
+| `select_to_add_lora` | Combo (hidden) | Manager Editor の LoRA ピッカーが選択肢ソースとして参照する。実行では未使用 |
+| `select_to_add_wildcard` | Combo (hidden) | Manager Editor の Wildcard ピッカーが選択肢ソースとして参照する。実行では未使用 |
+| `merge_outputs` | Boolean | `individual`: Relation ごとに出力 / `merged`: 有効な Relation のテキストを改行結合して単一出力 |
+
+**出力**: `individual` は Relation ごとの STRING、`merged` は単一の `merged` STRING
 
 #### 4 要素モデル
 
@@ -900,8 +1079,10 @@ applied_loras: {'lora_a'} (1 entries)
 **ノード本体ウィジェット**
 - `📖 Manage Texts...` ボタン / 右クリックメニューで Manager Dialog を起動
 - `[+ Add Relation]` で Relation を追加すると同時に出力 Slot も増える
+- `merge_outputs` を `merged` にすると、ON の Relation テキストを strip → 空文字除外 → 改行結合し、単一の `merged` 出力へ集約する
 - Relation を追加 / 削除 / 並べ替えしても、後続ノード（`SAX Prompt Concat` 等の動的入力ノードを含む）への接続は維持される
 - 各 Relation 行に行頭トグル（pill）/ `[✎]`（Item 選択）/ `[↑↓]`（並び替え）/ `[×]`（削除）
+- Relation 行のラベル部分をクリックすると、その Item を選択した状態で Manager が開き、そのまま編集できる（`(unset)` / `<orphan>` の行は Item 選択を開く）
 - 行頭トグルを OFF にすると、Item 割当を残したまま Slot 出力を空文字にできる（一時的に出力を止める用途）
 - OFF 状態の Relation はテキストが半透明表示になる
 - 未割当 Relation は `(unset)` を灰色で表示（スロットは残存し、接続していれば維持される）
@@ -965,7 +1146,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 下流ノード（`SAX Prompt Concat` 等）の空文字スキップ実装と整合します。
 
-`merge_outputs` を ON にすると、上記で空文字にならない Relation のテキストを `strip()` して改行（`\n`）で結合した単一文字列を `merged` ピンに出力します（全 Relation が空文字の場合は `""`）。これは `SAX Prompt Concat` が複数入力を `strip()` + 改行結合してから処理する挙動と等価で、個別出力を Prompt Concat に直結した場合と同じ結果になります（BREAK 構文も改行と独立に分割されるため同一挙動）。
+`merge_outputs` を ON（`merged`）にすると、残ったテキストを `strip()` し、空文字を除外して改行で結合します。バックエンドでは `out_0` に結合結果、`out_1..31` に空文字を返し、フロントエンドは単一の `merged` ピンを表示します。これは `SAX Prompt Concat` の正規化と等価で、BREAK 構文も独立して処理されます。
 
 > **互換性**: 旧ワークフロー（`on` フィールドが存在しない `items_json`）は ON 扱いで読み込まれます（後方互換）。
 
@@ -978,7 +1159,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 ### SAX Cache
 
-`SAX_Bridge_Cache` — Pipe 内のモデルに DeepCache / TGate をワンタッチ適用し、後段の KSampler・Detailer 全体を高速化するノードです。
+`SAX_Bridge_Cache` — Pipe 内のモデルに DeepCache をワンタッチ適用し、後段の KSampler・Detailer 全体を高速化するノードです。
 
 **入力**
 
@@ -988,12 +1169,11 @@ applied_loras: {'lora_a'} (1 entries)
 | `enabled` | Boolean | `False` でキャッシュを適用せずそのまま返す |
 | `deepcache_interval` | Int (1〜10) | N ステップに 1 回だけ深層計算し残りをキャッシュで代替（1 = DeepCache 無効） |
 | `deepcache_start_percent` | Float (0.0〜1.0) | DeepCache を開始するデノイジング進行割合 |
-| `tgate_enabled` | Boolean (optional) | `True` で TGate（cross-attention キャッシュ）も適用 |
-| `tgate_gate_step` | Float (0.0〜1.0, optional) | TGate キャッシュ開始の境界パーセント |
 
 **出力**: `PIPE`
 
 > **配置位置**: SAX Loader の直後（KSampler・Detailer より前）に挿入することで全処理に一括適用できます。
+> **対応モデル**: DeepCache は UNet 系モデル（SD1.5 / SDXL / Illustrious / Pony）専用です。FLUX・SD3.5・Qwen-Image・Chroma・Wan などの DiT 系モデルに挿した場合はキャッシュを適用せず、警告をログに出して Pipe をそのまま通します。
 > **注意**: 蒸留モデル（DMD2 等）との組み合わせでは品質劣化が顕著になる場合があります。
 
 [↑ トップへ](#top)
@@ -1005,6 +1185,10 @@ applied_loras: {'lora_a'} (1 entries)
 `SAX_Bridge_Toggle_Manager` — グループ・サブグラフ・ノード・Boolean ウィジェットの bypass / 値をシーン単位で一括管理するコントロールノードです。
 
 > **実行不要**: シーン切り替えとトグル操作はすべてフロントエンドで即時反映されます。キューへの追加は不要です。
+
+**入力**: `config_json` (String, hidden) — シーン設定の JSON。JS が管理するため直接編集は不要
+
+**出力**: なし（フロントエンド専用のコントロールノード）
 
 #### 主な機能
 

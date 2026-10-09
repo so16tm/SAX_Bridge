@@ -60,6 +60,13 @@ function makeNode({ id = 1, outputCount = 0 } = {}) {
         inputs: [],
         connectCalls: [],
         connect(slotIndex, targetNode, targetSlot) {
+            // 本物の LiteGraph.connect は対象入力スロットが存在しなければ null を返し
+            // link を作らない。陳腐化した targetSlot への再接続失敗を再現するために倣う
+            // (下流が動的入力で縮小したケースの検出に必要)。
+            if (targetNode.inputs && !targetNode.inputs[targetSlot]) {
+                this.connectCalls.push({ slotIndex, targetId: targetNode.id, targetSlot, failed: true });
+                return null;
+            }
             // テストでは graph.addLink で実 link を作成し、出力 slot.links に追加する
             const linkId = this._graph.addLink({
                 origin_id: this.id,
@@ -1201,7 +1208,8 @@ describe("DynamicSlotCoordinator.applyAfterCapture (内蔵パス)", () => {
 // NodeCollector 風の 1:N spec を生成するヘルパ。
 // entity = { sourceId, slotNames: string[], enabledSlots: number[] (globalIdx の配列) }
 // localSlotIdx は enabledSlots 内の index、globalSlotIdx は slotNames 内の絶対 index。
-function makeNodeCollectorLikeSpec(node, sources) {
+// opts.linkPreserving=true で本番 NodeCollector と同じ 1:N link-repointing 経路を有効化する。
+function makeNodeCollectorLikeSpec(node, sources, opts = {}) {
     const entityToSlots = (src) => {
         return (src.enabledSlots ?? []).map(globalIdx => ({
             name: src.slotNames[globalIdx],
@@ -1220,6 +1228,7 @@ function makeNodeCollectorLikeSpec(node, sources) {
     return {
         spec: {
             direction: "output",
+            ...(opts.linkPreserving === true ? { linkPreserving: true } : {}),
             getEntities: () => sources,
             entityToSlots,
             syncSlotStructure,
@@ -2092,5 +2101,220 @@ describe("computeLinkRepointPlan (純粋関数)", () => {
             entities: [a], entityIds, linkSnapshots, graphLinks, nodeId: 1,
         });
         assert.equal(plan.repoints.length, 0, "他ノード origin の link は repoint しない");
+    });
+});
+
+// ===========================================================================
+// 恒久対策 (2): 出力スロット可変ノード (NodeCollector) の 1:N link-repointing
+//
+// NodeCollector は出力スロットが可変し、rebuildAllSources / swapSources /
+// removeSourceAt / スロット選択変更 がいずれも「全出力ピンを破棄 → 再構築」で
+// 構造を作り直す (sax_ui_base.js _rebuildInner)。
+//
+// 旧経路 (#restoreByReconnect) は復元時に全出力リンクを removeLink してから
+// capture 時点の targetSlot へ connect し直していたため、下流が動的入力
+// (Autogrow、例: SAX Prompt Concat) だと removeLink で下流の入力スロットが詰められ、
+// 陳腐化した targetSlot への再接続が失敗・誤接続して接続が落ちていた。
+//
+// 新経路 (#detachCapturedOutputLinks + #restoreByRepoint) は下流端を一切触らず
+// origin_slot だけを新しい物理位置へ付け替える。
+// ===========================================================================
+
+// _rebuildInner (sax_ui_base.js) 相当: 全出力ピンを末尾から破棄して再構築する。
+function rebuildCollectorOutputs(node, sources) {
+    for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
+    for (const src of sources) {
+        for (const globalIdx of (src.enabledSlots ?? [])) {
+            node.addOutput(src.slotNames[globalIdx], "*");
+        }
+    }
+}
+
+// 当ノード → 下流ノードのリンクを { pin, targetSlot, id } の配列で返す (pin 昇順)。
+function downstreamLinks(graph, nodeId, targetId) {
+    return Object.values(graph.links)
+        .filter(l => l.origin_id === nodeId && l.target_id === targetId)
+        .map(l => ({ id: l.id, pin: l.origin_slot, targetSlot: l.target_slot }))
+        .sort((a, b) => a.pin - b.pin);
+}
+
+// 各リンクの下流端が実在の入力スロットを指し、そのスロットが当該 link を保持していること。
+function assertDownstreamIntegrity(graph, downstream, label = "") {
+    const prefix = label ? `[${label}] ` : "";
+    for (const link of Object.values(graph.links)) {
+        if (link.target_id !== downstream.id) continue;
+        const inp = downstream.inputs[link.target_slot];
+        assert.ok(inp, `${prefix}link ${link.id} の target_slot=${link.target_slot} に入力スロットが実在するべき`);
+        assert.equal(inp.link, link.id,
+            `${prefix}下流 inputs[${link.target_slot}].link は link ${link.id} を指すべき`);
+    }
+}
+
+describe("DynamicSlotCoordinator: 出力スロット可変ノードの 1:N link-repointing (恒久対策)", () => {
+    let graph;
+    beforeEach(() => { graph = makeGraphMock(); installAppMock(graph); });
+    afterEach(() => { uninstallAppMock(); });
+
+    // source 2 件 × 2 slot = 出力ピン 4 本 (A B C D) を下流ノードへ全結線した状態を作る。
+    function setupCollector(downstream) {
+        const node = makeNode({ outputCount: 0 });
+        node._graph = graph;
+        graph.registerNode(node);
+        graph.registerNode(downstream);
+
+        const sources = [
+            { sourceId: "s1", slotNames: ["A", "B"], enabledSlots: [0, 1] },
+            { sourceId: "s2", slotNames: ["C", "D"], enabledSlots: [0, 1] },
+        ];
+        rebuildCollectorOutputs(node, sources);
+        for (let i = 0; i < 4; i++) node.connect(i, downstream, i);
+
+        const { spec } = makeNodeCollectorLikeSpec(node, sources, { linkPreserving: true });
+        const coord = new DynamicSlotCoordinator(node, spec);
+        node.connectCalls = [];
+        return { node, sources, coord };
+    }
+
+    it("swapSources: 動的入力下流 (Autogrow) が縮小せず 4 本の link が identity 追従する", () => {
+        const ag = makeAutogrowTargetNode(1100, graph, { initialInputs: 1 });
+        const { node, sources, coord } = setupCollector(ag);
+        const inputCountBefore = autogrowInputCount(ag);
+        const idsBefore = downstreamLinks(graph, node.id, ag.id).map(l => l.id).sort();
+
+        coord.mutate((entities) => {
+            [entities[0], entities[1]] = [entities[1], entities[0]];
+            rebuildCollectorOutputs(node, entities);
+        });
+
+        const after = downstreamLinks(graph, node.id, ag.id);
+        assert.equal(after.length, 4, "swap 後も 4 本すべて維持されるべき");
+        assert.deepEqual(after.map(l => l.id).sort(), idsBefore,
+            "link は作り直されず同一 link id が維持されるべき (下流端に触れていない証拠)");
+        assert.equal(autogrowInputCount(ag), inputCountBefore,
+            "下流 Autogrow の入力スロットは縮小しないべき");
+        // s2 (C,D) が先頭に来たので pin0/pin1 が元 pin2/pin3 の下流端を指す。
+        assert.deepEqual(after.map(l => l.targetSlot), [2, 3, 0, 1],
+            "各 link は下流端を保ったまま出力ピンだけ付け替わるべき");
+        assert.equal(node.connectCalls.length, 0, "repoint 経路では connect を使わない");
+        assertLinkIntegrity(node, graph, "swap");
+        assertDownstreamIntegrity(graph, ag, "swap");
+    });
+
+    it("スロット選択解除: 解除した 1 本だけ切れ、残りは下流端を保つ", () => {
+        const ag = makeAutogrowTargetNode(1101, graph, { initialInputs: 1 });
+        const { node, sources, coord } = setupCollector(ag);
+        const inputCountBefore = autogrowInputCount(ag);
+        const linkOfA = downstreamLinks(graph, node.id, ag.id).find(l => l.pin === 0).id;
+
+        coord.mutate((entities) => {
+            entities[0].enabledSlots = [1]; // A を解除、B のみ残す
+            rebuildCollectorOutputs(node, entities);
+        });
+
+        const after = downstreamLinks(graph, node.id, ag.id);
+        assert.equal(after.length, 3, "解除した A の 1 本だけが切れ、B/C/D は維持されるべき");
+        assert.ok(!after.some(l => l.id === linkOfA), "解除された A の link は除去されるべき");
+        assert.deepEqual(after.map(l => l.pin), [0, 1, 2], "残り 3 本は詰めた物理位置に付け替わる");
+        assert.deepEqual(after.map(l => l.targetSlot), [0, 1, 2],
+            "下流 Autogrow は自身の disconnectInput で 1 つ詰めるだけで、残りの対応は保たれる");
+        assert.equal(autogrowInputCount(ag), inputCountBefore - 1,
+            "下流の縮小は切れた 1 本分だけであるべき");
+        assert.equal(node.connectCalls.length, 0, "repoint 経路では connect を使わない");
+        assertLinkIntegrity(node, graph, "deselect");
+        assertDownstreamIntegrity(graph, ag, "deselect");
+    });
+
+    it("source 削除: 当該 source の link だけ切れ、残る source の link は維持される", () => {
+        const ag = makeAutogrowTargetNode(1102, graph, { initialInputs: 1 });
+        const { node, coord } = setupCollector(ag);
+        const before = downstreamLinks(graph, node.id, ag.id);
+        const survivingIds = before.filter(l => l.pin >= 2).map(l => l.id).sort();
+
+        coord.mutate((entities) => {
+            entities.splice(0, 1); // s1 (A,B) を削除
+            rebuildCollectorOutputs(node, entities);
+        });
+
+        const after = downstreamLinks(graph, node.id, ag.id);
+        assert.deepEqual(after.map(l => l.id).sort(), survivingIds,
+            "s2 (C,D) の link は同一 link id のまま維持されるべき");
+        assert.deepEqual(after.map(l => l.pin), [0, 1], "詰めた物理位置に付け替わる");
+        assert.equal(autogrowInputCount(ag), 3, "下流は切れた 2 本分だけ縮小する (5 → 3)");
+        assertLinkIntegrity(node, graph, "remove-source");
+        assertDownstreamIntegrity(graph, ag, "remove-source");
+    });
+
+    it("source 追加: 既存 link は一切作り直されない (link id 不変・connect 不使用)", () => {
+        const ag = makeAutogrowTargetNode(1103, graph, { initialInputs: 1 });
+        const { node, coord } = setupCollector(ag);
+        const before = downstreamLinks(graph, node.id, ag.id);
+
+        coord.mutate((entities) => {
+            entities.push({ sourceId: "s3", slotNames: ["E"], enabledSlots: [0] });
+            node.addOutput("E", "*");
+        });
+
+        assert.deepEqual(downstreamLinks(graph, node.id, ag.id), before,
+            "末尾追加では既存 link の id / 物理位置 / 下流端すべてが不変であるべき");
+        assert.equal(node.connectCalls.length, 0, "repoint 経路では connect を使わない");
+        assertLinkIntegrity(node, graph, "add-source");
+        assertDownstreamIntegrity(graph, ag, "add-source");
+    });
+
+    it("静的入力下流でも swapSources で link が作り直されない (回帰: 下流種別非依存)", () => {
+        const target = { id: 1104, outputs: [], inputs: Array.from({ length: 4 }, (_, i) => ({ name: `in${i}`, type: "*", link: null })) };
+        const { node, coord } = setupCollector(target);
+        const idsBefore = downstreamLinks(graph, node.id, target.id).map(l => l.id).sort();
+
+        coord.mutate((entities) => {
+            [entities[0], entities[1]] = [entities[1], entities[0]];
+            rebuildCollectorOutputs(node, entities);
+        });
+
+        const after = downstreamLinks(graph, node.id, target.id);
+        assert.equal(after.length, 4, "静的入力下流でも 4 本維持");
+        assert.deepEqual(after.map(l => l.id).sort(), idsBefore, "link id も維持される");
+        assert.equal(node.connectCalls.length, 0, "repoint 経路では connect を使わない");
+        assertLinkIntegrity(node, graph, "static-swap");
+    });
+
+    it("action 内例外: 切り離した出力リンクが atomic rollback で復元される", () => {
+        const target = { id: 1105, outputs: [], inputs: Array.from({ length: 4 }, (_, i) => ({ name: `in${i}`, type: "*", link: null })) };
+        const { node, coord } = setupCollector(target);
+        const before = downstreamLinks(graph, node.id, target.id);
+
+        assert.throws(() => {
+            coord.mutate((entities) => {
+                rebuildCollectorOutputs(node, entities);
+                throw new Error("action failed");
+            });
+        }, /action failed/);
+
+        assert.equal(node.outputs.length, 4, "rollback で出力ピン数が戻るべき");
+        assert.deepEqual(downstreamLinks(graph, node.id, target.id), before,
+            "rollback で切り離し前の下流リンクが復元されるべき");
+        assertLinkIntegrity(node, graph, "rollback");
+    });
+
+    it("linkPreserving 未指定 (Image/Pipe Collector 風) は従来 reconnect 経路のまま", () => {
+        const target = { id: 1106, outputs: [], inputs: Array.from({ length: 4 }, (_, i) => ({ name: `in${i}`, type: "*", link: null })) };
+        const node = makeNode({ outputCount: 0 });
+        node._graph = graph;
+        graph.registerNode(node);
+        graph.registerNode(target);
+
+        const sources = [{ sourceId: "s1", slotNames: ["A", "B"], enabledSlots: [0, 1] }];
+        rebuildCollectorOutputs(node, sources);
+        node.connect(0, target, 0);
+        node.connect(1, target, 1);
+
+        const { spec } = makeNodeCollectorLikeSpec(node, sources); // linkPreserving なし
+        const coord = new DynamicSlotCoordinator(node, spec);
+        node.connectCalls = [];
+
+        coord.mutate((entities) => { entities[0].enabledSlots = [0, 1]; });
+
+        assert.ok(node.connectCalls.length > 0,
+            "linkPreserving 未指定 spec は従来どおり connect ベースで復元するべき (opt-in 限定の保証)");
     });
 });

@@ -5,12 +5,12 @@ import torch
 
 import folder_paths
 import comfy.sd
-import comfy.samplers
 import comfy.supported_models
 import comfy.utils
 from comfy_api.latest import io
 
 from .io_types import PipeLine, record_applied_loras
+from .loader_common import apply_single_lora, build_pipe, empty_latent, resolve_path, sampling_inputs
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -72,21 +72,45 @@ def _unet_model_options(weight_dtype: str) -> dict:
     return model_options
 
 
+# supported_models のクラス名 → テキストエンコーダの CLIPType 名。
+# CLIPLoader の `type` に相当する値を、ロード済み UNET から自動で決める。
+# 未登録のモデルは従来通り STABLE_DIFFUSION（Anima 等はこれで正しく読める）。
+_CLIP_TYPE_BY_MODEL = {
+    "QwenImage": "QWEN_IMAGE",
+    "QwenImage21": "QWEN_IMAGE",
+}
+
+
+def _clip_type_for_model(model) -> "comfy.sd.CLIPType":
+    """ロード済み UNET の model_config からテキストエンコーダの CLIPType を決める。
+
+    Qwen-Image 2.1 の Qwen3-VL 8B は CLIPType.QWEN_IMAGE で読まないと汎用の
+    Qwen3-VL として扱われ、テンプレートと画像スロットが Qwen-Image 用にならない。
+    """
+    # INTERNAL API: ModelPatcher.model.model_config は ComfyUI 内部 API。
+    config = getattr(getattr(model, "model", None), "model_config", None)
+    clip_type, matched = _clip_type_for_model_config(config)
+    if not matched:
+        name = _CLIP_TYPE_BY_MODEL.get(type(config).__name__)
+        if name is not None:
+            clip_type = getattr(comfy.sd.CLIPType, name, comfy.sd.CLIPType.STABLE_DIFFUSION)
+            matched = clip_type is not comfy.sd.CLIPType.STABLE_DIFFUSION
+    _log_clip_type_detection(config, clip_type, matched)
+    return clip_type
+
+
 class SAX_Bridge_Loader_Diffusion(io.ComfyNode):
     """UNET 単体 + CLIP 単体 + VAE 別構成の diffusion model を読み込むローダー。
 
     checkpoint に baked された model/clip/vae を一括ロードする SAX_Bridge_Loader と異なり、
     diffusion_models / text_encoders / vae の 3 フォルダから個別にロードする。
-    Anima (Qwen3 0.6B テキストエンコーダ) など最近の分割配布モデルを対象とする。
+    Anima (Qwen3 0.6B テキストエンコーダ) や Qwen-Image 2.1 (Qwen3-VL 8B) など
+    最近の分割配布モデルを対象とする。テキストエンコーダの種類 (CLIPType) は
+    UNET から自動判定する（_clip_type_for_model）。
 
     出力 pipe は SAX_Bridge_Loader と同一構造のため下流ノードは無改修で動作する。
-    空 latent は 4ch 全ゼロで生成し、KSampler 側の fix_empty_latent_channels が
-    モデルの latent_channels / latent_dimensions へ自動適応する。
-
-    clip_type は UNET の model_config 型から自動判別する（Krea2 → KREA2、
-    未登録は STABLE_DIFFUSION フォールバック）。checkpoint 版 SAX_Bridge_Loader は
-    本体 clip_target() 経由のため本判別と無関係。separate-load はこのノードのみ
-    のためローカル実装とする。
+    空 latent は 4ch 全ゼロ (1/8) で生成し、KSampler 側の fix_empty_latent_channels が
+    モデルの latent_channels / latent_dimensions / 縮小率へ自動適応する。
     """
 
     @classmethod
@@ -103,15 +127,7 @@ class SAX_Bridge_Loader_Diffusion(io.ComfyNode):
                 io.Combo.Input("vae_name", options=folder_paths.get_filename_list("vae")),
                 io.Combo.Input("lora_name", options=["None"] + folder_paths.get_filename_list("loras")),
                 io.Float.Input("lora_model_strength", default=1.0, min=-10.0, max=10.0, step=0.01),
-                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, control_after_generate=True),
-                io.Int.Input("steps", default=20, min=1, max=10000),
-                io.Float.Input("cfg", default=8.0, min=0.0, max=100.0, step=0.5),
-                io.Combo.Input("sampler_name", options=comfy.samplers.KSampler.SAMPLERS),
-                io.Combo.Input("scheduler_name", options=comfy.samplers.KSampler.SCHEDULERS),
-                io.Float.Input("denoise", default=1.0, min=0.0, max=1.0, step=0.01),
-                io.Int.Input("width", default=512, min=8, max=8192, step=8),
-                io.Int.Input("height", default=512, min=8, max=8192, step=8),
-                io.Int.Input("batch_size", default=1, min=1, max=4096),
+                *sampling_inputs(),
             ],
             outputs=[
                 PipeLine.Output("PIPE"),
@@ -138,65 +154,41 @@ class SAX_Bridge_Loader_Diffusion(io.ComfyNode):
         height: int,
         batch_size: int,
     ) -> io.NodeOutput:
-        unet_path = folder_paths.get_full_path("diffusion_models", unet_name)
-        if unet_path is None:
-            raise ValueError("[SAX_Bridge] Diffusion Loader: diffusion model not found: %s" % unet_name)
+        unet_path = resolve_path("diffusion_models", unet_name, "Diffusion Loader: diffusion model")
         model = comfy.sd.load_diffusion_model(unet_path, model_options=_unet_model_options(weight_dtype))
 
-        model_config = model.model.model_config
-        clip_type, matched = _clip_type_for_model_config(model_config)
-        _log_clip_type_detection(model_config, clip_type, matched)
+        clip_type = _clip_type_for_model(model)
 
-        clip_path = folder_paths.get_full_path("text_encoders", clip_name)
-        if clip_path is None:
-            raise ValueError("[SAX_Bridge] Diffusion Loader: text encoder not found: %s" % clip_name)
+        clip_path = resolve_path("text_encoders", clip_name, "Diffusion Loader: text encoder")
         clip = comfy.sd.load_clip(
             ckpt_paths=[clip_path],
             embedding_directory=folder_paths.get_folder_paths("embeddings"),
             clip_type=clip_type,
         )
 
-        vae_path = folder_paths.get_full_path("vae", vae_name)
-        if vae_path is None:
-            raise ValueError("[SAX_Bridge] Diffusion Loader: VAE not found: %s" % vae_name)
+        vae_path = resolve_path("vae", vae_name, "Diffusion Loader: VAE")
         vae = comfy.sd.VAE(sd=comfy.utils.load_torch_file(vae_path))
 
-        applied_lora_names = []
-        if lora_name != "None":
-            lora_path = folder_paths.get_full_path("loras", lora_name)
-            if lora_path is None:
-                raise ValueError("[SAX_Bridge] Diffusion Loader: LoRA not found: %s" % lora_name)
-            lora = comfy.utils.load_torch_file(lora_path)
-            model, clip = comfy.sd.load_lora_for_models(model, clip, lora, lora_model_strength, lora_model_strength)
-            applied_lora_names.append(lora_name)
+        model, clip, applied_lora_names = apply_single_lora(
+            model, clip, lora_name, lora_model_strength, "Diffusion Loader"
+        )
 
-        latent = torch.zeros([batch_size, 4, height // 8, width // 8], device="cpu")
-        latent_out = {"samples": latent}
-
-        pipe = {
-            "model": model,
-            "clip": clip,
-            "vae": vae,
-            "positive": None,
-            "negative": None,
-            "samples": latent_out,
-            "images": None,
-            "seed": seed,
-            "loader_settings": {
-                "ckpt_name": unet_name,
-                "steps": steps,
-                "cfg": cfg,
-                "sampler_name": sampler_name,
-                "scheduler": scheduler_name,
-                "denoise": denoise,
-                "clip_width": width,
-                "clip_height": height,
-                "positive": "",
-                "negative": "",
-                "xyplot": None,
-                "batch_size": batch_size,
-            }
-        }
+        pipe = build_pipe(
+            model=model,
+            clip=clip,
+            vae=vae,
+            latent=empty_latent(width, height, batch_size),
+            seed=seed,
+            steps=steps,
+            cfg=cfg,
+            sampler_name=sampler_name,
+            scheduler_name=scheduler_name,
+            denoise=denoise,
+            width=width,
+            height=height,
+            batch_size=batch_size,
+        )
+        pipe["loader_settings"]["ckpt_name"] = unet_name
         record_applied_loras(pipe, applied_lora_names)
 
         return io.NodeOutput(pipe, seed)

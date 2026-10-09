@@ -1,11 +1,13 @@
 # SAX_Bridge
 
+[![CI](https://github.com/so16tm/SAX_Bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/so16tm/SAX_Bridge/actions/workflows/ci.yml)
+
 [JP](README_ja.md) | [Key Features](#key-features) | [Installation](#installation) | [Dependencies](#dependencies) | [Node Reference](docs/nodes_en.md) | [MIT License](#license)
 
 **Build advanced workflows with fewer nodes. Smart trial-and-error with management nodes.**
 
 SAX_Bridge is a collection of custom nodes that fills the missing pieces in ComfyUI workflows.
-From loading checkpoints (or split-distribution diffusion models such as Anima or Krea 2: UNET + text encoder + VAE), CLIP, and LoRA to prompt processing, sampling, detailing, and output — all in a minimal set of nodes, enabling high-quality generation without complex configurations.
+From loading checkpoints (or split-distribution diffusion models such as Anima, Krea 2, and Qwen-Image 2.1: UNET + text encoder + VAE), CLIP, and LoRA to prompt processing, sampling, detailing, and output — all in a minimal set of nodes, enabling high-quality generation without complex configurations.
 A unique scene-based control system lets you batch-manage nodes and groups, quickly switch between configurations, and shorten your iteration cycle.
 
 ---
@@ -148,6 +150,30 @@ Automatically detects and re-syncs when source slots are added, removed, or rena
 
 **SAX Pipe Collector** acts as a switch that selects the first valid Pipe from multiple routes, enabling conditional branching through wiring alone.
 **SAX Image Collector** batch-combines multiple IMAGE outputs and passes them to SAX Image Preview for all-at-once comparison.
+
+[↑ Back to top](#sax_bridge)
+
+---
+
+<a id="qwen-image"></a>
+
+### Qwen-Image 2.1 text-to-image and multi-image editing — Qwen Image Prompt
+
+Generate and edit with Qwen-Image 2.1 in 4 nodes: **SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output**.
+With no reference images it runs text-to-image; connect images to `image_1`–`image_10` for image-to-image (multi-image composition and editing), referring to them as `<image1>`, `<image2>`, ... in the prompt.
+SAX Diffusion Loader detects the text encoder type from the model automatically, so no extra setup is needed (recommended: `cfg=1`, `euler`, `simple`).
+
+[↑ Back to top](#sax_bridge)
+
+---
+
+<a id="minimax-h3"></a>
+
+### MiniMax H3 video + audio generation — MiniMax H3 Loader / Sampler
+
+Generate with MiniMax H3 through [MiniMaxH3-Director](https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director) in 4 nodes: **SAX MiniMax H3 Loader → MiniMax H3 Director → SAX MiniMax H3 Sampler → Save Video** (requires ComfyUI 0.30.0 or later).
+The Loader loads the diffusion model, text encoder (type set automatically), video VAE, and audio VAE together, and pre-selects the files by name. The Sampler does noise, scheduler, guider, sampling, video / audio decoding, and video creation in one node, defaulting to the official `res_multistep` / `simple` / 20 steps.
+To use reference images / videos / audio, select the REF2VA checkpoint in `ref_unet_name` and turn Refs ON in the Director.
 
 [↑ Back to top](#sax_bridge)
 

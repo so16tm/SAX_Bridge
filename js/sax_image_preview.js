@@ -1,5 +1,5 @@
 import { app } from "../../scripts/app.js";
-import { getComfyTheme, rrect, txt, BOTTOM_PAD } from "./sax_ui_base.js";
+import { getComfyTheme, rrect, txt, BOTTOM_PAD, nodeCanvasWidth } from "./sax_ui_base.js";
 
 const EXT_NAME   = "SAX.ImagePreview";
 const NODE_TYPE  = "SAX_Bridge_Image_Preview";
@@ -163,6 +163,7 @@ function makePreviewWidget(node) {
         },
 
         draw(ctx, drawNode, W, y) {
+            W = nodeCanvasWidth(this, ctx, drawNode, W);
             widget._lastY = y;
             const { maxCols } = getLayoutParams(drawNode);
             const cellW = Math.max(1, Math.floor((W - (maxCols + 1) * GAP) / maxCols));
@@ -425,7 +426,9 @@ app.registerExtension({
             this.size[0] = calcNodeWidth(cellW, maxCols);
         };
 
+        const origWidgetChanged = nodeType.prototype.onWidgetChanged;
         nodeType.prototype.onWidgetChanged = function (name) {
+            origWidgetChanged?.apply(this, arguments);
             if (!["cell_w", "max_cols"].includes(name)) return;
             const { cellW, maxCols } = getLayoutParams(this);
             this.size[0] = calcNodeWidth(cellW, maxCols);
@@ -433,7 +436,9 @@ app.registerExtension({
             app.graph.setDirtyCanvas(true, true);
         };
 
+        const origExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (output) {
+            origExecuted?.apply(this, arguments);
             const images = output?.images ?? [];
             const w      = this._previewWidget;
             if (!w) return;

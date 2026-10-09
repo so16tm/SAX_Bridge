@@ -535,7 +535,9 @@ class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
         batch_preview_masks = []
 
         for b in range(batch_size):
-            img_np    = (images[b].cpu().numpy() * 255).astype(np.uint8)
+            # clip しないと 1.0 超過の画素が uint8 でラップアラウンドし、
+            # 白飛び部分が黒に化けたまま無言で誤ったマスクが出る (output.py と同じ扱い)
+            img_np    = (images[b].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
             pil_image = Image.fromarray(img_np[..., :3])
 
             positive_list = []

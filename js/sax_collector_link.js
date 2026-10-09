@@ -21,6 +21,7 @@
  *   partitionLiveSources(sources, getNodeById)        — sig rebuild の一時 null 温存分割
  *   mergeSourceAnchors(oldSource, newSource)          — H-1 rebuild 時の identity アンカー引継ぎ
  *   rebuildLiveSources({...})                         — H-1/H-3 rebuild の app 非依存中核 (live 再構築 + anchor 引継ぎ + missing 温存)
+ *   resolveLocalSlotBySlotName(entity, name, gi)      — NodeCollector 下流リンク復元の段階1 resolver (同名出力を globalSlotIdx で判別)
  */
 
 /**
@@ -244,6 +245,39 @@ export function partitionLiveSources(sources, getNodeById) {
 }
 
 /**
+ * rebuild で fresh 生成した source を、**旧 source オブジェクトへ in-place で取り込む**。
+ *
+ * DynamicSlotCoordinator は entity (= source オブジェクト) の **参照** を WeakMap のキーに
+ * して capture 済みリンクを解決する。rebuild で `buildSource` の戻り値 (新オブジェクト) を
+ * そのまま `_remoteSources` に戻すと entity identity が毎回破壊され、Coordinator は
+ * 「全 entity が削除された」と解釈して下流リンクを 1 本も復元できない。
+ * 旧オブジェクトを器として使い回すことで、rebuild を挟んでも identity が保たれる
+ * (TextCatalog / PrimitiveStore の in-place 更新と同型)。
+ *
+ * 取り込み規則:
+ *   - アンカー系 (inputAnchors / slotNames / slotTypes) は mergeSourceAnchors の規則で引継ぐ。
+ *   - fresh が持たないキー (前回の sig / _connectRetries 等) は削除し、fresh の状態と一致させる
+ *     (旧状態の残留による判定ズレを防ぐ)。
+ *   - 旧 / fresh いずれかが無い場合は存在するほうをそのまま返す (初回 addSource は fresh が正)。
+ *
+ * @param {object|null|undefined} oldSource    rebuild 前の source (identity の器)
+ * @param {object|null|undefined} freshSource  buildSource が生成した新 source
+ * @returns {object} identity を保った source (oldSource があれば oldSource 自身)
+ */
+export function adoptSourceIdentity(oldSource, freshSource) {
+    if (!oldSource || !freshSource) return freshSource ?? oldSource;
+    if (oldSource === freshSource) return oldSource;
+
+    mergeSourceAnchors(oldSource, freshSource);
+
+    for (const key of Object.keys(oldSource)) {
+        if (!Object.prototype.hasOwnProperty.call(freshSource, key)) delete oldSource[key];
+    }
+    Object.assign(oldSource, freshSource);
+    return oldSource;
+}
+
+/**
  * H-1/H-3 rebuild の app 非依存中核ロジック。
  *
  * 保存済み source 配列を走査し、上流が live なものだけを `buildSourceFn` で fresh 再構築し、
@@ -291,9 +325,41 @@ export function rebuildLiveSources({ savedSources, getNodeById, buildSourceFn, g
             continue;
         }
         if (!fresh) continue;
-        mergeSourceAnchors(oldSource, fresh);
-        rebuilt.push({ source: fresh, srcNode, offset });
-        offset += getSlotCount(fresh);
+        // identity の器は旧 source。プロダクション rebuild (_addSourceInner) と同じ
+        // in-place 取り込みにすることで、Coordinator の entity identity 前提を本経路でも保つ。
+        const adopted = adoptSourceIdentity(oldSource, fresh);
+        rebuilt.push({ source: adopted, srcNode, offset });
+        offset += getSlotCount(adopted);
     }
     return { rebuilt, missing };
+}
+
+/**
+ * NodeCollector 出力リンク復元の段階1 resolver: 出力名 → entity 内 localSlotIdx。
+ *
+ * 上流ノードは同名の出力を複数持ちうる (例: 2 つの "IMAGE")。`slotNames.indexOf` だけだと
+ * 常に最初の一致へ解決され、同名の 2 本目以降のリンクが 1 本目のピンへ寄って
+ * 並べ替え/再構築のたびに下流が誤接続・断線する。capture 時に記録した globalSlotIdx
+ * (= その出力が元いた entity 内の位置) が分かる場合は、同名一致のうちそれに最も近いものを選ぶ。
+ * globalSlotIdx が一致候補に含まれていればそれ自身が選ばれる。
+ *
+ * 選んだ global index が enabledSlots に無い (スロット選択で解除された) 場合は null を返し、
+ * 呼出側 (Coordinator) は段階2 → 段階3 (リンク除去) へ進む。
+ *
+ * @param {{ slotNames?: string[], enabledSlots?: number[] }} entity
+ * @param {string} slotName
+ * @param {number | null} [globalSlotIdx]  capture 時の entity 内 global index (任意)
+ * @returns {number | null}
+ */
+export function resolveLocalSlotBySlotName(entity, slotName, globalSlotIdx = null) {
+    const names = entity?.slotNames ?? [];
+    let best = -1;
+    for (let i = 0; i < names.length; i++) {
+        if (names[i] !== slotName) continue;
+        if (best < 0) { best = i; continue; }
+        if (globalSlotIdx != null && Math.abs(i - globalSlotIdx) < Math.abs(best - globalSlotIdx)) best = i;
+    }
+    if (best < 0) return null;
+    const localIdx = entity?.enabledSlots?.indexOf(best) ?? -1;
+    return localIdx >= 0 ? localIdx : null;
 }

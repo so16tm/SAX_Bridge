@@ -338,3 +338,12 @@ class TestExecuteClipTypeWiring:
         mock_load_clip = self._run_execute(MagicMock(name="unknown_config"))
         _, kwargs = mock_load_clip.call_args
         assert kwargs["clip_type"] is comfy.sd.CLIPType.STABLE_DIFFUSION
+
+    def test_qwen_image_21_uses_qwen_image(self):
+        mock_load_clip = self._run_execute(type("QwenImage21", (), {})())
+        assert mock_load_clip.call_args.kwargs["clip_type"] is comfy.sd.CLIPType.QWEN_IMAGE
+
+    def test_other_models_keep_stable_diffusion(self):
+        """Anima 等、従来通りの読み込みを変えない。"""
+        mock_load_clip = self._run_execute(type("Anima", (), {})())
+        assert mock_load_clip.call_args.kwargs["clip_type"] is comfy.sd.CLIPType.STABLE_DIFFUSION

@@ -20,17 +20,30 @@ const MAX_RELATIONS = 32;
 const MAX_ITEMS     = 256;
 const MAX_TAGS      = 8;
 
+// -- Manager Dialog のアイテムリスト仮想化パラメータ --
+// 行は絶対配置し、スクロール量から可視インデックスを算出する。そのため
+// 行の高さは CSS 側で固定し、ここの数値と一致させる必要がある。
+/** アイテム行の高さ (px)。row の height と一致させること。 */
+const ITEM_ROW_HEIGHT = 26;
+/** アイテム行どうしの間隔 (px)。 */
+const ITEM_ROW_GAP    = 2;
+/** 1 行あたりの占有高 (px)。i 番目の行の top = i * ITEM_ROW_STRIDE。 */
+const ITEM_ROW_STRIDE = ITEM_ROW_HEIGHT + ITEM_ROW_GAP;
+/** 可視範囲の上下に余分に描画しておく行数（高速スクロール時の白抜け防止）。 */
+const ITEM_ROW_OVERSCAN = 6;
+/**
+ * リストの可視高が測れないとき (clientHeight が 0／未定義。DOM 未アタッチ時や
+ * テスト用 DOM スタブ) のフォールバック。左ペインの min-height 相当。
+ */
+const ITEM_LIST_FALLBACK_VIEWPORT = 440;
+
 const UNSET_LABEL  = "(unset)";
 const ORPHAN_LABEL = "<orphan>";
 
 /** 個別出力 / マージ出力を切り替える Boolean widget 名 (Python schema と一致) */
 const MERGE_WIDGET_NAME = "merge_outputs";
 
-/**
- * マージ出力モードか判定する (lazy getter)。
- * widget 未生成 / widgets_values 写像事故で value が null/undefined になっても
- * Boolean() で明示 false へ倒す。
- */
+/** マージ出力モードか判定する。 */
 function isMerged(node) {
     return Boolean(node.widgets?.find(w => w.name === MERGE_WIDGET_NAME)?.value);
 }
@@ -345,30 +358,82 @@ function parseState(raw) {
     }
 }
 
-/** state → items_json (string)。内部プロパティ（_links 等）は明示的に除外する */
-function serializeState(state) {
-    const payload = {
-        version: SCHEMA_VERSION,
-        catalog: {
-            items: state.catalog.items.map(({ id, name, text, tags }) => ({
-                id, name, text, tags: [...(tags ?? [])],
-            })),
-            tag_definitions: [...state.catalog.tag_definitions],
-            favorite_tags: [...(state.catalog.favorite_tags ?? [])],
-        },
-        // `on` の正規化は parseState と対称に書く（欠損 → true、それ以外は Boolean()）
-        relations: state.relations.map(({ item_id, on }) => ({
-            item_id,
-            on: on !== undefined ? Boolean(on) : true,
+/**
+ * catalog オブジェクト → その JSON 断片のキャッシュ。
+ *
+ * items 索引 (`_itemIndexCache`) と同じ不変条件に乗る: catalog は内容が変わるとき必ず
+ * 新しいオブジェクトに差し替わる (parseState / Manager Save の snapshot) ため、
+ * オブジェクト identity をキーにすれば stale なキャッシュは発生しない。
+ */
+const _catalogJsonCache = new WeakMap();
+
+/** catalog 部分の JSON 断片を返す（catalog オブジェクトごとに初回のみ生成）。 */
+function serializeCatalog(catalog) {
+    const cached = _catalogJsonCache.get(catalog);
+    if (cached !== undefined) return cached;
+    const json = JSON.stringify({
+        items: catalog.items.map(({ id, name, text, tags }) => ({
+            id, name, text, tags: [...(tags ?? [])],
         })),
-    };
-    return JSON.stringify(payload);
+        tag_definitions: [...catalog.tag_definitions],
+        favorite_tags: [...(catalog.favorite_tags ?? [])],
+    });
+    _catalogJsonCache.set(catalog, json);
+    return json;
 }
 
-/** Catalog 内で id から Item を引く（O(n) 線形検索でも n<=32 なので問題なし） */
+/**
+ * state → items_json (string)。内部プロパティ（_links 等）は明示的に除外する。
+ *
+ * relation の追加・削除・並べ替え・トグルは `syncOutputSlots` 経由で毎回ここを通るが、
+ * catalog (最大 MAX_ITEMS=256 件) は relation 操作では変化しない。catalog 断片を
+ * キャッシュし、毎回作り直すのは relations 部分だけにする。
+ * 出力は従来実装とバイト単位で同一 (キー順・正規化規則とも不変)。
+ */
+function serializeState(state) {
+    // `on` の正規化は parseState と対称に書く（欠損 → true、それ以外は Boolean()）
+    const relationsJson = JSON.stringify(state.relations.map(({ item_id, on }) => ({
+        item_id,
+        on: on !== undefined ? Boolean(on) : true,
+    })));
+    return `{"version":${JSON.stringify(SCHEMA_VERSION)}`
+        + `,"catalog":${serializeCatalog(state.catalog)}`
+        + `,"relations":${relationsJson}}`;
+}
+
+/**
+ * `catalog.items` 配列 → `id → item` の索引キャッシュ。
+ *
+ * 配列そのものを WeakMap のキーにする。items 配列は内容が変わるとき必ず
+ * 新しい配列に差し替わる (parseState / Manager Save の deep copy) ため、
+ * 「同じ配列 identity なら中身も同じ」が成立し stale 索引は発生しない。
+ * 配列が GC されれば索引も一緒に消える。
+ */
+const _itemIndexCache = new WeakMap();
+
+/** `catalog.items` の id 索引を取得する（配列ごとに初回のみ構築）。 */
+function itemIndexOf(items) {
+    if (!Array.isArray(items)) return null;
+    let index = _itemIndexCache.get(items);
+    if (index) return index;
+    index = new Map();
+    for (const it of items) {
+        if (it?.id != null) index.set(it.id, it);
+    }
+    _itemIndexCache.set(items, index);
+    return index;
+}
+
+/**
+ * Catalog 内で id から Item を引く。
+ *
+ * MAX_ITEMS を 32 → 256 に引き上げたことで、線形検索のままでは
+ * relation ごとに呼ぶ `syncOutputSlots` と毎フレーム走る `drawRelationContent` が
+ * O(relations × items) になる。id 索引で O(1) にする。
+ */
 function findItemById(state, itemId) {
     if (!itemId) return null;
-    return state.catalog.items.find(it => it.id === itemId) ?? null;
+    return itemIndexOf(state.catalog?.items)?.get(itemId) ?? null;
 }
 
 /** Relation の表示名を解決 */
@@ -454,17 +519,33 @@ function sortTagsByContext(filteredItems, activeTags, favoriteTags = []) {
 }
 
 /**
+ * タグ順序配列を `tag → index` の Map に変換する。
+ * items ループの外で 1 回だけ作り、`sortItemTagsByContext` に使い回す。
+ *
+ * @param {string[]} sortedTags
+ * @returns {Map<string, number>}
+ */
+function tagOrderMap(sortedTags) {
+    return new Map((sortedTags ?? []).map((t, i) => [t, i]));
+}
+
+/**
  * Item のタグ配列を sortedTags の順序に並び替える。
  * sortedTags に含まれないタグ（コンテキスト外タグ）は末尾にアルファベット順で付加する。
  * Editor / リスト内のタグ表示でタグトグルと並びを揃えるために使う。
  *
+ * items を列挙するループから呼ぶ場合は `tagOrderMap(sortedTags)` で作った Map を渡すこと。
+ * 配列を渡すと呼び出しごとに Map を組み直すため、items 件数 × タグ語彙数のコストになる
+ * (MAX_ITEMS=256 では無視できない)。
+ *
  * @param {string[]} itemTags    - Item の tags 配列
- * @param {string[]} sortedTags  - sortTagsByContext で得たタグ全体順序
+ * @param {string[] | Map<string, number>} sortedTags
+ *        sortTagsByContext で得たタグ全体順序、または `tagOrderMap` で Map 化したもの
  * @returns {string[]} 並び替え後の新配列（元配列は変更しない）
  */
 function sortItemTagsByContext(itemTags, sortedTags) {
     if (!Array.isArray(itemTags) || itemTags.length === 0) return [];
-    const order = new Map(sortedTags.map((t, i) => [t, i]));
+    const order = sortedTags instanceof Map ? sortedTags : tagOrderMap(sortedTags);
     const inOrder = [];
     const outOfContext = [];
     for (const tag of itemTags) {
@@ -517,9 +598,29 @@ function sortItemsByTagOrder(items, sortedTags) {
     return keyed.map(k => k.item);
 }
 
-/** Item を参照している Relation 数を返す */
+/** Item を参照している Relation 数を返す（単発呼び出し用） */
 function countRelationsReferencing(state, itemId) {
     return state.relations.filter(r => r.item_id === itemId).length;
+}
+
+/**
+ * 全 Item の被参照数を 1 パスで集計する。
+ *
+ * items を列挙しながら `countRelationsReferencing` を呼ぶと O(items × relations) に
+ * なるうえ、呼び出しごとの state スプレッドで毎回オブジェクトを作ってしまう。
+ * リスト描画ではこちらを 1 回だけ呼ぶ。
+ *
+ * @param {object[]} relations
+ * @returns {Map<string, number>} item_id → 参照している relation 数
+ */
+function countRelationsByItem(relations) {
+    const counts = new Map();
+    for (const rel of relations ?? []) {
+        const id = rel?.item_id;
+        if (!id) continue;
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return counts;
 }
 
 // ---------------------------------------------------------------------------
@@ -610,7 +711,12 @@ function showAllTagsDialog(computeContext, activeTags, favSetGetter, onChange) {
     });
 }
 
-function showManagerDialog(node, getState, applyDraft) {
+/**
+ * @param {string|null} [initialItemId] 開いた直後に選択する item の id。
+ *   ノード上の Relation 行クリックから該当 item を直接編集するために使う。
+ *   該当 item が無ければ従来どおりリスト先頭を選択する。
+ */
+function showManagerDialog(node, getState, applyDraft, initialItemId = null) {
     // draft は Dialog ローカルの「書き換え可能な作業コピー」として扱う。
     // 設計方針:
     //   - 親 state（node._textCatalogState）はイミュータブル更新を厳守する
@@ -629,11 +735,43 @@ function showManagerDialog(node, getState, applyDraft) {
     let searchQuery = "";
     let dirty = false;  // Save 後の追加変更を検知
 
+    /** 選択中のアイテム行の背景色。初回描画と選択変更 fast path で共有する。 */
+    const ROW_SELECTED_BG = "var(--comfy-menu-secondary-bg,#303030)";
+
     // -- レンダリング再構築用ハンドル --
+    /** アイテムリストのスクロールコンテナ。 */
     let leftListEl = null;
+    /** leftListEl の内側で全行分の高さを確保する絶対配置の土台。 */
+    let listCanvasEl = null;
+    /** 該当 0 件のときだけ leftListEl に差し込むメッセージ行。 */
+    let emptyRowEl = null;
+    /**
+     * item_id → 現在マウント済みのリスト行 DOM。選択変更 fast path のハイライト
+     * 付け替えと、再描画時のキー付き再利用の両方がこのマップを参照する。
+     */
+    let rowElsById = new Map();
+    /** アンマウントした行 DOM の再利用プール（行の生成そのものを避ける）。 */
+    const rowPool = [];
+    /** 直近の renderItemList が確定させた表示順。スクロール時の窓計算に使う。 */
+    let visibleItems = [];
+    /** visibleItems と同時に確定する、タグ表示順の索引。 */
+    let rowTagOrder = new Map();
+    /** 現在マウントしている行の範囲 [start, end)。窓が動いたときだけ差分更新する。 */
+    let mountedStart = 0;
+    let mountedEnd   = 0;
+    /** 最後にスクロール位置を合わせた選択 id。選択が外から変わった時だけ追従する。 */
+    let scrolledSelectionId = null;
+    /** リストの可視高の変化（初回レイアウト・ウィンドウリサイズ）を拾う observer。 */
+    let listResizeObserver = null;
     let editorEl   = null;
     let tagFilterRowEl = null;
     let leftTitleEl = null;
+
+    /**
+     * relation の参照数は original.relations から決まり、ダイアログを開いている間は
+     * 変化しない。renderItemList / スクロールのたびに数え直さないよう 1 回だけ作る。
+     */
+    const relationRefCounts = countRelationsByItem(original.relations);
 
     /** 検索クエリ + 選択タグで絞り込んだ items（コンテキスト計算の基準） */
     function getFilteredItems() {
@@ -656,8 +794,10 @@ function showManagerDialog(node, getState, applyDraft) {
         return sortItemsByTagOrder(filtered, sortedTags);
     }
 
-    // 初期選択はリスト表示順の先頭
-    selectedId = getVisibleItems()[0]?.id ?? null;
+    // 初期選択は指定 item、無ければリスト表示順の先頭
+    selectedId = draft.items.some(it => it.id === initialItemId)
+        ? initialItemId
+        : getVisibleItems()[0]?.id ?? null;
 
     function renderTagFilterRow() {
         if (!tagFilterRowEl) return;
@@ -672,50 +812,211 @@ function showManagerDialog(node, getState, applyDraft) {
         renderTagFilter(tagFilterRowEl, ctxFn, activeTagFilter, favSetGetter, () => renderAll());
     }
 
+    // -----------------------------------------------------------------
+    // アイテムリストの描画（行の再利用 + 仮想化）
+    //
+    // 以前は renderItemList が毎回 leftListEl を空にして全行を作り直していた。
+    // MAX_ITEMS=256 では 256 行 × 約 5 要素 ≈ 1300 ノードの再生成になり、
+    // ダイアログのオープンと検索 1 打鍵がそのままこのコストを負っていた。
+    // 対策は 2 段構え:
+    //   1. 仮想化  — 可視範囲 + overscan の行だけを DOM に載せる
+    //   2. 行再利用 — 行 DOM を item_id でキャッシュし、変化した部分だけ書き換える
+    // これでリスト長に比例する DOM 生成が消え、コストは可視行数に比例する。
+    // -----------------------------------------------------------------
+
+    const REF_BADGE_CSS = "font-size:9px;color:#7a9;background:#234;padding:1px 5px;border-radius:8px;flex-shrink:0;";
+    const TAG_BADGE_CSS = "font-size:9px;color:#aab;background:#334;padding:1px 4px;border-radius:6px;flex-shrink:0;";
+
+    /** 空の行 DOM を 1 つ作る。中身は updateRow が後から流し込む。 */
+    function createRow() {
+        const row = h("div",
+            `position:absolute;left:0;right:0;height:${ITEM_ROW_HEIGHT}px;box-sizing:border-box;`
+            + "padding:0 6px;border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:6px;");
+        // 行は使い回されるので、リスナは生成時の item ではなく row._itemId を見る。
+        row._itemId = null;
+        row._sig    = null;
+        row._badges = [];
+        row._nameEl = h("div", "flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;");
+        row.appendChild(row._nameEl);
+
+        row.addEventListener("click", () => {
+            // 選択が変わるだけならリストの中身 (並び順・参照数・タグ) は不変。
+            // ハイライトの付け替えと Editor 再描画だけで済ませる。
+            if (row._itemId === null || row._itemId === selectedId) return;
+            const prevRow = rowElsById.get(selectedId);
+            if (prevRow) prevRow.style.background = "";
+            selectedId = row._itemId;
+            // 可視行のクリックなので、次の再描画でスクロールを動かす必要はない。
+            scrolledSelectionId = selectedId;
+            row.style.background = ROW_SELECTED_BG;
+            renderEditor();
+        });
+        row.addEventListener("mouseenter", () => {
+            if (row._itemId !== selectedId) row.style.background = "var(--comfy-menu-secondary-bg,#2a2a2a)";
+        });
+        row.addEventListener("mouseleave", () => {
+            if (row._itemId !== selectedId) row.style.background = "";
+        });
+        return row;
+    }
+
+    /** row の badge スロット i を指定の見た目に合わせる（無ければ生成して追加）。 */
+    function setBadge(row, i, css, text) {
+        let badge = row._badges[i];
+        if (!badge) {
+            badge = h("span", css, text);
+            badge._css = css;
+            row._badges[i] = badge;
+            row.appendChild(badge);
+            return;
+        }
+        if (badge._css !== css) {
+            badge.style.cssText = css;
+            badge._css = css;
+        }
+        if (badge.textContent !== text) badge.textContent = text;
+        if (badge.style.display === "none") badge.style.display = "";
+    }
+
+    /** used 個目以降の badge スロットを隠す（DOM からは外さず再利用に残す）。 */
+    function hideBadgesFrom(row, used) {
+        for (let i = used; i < row._badges.length; i++) row._badges[i].style.display = "none";
+    }
+
+    /** 行 DOM を index 番目の item の内容・位置に合わせる。 */
+    function updateRow(row, item, index) {
+        row.style.top = `${index * ITEM_ROW_STRIDE}px`;
+
+        const refs = relationRefCounts.get(item.id) ?? 0;
+        const tags = sortItemTagsByContext(item.tags, rowTagOrder).slice(0, 3);
+        // 名前・参照数・表示タグが全部同じなら子要素の書き換えは丸ごと不要。
+        const sig  = `${item.name ?? ""}\u0000${refs}\u0000${tags.join("\u0001")}`;
+        if (row._itemId !== item.id || row._sig !== sig) {
+            row._itemId = item.id;
+            row._sig    = sig;
+            row._nameEl.textContent = item.name || "(unnamed)";
+            let used = 0;
+            if (refs > 0) setBadge(row, used++, REF_BADGE_CSS, `×${refs}`);
+            for (const tag of tags) setBadge(row, used++, TAG_BADGE_CSS, tag);
+            hideBadgesFrom(row, used);
+        }
+        row.style.background = item.id === selectedId ? ROW_SELECTED_BG : "";
+    }
+
+    /** 現在のスクロール位置から、描画すべき行のインデックス範囲 [start, end) を求める。 */
+    function computeRowWindow() {
+        const total = visibleItems.length;
+        if (total === 0) return { start: 0, end: 0 };
+        // DOM 未アタッチ時 / テスト用スタブでは clientHeight が取れないので既定値に落とす。
+        const viewport  = leftListEl.clientHeight || ITEM_LIST_FALLBACK_VIEWPORT;
+        const scrollTop = leftListEl.scrollTop || 0;
+        const first = Math.floor(scrollTop / ITEM_ROW_STRIDE) - ITEM_ROW_OVERSCAN;
+        const last  = Math.ceil((scrollTop + viewport) / ITEM_ROW_STRIDE) + ITEM_ROW_OVERSCAN;
+        return {
+            start: Math.min(Math.max(0, first), total),
+            end:   Math.min(total, Math.max(0, last)),
+        };
+    }
+
+    /** マウント済みの行をすべて外してプールへ戻す。 */
+    function unmountAllRows() {
+        for (const row of rowElsById.values()) {
+            listCanvasEl.removeChild(row);
+            rowPool.push(row);
+        }
+        rowElsById.clear();
+        mountedStart = 0;
+        mountedEnd   = 0;
+    }
+
+    /**
+     * 可視範囲の行だけを DOM に載せ替える。
+     *
+     * @param {boolean} contentChanged リスト内容（並び順・件数・表示文字列）が変わったか。
+     *   false（純粋なスクロール）で窓が動いていなければ何もしない。
+     */
+    function renderRowWindow(contentChanged) {
+        const { start, end } = computeRowWindow();
+        if (!contentChanged && start === mountedStart && end === mountedEnd) return;
+
+        // 新しい窓に入る item_id。ここに無い行は外してプールへ戻す。
+        const keep = new Set();
+        for (let i = start; i < end; i++) keep.add(visibleItems[i].id);
+        for (const [id, row] of rowElsById) {
+            if (keep.has(id)) continue;
+            listCanvasEl.removeChild(row);
+            rowElsById.delete(id);
+            rowPool.push(row);
+        }
+        for (let i = start; i < end; i++) {
+            const item = visibleItems[i];
+            let row = rowElsById.get(item.id);
+            if (!row) {
+                row = rowPool.pop() ?? createRow();
+                rowElsById.set(item.id, row);
+                listCanvasEl.appendChild(row);
+            }
+            updateRow(row, item, i);
+        }
+        mountedStart = start;
+        mountedEnd   = end;
+    }
+
+    /**
+     * 行クリック以外（+ New / Duplicate / Delete など）で選択が動いたとき、
+     * 選択行が可視範囲に入るようスクロールする。仮想化により選択行が DOM 上に
+     * 存在しないことがあるため、ブラウザ任せにはできない。
+     */
+    function ensureSelectionVisible() {
+        if (selectedId === scrolledSelectionId) return;
+        scrolledSelectionId = selectedId;
+        const index = visibleItems.findIndex(it => it.id === selectedId);
+        if (index < 0) return;
+        const viewport  = leftListEl.clientHeight || ITEM_LIST_FALLBACK_VIEWPORT;
+        const scrollTop = leftListEl.scrollTop || 0;
+        const top    = index * ITEM_ROW_STRIDE;
+        const bottom = top + ITEM_ROW_HEIGHT;
+        if (top < scrollTop) leftListEl.scrollTop = top;
+        else if (bottom > scrollTop + viewport) leftListEl.scrollTop = bottom - viewport;
+    }
+
+    /** 該当 0 件メッセージの表示 / 非表示。 */
+    function setEmptyMessage(text) {
+        if (text === null) {
+            if (emptyRowEl) emptyRowEl.style.display = "none";
+            return;
+        }
+        if (!emptyRowEl) {
+            emptyRowEl = h("div", "color:#666;font-size:11px;padding:8px;text-align:center;");
+            leftListEl.appendChild(emptyRowEl);
+        }
+        if (emptyRowEl.textContent !== text) emptyRowEl.textContent = text;
+        emptyRowEl.style.display = "";
+    }
+
     function renderItemList() {
         if (!leftListEl) return;
-        leftListEl.innerHTML = "";
         if (leftTitleEl) {
             leftTitleEl.textContent = `Items (${draft.items.length}/${MAX_ITEMS})`;
         }
 
         const { filtered, sortedTags } = computeContext();
-        if (filtered.length === 0) {
-            leftListEl.appendChild(h("div", "color:#666;font-size:11px;padding:8px;text-align:center;",
-                draft.items.length === 0 ? "No items. Click [+ New] to create one." : "No items match the filter."));
+        rowTagOrder  = tagOrderMap(sortedTags);
+        visibleItems = filtered.length === 0 ? [] : sortItemsByTagOrder(filtered, sortedTags);
+
+        if (visibleItems.length === 0) {
+            unmountAllRows();
+            listCanvasEl.style.height = "0px";
+            setEmptyMessage(draft.items.length === 0
+                ? "No items. Click [+ New] to create one."
+                : "No items match the filter.");
             return;
         }
-        const sorted = sortItemsByTagOrder(filtered, sortedTags);
-
-        for (const it of sorted) {
-            const row = h("div", "padding:5px 6px;border-radius:3px;cursor:pointer;display:flex;align-items:center;gap:6px;");
-            if (it.id === selectedId) {
-                row.style.background = "var(--comfy-menu-secondary-bg,#303030)";
-            }
-            row.addEventListener("click", () => {
-                selectedId = it.id;
-                renderAll();
-            });
-            row.addEventListener("mouseenter", () => {
-                if (it.id !== selectedId) row.style.background = "var(--comfy-menu-secondary-bg,#2a2a2a)";
-            });
-            row.addEventListener("mouseleave", () => {
-                if (it.id !== selectedId) row.style.background = "";
-            });
-
-            const nameEl = h("div", "flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", it.name || "(unnamed)");
-            row.appendChild(nameEl);
-
-            const refs = countRelationsReferencing({ ...original, catalog: draft }, it.id);
-            if (refs > 0) {
-                row.appendChild(h("span", "font-size:9px;color:#7a9;background:#234;padding:1px 5px;border-radius:8px;flex-shrink:0;", `×${refs}`));
-            }
-            const tagsForDisplay = sortItemTagsByContext(it.tags, sortedTags).slice(0, 3);
-            for (const tag of tagsForDisplay) {
-                row.appendChild(h("span", "font-size:9px;color:#aab;background:#334;padding:1px 4px;border-radius:6px;flex-shrink:0;", tag));
-            }
-            leftListEl.appendChild(row);
-        }
+        setEmptyMessage(null);
+        // 全行分の高さを土台に持たせ、スクロールバーの長さを実件数どおりにする。
+        listCanvasEl.style.height = `${visibleItems.length * ITEM_ROW_STRIDE}px`;
+        ensureSelectionVisible();
+        renderRowWindow(true);
     }
 
     function renderEditor() {
@@ -872,6 +1173,10 @@ function showManagerDialog(node, getState, applyDraft) {
         width: 900,        // テキスト入力エリアを広く確保
         maxHeight: "85vh",
         className: "__sax_text_catalog_manager",
+        onClose() {
+            listResizeObserver?.disconnect();
+            listResizeObserver = null;
+        },
         build(dlg, close) {
             // Wildcard リストを Impact-Pack の API から遅延ロード（define_schema 取得失敗時の補完）。
             // 取得後にボタン無効化を再評価するため、完了時 renderEditor を再実行する。
@@ -924,7 +1229,20 @@ function showManagerDialog(node, getState, applyDraft) {
             leftHeader.appendChild(newBtn);
             leftPane.appendChild(leftHeader);
 
-            leftListEl = h("div", "flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;");
+            // 仮想化のため、スクロールコンテナ (leftListEl) と全行分の高さを確保する
+            // 土台 (listCanvasEl) を分ける。行は listCanvasEl に絶対配置され、
+            // 行間は ITEM_ROW_STRIDE で表現するので flex の gap は使わない。
+            leftListEl   = h("div", "flex:1;overflow-y:auto;position:relative;");
+            listCanvasEl = h("div", "position:relative;width:100%;");
+            leftListEl.appendChild(listCanvasEl);
+            leftListEl.addEventListener("scroll", () => renderRowWindow(false));
+            // showDialog は build() の後に overlay を document へ追加するため、初回の
+            // renderItemList 時点では clientHeight が 0 で可視高が測れない。レイアウト確定後
+            // (とウィンドウリサイズ後) に窓を測り直す。
+            if (typeof ResizeObserver !== "undefined") {
+                listResizeObserver = new ResizeObserver(() => renderRowWindow(false));
+                listResizeObserver.observe(leftListEl);
+            }
             leftPane.appendChild(leftListEl);
 
             const manageTagsBtn = h("button", STYLE.btn, "Manage Tags…");
@@ -1189,6 +1507,8 @@ function pickItemForRelation(state, currentItemId, onSelect) {
                 return row;
             };
 
+            // `sortedTags` は配列でも Map でも受け付ける。items ループから呼ぶ側は
+            // tagOrderMap で Map 化したものを渡し、行ごとの Map 再構築を避ける。
             const makeItemRow = (item, isCurrent, sortedTags) => {
                 const row = h("div", "padding:5px 6px;border-radius:3px;display:flex;align-items:center;gap:6px;" +
                     (isCurrent ? "background:var(--comfy-menu-secondary-bg,#303030);" : ""));
@@ -1218,8 +1538,9 @@ function pickItemForRelation(state, currentItemId, onSelect) {
                     return;
                 }
                 const sorted = sortItemsByTagOrder(filtered, sortedTags);
+                const tagOrder = tagOrderMap(sortedTags);
                 for (const it of sorted) {
-                    listEl.appendChild(makeItemRow(it, it.id === currentItemId, sortedTags));
+                    listEl.appendChild(makeItemRow(it, it.id === currentItemId, tagOrder));
                 }
             };
 
@@ -1229,7 +1550,10 @@ function pickItemForRelation(state, currentItemId, onSelect) {
             };
 
             // 検索
-            const searchInput = h("input", STYLE.input + "width:100%;");
+            // dlg は max-height 付きの縦 flex。高さが足りないとき縮むのはリストだけにし、
+            // 検索欄・タグフィルタ行 (overflow:hidden で min-height が 0 になる)・フッターは
+            // flex-shrink:0 で潰れないようにする。リストの下限も画面高に合わせて抑える。
+            const searchInput = h("input", STYLE.input + "width:100%;box-sizing:border-box;flex-shrink:0;");
             searchInput.type = "text";
             searchInput.placeholder = "Search by name or tag…";
             searchInput.addEventListener("input", () => {
@@ -1239,17 +1563,17 @@ function pickItemForRelation(state, currentItemId, onSelect) {
             dlg.appendChild(searchInput);
 
             // タグフィルタ
-            dlg.appendChild(h("div", STYLE.label, "Filter by tags"));
+            dlg.appendChild(h("div", STYLE.label + "flex-shrink:0;", "Filter by tags"));
             tagFilterRowEl = h("div",
-                "display:flex;gap:4px;align-items:center;overflow:hidden;white-space:nowrap;height:22px;");
+                "display:flex;gap:4px;align-items:center;overflow:hidden;white-space:nowrap;height:22px;flex-shrink:0;");
             dlg.appendChild(tagFilterRowEl);
 
             // リスト
-            listEl = h("div", STYLE.pane + "flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;min-height:300px;");
+            listEl = h("div", STYLE.pane + "flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;min-height:min(300px,30vh);");
             dlg.appendChild(listEl);
 
             // フッター
-            const foot = h("div", "display:flex;justify-content:flex-end;margin-top:4px;");
+            const foot = h("div", "display:flex;justify-content:flex-end;margin-top:4px;flex-shrink:0;");
             const cancelBtn = h("button", STYLE.btn + "padding:6px 14px;", "Cancel");
             cancelBtn.addEventListener("click", close);
             foot.appendChild(cancelBtn);
@@ -1266,10 +1590,9 @@ function pickItemForRelation(state, currentItemId, onSelect) {
 // ---------------------------------------------------------------------------
 
 function syncOutputSlots(node, state) {
-    // 構造分岐の唯一点。merged 時は単一ピン "merged"(STRING) のみへ収束させる。
-    // merged 冪等性: 1 本状態での再呼び出しで removeOutput/addOutput が走らない
-    // (= merged ピンのリンク保持) を厳守する。
     if (isMerged(node)) {
+        // merged は常に単一 STRING ピン。1 本状態での再同期では add/remove しないため、
+        // relation の値変更だけでは下流リンクを切断しない。
         while ((node.outputs?.length ?? 0) > 1) {
             node.removeOutput(node.outputs.length - 1);
         }
@@ -1278,6 +1601,7 @@ function syncOutputSlots(node, state) {
         }
         node.outputs[0].name = "merged";
         node.outputs[0].type = "STRING";
+        delete node.outputs[0]._textCatalogStatus;
     } else {
         const relations = state.relations;
         while ((node.outputs?.length ?? 0) > relations.length) {
@@ -1307,59 +1631,63 @@ function syncOutputSlots(node, state) {
 }
 
 /**
- * merge_outputs トグル切替時のハンドラ。
+ * merge_outputs 切替時は出力の意味自体が変わるため、既存リンクを明示切断して
+ * individual / merged のスロット構造を作り直す。
  *
- * 出力の意味が変わる (relation 別ピン ⇔ 単一 merged ピン) ため、意味変化リンクの残存を
- * 防ぐべく全出力を明示切断してから構造を再構築する (ユーザー承認済み)。
- * individual へ戻した場合のみ Coordinator に現状接続を再取り込みさせる
- * (merged→individual で再度ピンを生やすため、link-preserving snapshot を張り直す)。
+ * @param {object} node
+ * @param {boolean} previousMerged callback 発火前に記録していた状態
  */
-function onMergeToggle(node) {
-    // 切替前のトグル状態を退避する。同期フェーズ (clearAllSlots / syncOutputSlots) が
-    // 例外を投げた場合、widget value は既に切替後になっているため、value を旧状態へ戻して
-    // syncOutputSlots を再実行し、widget value と出力スロット構造の齟齬 (回復不能な中途半端
-    // 状態) を防ぐ (Manager Save 経路 A2-1 と対称の best-effort ロールバック)。
+function onMergeToggle(node, previousMerged) {
     const mergeWidget = node.widgets?.find(w => w.name === MERGE_WIDGET_NAME);
-    const prevMerged = Boolean(mergeWidget?.value);
+    const nextMerged = Boolean(mergeWidget?.value);
+    if (nextMerged === Boolean(previousMerged)) return;
+
     const state = node._textCatalogState ?? emptyState();
     try {
         clearAllSlots(node, { inputs: false });
         syncOutputSlots(node, state);
-        if (!isMerged(node)) {
+        if (!nextMerged) {
             const coordinator = ensureCoordinator(node, buildTextCatalogSpec);
             setTimeout(() => coordinator.captureFromExisting(), 0);
         }
-        // syncOutputSlots 内で size 更新済みだが、computeSize 反映を共通 API で明示的に確定する。
         autoResize(node);
     } catch (e) {
-        // best-effort ロールバック: widget value を旧状態へ戻し、その状態で構造を張り直す。
-        // 再例外時は abort せずログのみ (次回トグル操作で回復可能)。切断済みリンクは復元しない
-        // (トグル切替時の切断はユーザー承認済み)。
-        if (mergeWidget) mergeWidget.value = prevMerged;
+        // widget とスロット構造を切替前へ戻す。リンクはモード切替時に意図的に切断済み。
+        if (mergeWidget) mergeWidget.value = Boolean(previousMerged);
         try {
+            clearAllSlots(node, { inputs: false });
             syncOutputSlots(node, state);
             autoResize(node);
         } catch (rollbackError) {
-            console.error("[TextCatalog] onMergeToggle rollback syncOutputSlots failed:", rollbackError);
+            console.error("[TextCatalog] merge_outputs rollback failed:", rollbackError);
         }
         throw e;
     }
 }
 
-/**
- * merge_outputs widget の callback に onMergeToggle をチェーンする (二重 chain ガード付き)。
- * onNodeCreated / onConfigure の両方から呼ぶが、_saxMergeChained フラグで一度だけ適用する。
- */
+/** merge_outputs widget の callback に切替処理を一度だけチェーンする。 */
 function chainMergeToggle(node) {
     const w = node.widgets?.find(w => w.name === MERGE_WIDGET_NAME);
-    if (w && !w._saxMergeChained) {
-        const orig = w.callback;
-        w.callback = function () {
-            orig?.apply(this, arguments);
-            onMergeToggle(node);
-        };
-        w._saxMergeChained = true;
+    if (!w) return;
+
+    // onConfigure が同じ instance に再度走った場合は、復元された現在値を基準値へ同期する。
+    if (w._saxMergeChained) {
+        w._saxMergeLastValue = Boolean(w.value);
+        return;
     }
+
+    const orig = w.callback;
+    w._saxMergeLastValue = Boolean(w.value);
+    w.callback = function () {
+        const previousMerged = Boolean(w._saxMergeLastValue);
+        try {
+            orig?.apply(this, arguments);
+            onMergeToggle(node, previousMerged);
+        } finally {
+            w._saxMergeLastValue = Boolean(w.value);
+        }
+    };
+    w._saxMergeChained = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1431,7 +1759,7 @@ function makeCatalogWidget(node) {
     const getState = () => node._textCatalogState ?? emptyState();
     const coordinator = ensureCoordinator(node, buildTextCatalogSpec);
 
-    const openManager = () => {
+    const openManager = (initialItemId = null) => {
         showManagerDialog(node, getState, (draftCatalog) => {
             const state = getState();
             const validIds = new Set(draftCatalog.items.map(it => it.id));
@@ -1471,9 +1799,27 @@ function makeCatalogWidget(node) {
                 }
                 throw e;
             }
-        });
+        }, initialItemId);
     };
     node._openTextCatalogManager = openManager;
+
+    const pickItem = (relation) => {
+        // picker 表示時の item_id を渡すが、確定時の relations は picker コールバック内で
+        // 再取得する (picker 表示中に他経路で relations が変わった場合の stale closure 回避)。
+        pickItemForRelation(getState(), relation.item_id, (selectedId) => {
+            // 確定時点の最新 state を再取得 (stale closure 回避、CR/TR レビュー M-2 対応)。
+            const currentState = getState();
+            // picker 表示中に対象 relation が他経路で削除されていた場合は no-op で終わる。
+            if (!currentState.relations.includes(relation)) return;
+            // item_id 変更は slot 数不変・type STRING 固定の「値のみ変更」。
+            // relation を in-place 更新して entity identity を維持し、applySaveOnly で保存する
+            // (PrimitiveStore 同型。capture/restore を通さないため下流リンクは保持される。
+            // 新オブジェクト化すると Coordinator の WeakMap snapshot 解決が壊れ切断する)。
+            relation.item_id = selectedId;
+            if (relation.on === undefined || relation.on === null) relation.on = true;
+            coordinator.applySaveOnly(currentState.relations);
+        });
+    };
 
     return makeItemListWidget({
         widgetName: "__sax_text_catalog_widget",
@@ -1483,15 +1829,13 @@ function makeCatalogWidget(node) {
         // フォールバックとして呼ぶ可能性があるため残す。TextCatalog 自身の mutation 経路は
         // beforeModify / saveItemsCapturing / saveItemsValueOnly のみ使用するため通常呼ばれない。
         saveItems: (newRelations) => coordinator.applySaveOnly(newRelations),
-        // beforeModify 経由 (add/del/move): individual は capture 済みスナップショットで restore まで行う。
-        // merged 中は単一ピン前提を壊さないため restore を発火させる applyAfterCapture を回避し applySaveOnly。
+        // individual はリンク保持 restore、merged は単一ピンを維持するため値/構造同期のみ。
         saveItemsCapturing: (newRelations) =>
             isMerged(node)
                 ? coordinator.applySaveOnly(newRelations)
                 : coordinator.applyAfterCapture(newRelations),
-        // beforeModify 非経由 (toggle/onPopup 内など): slot 構造不変、値のみ保存。両モード共通。
+        // beforeModify 非経由 (toggle/onPopup 内など): slot 構造不変、値のみ保存。
         saveItemsValueOnly: (newRelations) => coordinator.applySaveOnly(newRelations),
-        // merged 中は restore 発火 API を一切呼ばない (遮断点の一本化)。individual のみ capture。
         beforeModify: () => { if (!isMerged(node)) coordinator.captureFromExisting(); },
 
         // `hasToggle: true` により行頭 pill が描画され、クリックで `relation.on` がトグルされる。
@@ -1504,29 +1848,19 @@ function makeCatalogWidget(node) {
                 w: 24,
                 get: () => "",
                 format: () => "✎",
-                onPopup: (relation, _idx, _node) => {
-                    // picker 表示時の item_id を渡すが、確定時の relations は picker コールバック内で
-                    // 再取得する (picker 表示中に他経路で relations が変わった場合の stale closure 回避)。
-                    pickItemForRelation(getState(), relation.item_id, (selectedId) => {
-                        // 確定時点の最新 state を再取得 (stale closure 回避、CR/TR レビュー M-2 対応)。
-                        const currentState = getState();
-                        // picker 表示中に対象 relation が他経路で削除されていた場合は no-op で終わる。
-                        if (!currentState.relations.includes(relation)) return;
-                        // item_id 変更は slot 数不変・type STRING 固定の「値のみ変更」。
-                        // relation を in-place 更新して entity identity を維持し、applySaveOnly で保存する
-                        // (PrimitiveStore 同型。capture/restore を通さないため下流リンクは保持される。
-                        // 新オブジェクト化すると Coordinator の WeakMap snapshot 解決が壊れ切断する)。
-                        relation.item_id = selectedId;
-                        if (relation.on === undefined || relation.on === null) relation.on = true;
-                        coordinator.applySaveOnly(currentState.relations);
-                    });
-                },
+                onPopup: (relation) => pickItem(relation),
             },
         ],
 
         content: {
             draw(ctx, relation, x, y, w, rowH, on) {
                 drawRelationContent(ctx, getState(), relation, x, y, w, rowH, on);
+            },
+            // 行のラベル部分クリック: 参照先 item があれば Manager でその item を開いて編集する。
+            // (unset)/<orphan> は編集対象が無いため ✎ と同じ item 選択 picker を開く。
+            onClick(relation) {
+                if (relationStatus(getState(), relation) === "ok") openManager(relation.item_id);
+                else pickItem(relation);
             },
         },
 
@@ -1587,8 +1921,7 @@ app.registerExtension({
 
             addManagerButton(this);
             this.addCustomWidget(makeCatalogWidget(this));
-            // merge_outputs は表示したまま callback に onMergeToggle をチェーンする。
-            // 初期は default individual のため現行フロー通り。
+            // merge_outputs は表示したまま、出力構造切替 callback のみ追加する。
             chainMergeToggle(this);
             this.size[0] = Math.max(this.size[0] ?? 0, 280);
             this.size[1] = 1;
@@ -1616,8 +1949,7 @@ app.registerExtension({
             }
             addManagerButton(this);
             this.addCustomWidget(makeCatalogWidget(this));
-            // merge_outputs は onConfigure の widget filter で除去されないが二重ガードで安全に再チェーン。
-            // merge_outputs.value は configure で復元済みのため isMerged は正しく判定できる。
+            // merge_outputs は表示したまま、出力構造切替 callback のみ追加する。
             chainMergeToggle(this);
             this.size[0] = Math.max(this.size[0] ?? 0, 280);
 
@@ -1642,9 +1974,9 @@ app.registerExtension({
 
             // LiteGraph のリンク復元完了後に Coordinator が現状接続を snapshot に取り込む。
             // setTimeout(0) は LiteGraph link 復元完了待ち (PrimitiveStore L497-499 と同パターン)。
-            // merged 時は entityToSlots 1:1 前提 (relation 1 件 → ピン 1 件) が崩れるため
-            // captureFromExisting をスキップする (単一ピンへ N relation を写像できない)。
             const coordinator = ensureCoordinator(this, buildTextCatalogSpec);
+            // merged は relation N件 → 出力1本で Coordinator の 1:1 前提と一致しないため、
+            // individual のときだけリンク snapshot を取り込む。
             if (!isMerged(this)) {
                 setTimeout(() => {
                     coordinator.captureFromExisting();

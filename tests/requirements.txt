@@ -1,0 +1,14 @@
+# SAX_Bridge のテスト実行に必要な依存。
+# ComfyUI 本体は tests/python/conftest.py がモックするため不要だが、
+# torch / numpy / Pillow はノード実装が実際に import するため本物が要る。
+#
+# CI では torch を CPU ビルドで先に入れる (PyPI の既定 wheel は CUDA 同梱で巨大なため):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r tests/requirements.txt
+#
+# ComfyUI の venv で動かす場合は torch/numpy/Pillow は既に入っているので
+# pytest だけが追加で入る。
+pytest>=8.0
+torch>=2.4
+numpy>=1.24
+Pillow>=10.0

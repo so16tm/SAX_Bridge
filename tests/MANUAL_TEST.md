@@ -445,6 +445,28 @@
 - [ ] **lora**: `lora_name` を実 LoRA に設定 → model/clip に適用され生成結果に反映される
 - [ ] **krea2**: Krea2 Turbo（`diffusion_models/` に krea2、`text_encoders/` に qwen3vl_4b、`vae/` に qwen_image_vae）を選択し steps=8 / cfg=1.0 目安で実行 → ログに `clip_type auto-detected: CLIPType.KREA2` が出力され、空 latent (4ch) が 16ch へ自動適応されてエラーなく画像生成される
 
+### L-5. Qwen-Image 2.1 (workflows/20_qwen_image_21.json)
+
+事前準備: [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1) の `qwen_image_2.1_*.safetensors`（diffusion_models）・`qwen3vl_8b_*.safetensors`（text_encoders）・`qwen_image_2.1_vae_bf16.safetensors`（vae）を配置し、`CHANGE_ME_*` を差し替える。Qwen-Image 2.1 対応版の ComfyUI が必要。
+
+- [ ] **t2i**: そのまま実行 → 1024×1024 の画像が生成される（2048×2048 にならない）
+- [ ] **i2i**: `SAX Qwen Image Prompt` の `image_1` に LoadImage を接続し編集指示で実行 → 出力サイズが image_1 の縮小後サイズになり、編集結果が得られる
+- [ ] **multi**: `image_2` 以降にも画像を接続し `<image1>` `<image2>` を含む指示で実行 → 複数画像を参照した結果になる
+- [ ] **batch**: Loader の `batch_size=2` で i2i → 2 枚生成される
+- [ ] **rgba**: 「This is an RGBA format image with transparency. ... transparent background.」形式のプロンプトで t2i、PNG 保存 → アルファ付きで保存される
+
+### L-6. MiniMax H3 (workflows/21_minimax_h3.json)
+
+事前準備: ComfyUI 0.30.0 以降と [MiniMaxH3-Director](https://github.com/seesee75-commits/ComfyUI-MiniMaxH3-Director) を導入し、[Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) の FL2VA（diffusion_models）・Qwen3-VL 32B（text_encoders）・映像 VAE / 音声 VAE（vae）を配置する。ファイル名が違う場合は SAX MiniMax H3 Loader で選び直す。
+
+- [ ] **defaults**: ファイルを配置してノードを新規追加 → `unet_name` / `clip_name` / `vae_name` / `audio_vae_name` が H3 のファイルに初期選択される
+- [ ] **t2v**: Director のタイムラインにプロンプトを入れて実行 → 音声付きの動画が保存され、映像にノイズが乗っていない
+- [ ] **i2v**: Director のメイントラックに画像を置き（Refs OFF）実行 → 画像が先頭フレームになる
+- [ ] **ref2va**: `ref_unet_name` に REF2VA を選び Director の Refs を ON、参照画像を置いて実行 → 参照が反映される
+- [ ] **single model**: `ref_unet_name=None` のまま Refs OFF で実行 → 警告なく生成できる（REF2VA は読み込まれない）
+- [ ] **turbo lora**: `lora_name` に FL2V turbo 4-step LoRA、`steps=4` で実行 → 4 ステップで生成できる（`ref_lora_name` は REF2VA 側に別途指定）
+- [ ] **pipe**: Sampler の `PIPE` に SAX Output 等を繋ぐ → 生成後のフレームサイズが `loader_settings` に反映される
+
 ## M. UI Phase 1.2.A 検証 (TextCatalog Coordinator 移行)
 
 ### M-1. TextCatalog clone smoke (workflows/text_catalog_clone_smoke.json)
@@ -475,6 +497,7 @@
 任意のワークフローで TextCatalog の出力スロットを後続ノードに接続した状態で以下を確認する。
 
 - [ ] **onPopup（Item 再割当）**: Relation 行の `[✎]` で Item を別のものに変更 → 下流接続が維持される
+- [ ] **行クリック編集**: Relation 行のラベル部分をクリック → その Item が選択された状態で Manager が開く。`(unset)` / `<orphan>` 行では Item 選択が開く
 - [ ] **Manager Save（item 削除）**: Manager Dialog で参照中 Item を削除して `[Save]` → 当該 Relation が `(unset)` 表示になり、かつ下流接続が維持される
 - [ ] **孤立スロット表示**: `<orphan>` 表示の Relation も出力スロット自体は残存し、接続されていれば維持される
 
@@ -505,3 +528,17 @@ LiteGraph / ComfyUI がサブグラフ折畳 / undo / redo 時に `onNodeRemoved
 
 - [ ] サブグラフ折畳時に `onNodeRemoved` が発火しても、遅延再確認により source が削除されないことを DevTools console で確認
 - [ ] undo 時に `onNodeRemoved` が発火しても、遅延再確認により source が削除されないことを確認
+
+### N-6. Node Collector 出力接続維持（下流が動的入力ノード）
+
+Node Collector に上流ノードを 2 つ以上登録し、その**出力スロットすべて**を `SAX Prompt Concat`
+（Autogrow = 動的入力ノード）の入力へ接続した状態で以下を確認する。
+自動テストは `tests/integration/node_collector_downstream_link.test.mjs` で担保しているが、
+実 LiteGraph の `removeOutput` / `disconnectInput` 挙動は実機でのみ確証できるため本シナリオを残す。
+
+- [ ] **スロット選択変更**: ソース行をクリック → スロット選択ダイアログで 1 つ外して `Apply` → 外したスロットの接続だけが切れ、残りの接続と下流の入力スロット数が維持される
+- [ ] **ソース並べ替え**: ソース行の ▲ / ▼ で並べ替え → 出力ピンの順序が入れ替わっても各接続が元の下流入力へ追従し、下流の入力スロットが縮まない
+- [ ] **ソース追加**: `+ Add Source` で別ノードを追加 → 既存の接続がすべて不変のまま出力ピンだけが末尾に増える
+- [ ] **ソース削除**: ソース行の [✕] → 削除したソース分の接続だけが切れ、残るソースの接続が維持される
+- [ ] **上流スロット改名**: 上流ノードの出力スロット名を変更（自動 rebuild が走る）→ 下流接続が維持される
+- [ ] **下流が静的入力の場合**: 下流を通常ノード（固定入力）にしても上記がすべて同様に維持される

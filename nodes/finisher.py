@@ -5,11 +5,10 @@ Detailer / Upscaler の後に配置し、最終画像にポストエフェクト
 すべての効果は 0 でバイパスされるため、不要な効果は無効化できる。
 """
 import torch
-import torch.nn.functional as F
 
 from comfy_api.latest import io
 
-from .noise import SAXNoiseEngine
+from .noise import SAXNoiseEngine, unsharp_mask
 from .io_types import PipeLine
 
 
@@ -23,10 +22,12 @@ def _apply_color_correction(rgb: torch.Tensor, reference: torch.Tensor, strength
     """
     eps = 1e-6
     reference = reference.to(device=rgb.device, dtype=rgb.dtype)
-    if reference.shape[0] not in (1, rgb.shape[0]):
-        raise ValueError("[SAX_Bridge] Finisher: reference batch must be 1 or match image batch.")
-    ref_mean = reference.mean(dim=(2, 3), keepdim=True)
-    ref_std = reference.std(dim=(2, 3), keepdim=True, correction=0).clamp(min=eps)
+    # バッチ数が違う参照画像はブロードキャストできず RuntimeError になる。
+    # 1 枚ならそのままブロードキャストさせ、それ以外はバッチ方向も畳んで
+    # 「参照画像全体の平均的な色調」を基準にする。
+    ref_dims = (2, 3) if reference.shape[0] in (1, rgb.shape[0]) else (0, 2, 3)
+    ref_mean = reference.mean(dim=ref_dims, keepdim=True)
+    ref_std = reference.std(dim=ref_dims, keepdim=True, correction=0).clamp(min=eps)
     src_mean = rgb.mean(dim=(2, 3), keepdim=True)
     src_std = rgb.std(dim=(2, 3), keepdim=True, correction=0).clamp(min=eps)
 
@@ -42,19 +43,14 @@ def _apply_smooth(rgb: torch.Tensor, strength: float, sigma: float = 1.0) -> tor
 
 
 def _apply_sharpen(rgb: torch.Tensor, strength: float, sigma: float) -> torch.Tensor:
-    """Unsharp Mask シャープ化。(B, C, H, W) float32"""
+    """Unsharp Mask シャープ化。(B, C, H, W) float32
+
+    strength=0 は「無補正」なので入力をそのまま返す (clamp も掛けない)。
+    本体は Detailer と同じ separable 実装を共有する。
+    """
     if strength <= 0.0:
         return rgb
-    kernel_size = max(3, int(6 * sigma + 1) | 1)
-    x = torch.arange(kernel_size, dtype=rgb.dtype, device=rgb.device) - kernel_size // 2
-    g = torch.exp(-0.5 * (x / sigma) ** 2)
-    g = g / g.sum()
-    kernel = (g.unsqueeze(0) * g.unsqueeze(1)).unsqueeze(0).unsqueeze(0)
-    kernel = kernel.expand(rgb.shape[1], 1, kernel_size, kernel_size).contiguous()
-    pad = kernel_size // 2
-    blurred = F.conv2d(F.pad(rgb, (pad, pad, pad, pad), mode="replicate"), kernel,
-                       groups=rgb.shape[1])
-    return torch.clamp(rgb + strength * (rgb - blurred), 0.0, 1.0)
+    return unsharp_mask(rgb, strength, sigma)
 
 
 def _apply_bloom(rgb: torch.Tensor, intensity: float, threshold: float = 0.7,

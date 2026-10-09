@@ -2,7 +2,12 @@
 
 import pytest
 from unittest.mock import MagicMock
-from nodes.pipe import SAX_Bridge_Pipe, SAX_Bridge_Pipe_Switcher, N_SWITCH_PIPES
+from nodes.pipe import (
+    N_SWITCH_PIPES,
+    SAX_Bridge_Pipe,
+    SAX_Bridge_Pipe_Switcher,
+    explode_pipe,
+)
 
 
 class TestPipeExecuteNewPipe:
@@ -313,3 +318,48 @@ class TestPipeSwitcherLoaderSettingsExpansion:
             slot=0, pipe1=None, pipe2=None, pipe3=None, pipe4=None, pipe5=None,
         )
         assert len(result.args) == 16
+
+
+class TestPipeOutputContract:
+    """SAX Pipe と SAX Pipe Switcher は同じ 16 出力を同じ順で返す。
+
+    片方だけ出力を足す／並べ替えると下流のリンクが 1 つずれるため、
+    スキーマと分解ロジックの両方を突き合わせる。
+    """
+
+    def test_both_nodes_declare_identical_outputs(self):
+        a = [(o.id, type(o).__name__) for o in SAX_Bridge_Pipe.define_schema().outputs]
+        b = [(o.id, type(o).__name__) for o in SAX_Bridge_Pipe_Switcher.define_schema().outputs]
+        assert a == b
+
+    def test_explode_length_matches_schema(self):
+        outputs = SAX_Bridge_Pipe.define_schema().outputs
+        # PIPE 本体を除いた残りが explode_pipe の要素数
+        assert len(explode_pipe({})) == len(outputs) - 1
+
+    def test_explode_reads_expected_keys(self):
+        pipe = {
+            "model": "M", "positive": "P", "negative": "N", "samples": "L",
+            "vae": "V", "clip": "C", "images": "I", "seed": 7,
+            "loader_settings": {
+                "steps": 20, "cfg": 8.0, "sampler_name": "euler",
+                "scheduler": "normal", "denoise": 1.0,
+                "optional_sampler": "os", "optional_sigmas": "sg",
+            },
+        }
+        assert explode_pipe(pipe) == (
+            "M", "P", "N", "L", "V", "C", "I", 7,
+            20, 8.0, "euler", "normal", 1.0, "os", "sg",
+        )
+
+    def test_explode_tolerates_missing_loader_settings(self):
+        assert explode_pipe({"model": "M"})[0] == "M"
+        assert explode_pipe({"model": "M"})[8] is None
+
+    def test_explode_tolerates_none_loader_settings(self):
+        """loader_settings が None の pipe でも AttributeError にしない。"""
+        assert explode_pipe({"loader_settings": None})[8] is None
+
+    def test_switcher_with_none_loader_settings(self):
+        result = SAX_Bridge_Pipe_Switcher.execute(slot=1, pipe1={"model": "M", "loader_settings": None})
+        assert result.args[1] == "M"
