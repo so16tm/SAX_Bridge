@@ -3,6 +3,72 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from nodes.cache import SAX_Bridge_Cache
+import torch
+from types import SimpleNamespace
+from nodes.cache_impl import deepcache as dc
+
+
+def _fake_unet_executor(monkeypatch):
+    model = SimpleNamespace(
+        input_blocks=["input"] * 3, output_blocks=["output"] * 3,
+        middle_block=None, model_channels=1, time_embed=lambda x: x,
+        num_classes=None, default_num_video_frames=None, predict_codebook_ids=False,
+        out=lambda x: x,
+    )
+    monkeypatch.setattr(dc, "timestep_embedding", lambda t, *a, **k: t)
+    monkeypatch.setattr(dc, "apply_control", lambda h, *a: h)
+    monkeypatch.setattr(dc, "forward_timestep_embed", lambda block, h, *a, **k: h if block == "input" else h.sum(dim=1, keepdim=True))
+    executor = MagicMock(return_value="native")
+    executor.class_obj = model
+    state = dc.DeepCacheState(3, 0.0, 0.0, 1)
+    state.prepare_sampling(5)
+    return executor, state
+
+
+def test_negative_first_cfg_uses_positive_hidden_cache(monkeypatch):
+    executor, state = _fake_unet_executor(monkeypatch)
+    opts = {"deepcache_state": state, "cond_or_uncond": [1, 0]}
+    context = torch.zeros(2, 1, 1)
+    dc.deepcache_diffusion_model_wrapper(executor, torch.tensor([10., 1.]).view(2, 1, 1, 1), torch.tensor([5., 5.]), context, transformer_options=opts)
+    result = dc.deepcache_diffusion_model_wrapper(executor, torch.tensor([9., 2.]).view(2, 1, 1, 1), torch.tensor([4., 4.]), context, transformer_options=opts)
+    assert result.flatten().tolist() == [40., 5.]
+    assert state.cfg_skipped == 1
+
+
+@pytest.mark.parametrize("change", ["conditioning", "batch", "order"])
+def test_changed_evaluation_does_not_reuse_hidden_cache(monkeypatch, change):
+    executor, state = _fake_unet_executor(monkeypatch)
+    opts = {"deepcache_state": state, "cond_or_uncond": [0]}
+    x = torch.ones(1, 1, 1, 1)
+    context = torch.ones(1, 1, 1)
+    dc.deepcache_diffusion_model_wrapper(executor, x, torch.tensor([5.]), context, transformer_options=opts)
+    if change == "conditioning":
+        context = context * 2
+    elif change == "batch":
+        x, context = x.repeat(2, 1, 1, 1), context.repeat(2, 1, 1)
+    else:
+        opts["cond_or_uncond"] = [1]
+    dc.deepcache_diffusion_model_wrapper(executor, x * 2, torch.full((x.shape[0],), 4.), context, transformer_options=opts)
+    assert state.steps_cached == 0
+    assert state.steps_computed == 2
+    assert state.cached_negative is None
+
+
+@pytest.mark.parametrize("incompatible", ["dit", "controlnet", "patch", "pag"])
+def test_unsupported_forward_delegates_to_native(monkeypatch, incompatible):
+    executor, state = _fake_unet_executor(monkeypatch)
+    opts = {"deepcache_state": state}
+    control = None
+    if incompatible == "dit":
+        del executor.class_obj.input_blocks
+    elif incompatible == "controlnet":
+        control = {"input": []}
+    elif incompatible == "patch":
+        opts["patches"] = {"middle_block_after_patch": [lambda x: x]}
+    else:
+        opts["patches_replace"] = {"attn1": {("middle", 0): lambda x: x}}
+    assert dc.deepcache_diffusion_model_wrapper(executor, torch.ones(1, 1, 1, 1), torch.ones(1), torch.ones(1, 1, 1), control=control, transformer_options=opts) == "native"
+    executor.assert_called_once()
 
 
 class TestCacheExecute:

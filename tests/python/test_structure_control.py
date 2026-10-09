@@ -73,6 +73,20 @@ def _cn_mocks():
     return control_net, loader, apply_node
 
 
+@pytest.mark.parametrize("start,end", [(0.8, 0.2), (0.5, 0.5), (-0.1, 1.), (0., 1.1), (float("nan"), 1.)])
+def test_structure_lock_rejects_empty_or_invalid_sampling_range(start, end):
+    with pytest.raises(ValueError, match="start_percent < end_percent"):
+        SAX_Bridge_Structure_Lock.execute({}, "union_cn.safetensors", "tile", 0.6, start, end)
+
+
+def test_pipe_structure_settings_reject_reversed_range():
+    _, loader, apply_node = _cn_mocks()
+    with patch("nodes.structure_control.nodes.ControlNetLoader", return_value=loader, create=True), patch("nodes.structure_control.nodes.ControlNetApplyAdvanced", return_value=apply_node, create=True):
+        with pytest.raises(ValueError, match="start_percent < end_percent"):
+            apply_structure_control_cfg(_make_cfg(start_percent=0.8, end_percent=0.2), [], [], _make_images(), object())
+    apply_node.apply_controlnet.assert_not_called()
+
+
 class TestSetUnionControlType:
     def _assert_mode_maps_to(self, monkeypatch, mode: str, expected: int) -> None:
         # Arrange

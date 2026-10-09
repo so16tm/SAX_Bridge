@@ -14,6 +14,15 @@ from nodes.loader_diffusion import (
 from nodes.io_types import _APPLIED_LORAS_KEY, _normalize_lora_name
 
 
+def test_diffusion_model_name_is_available_to_output_templates():
+    model, clip, vae = MagicMock(), MagicMock(), MagicMock()
+    with patch("nodes.loader_diffusion.comfy.sd.load_diffusion_model", return_value=model), patch("nodes.loader_diffusion.comfy.sd.load_clip", return_value=clip), patch("nodes.loader_diffusion.comfy.sd.VAE", return_value=vae):
+        pipe = SAX_Bridge_Loader_Diffusion.execute(**_default_kwargs(unet_name="style/diffusion.safetensors"))[0]
+    from nodes.output import _pipe_to_meta, _expand_filename
+    import datetime
+    assert _expand_filename("{model}", _pipe_to_meta(pipe), datetime.datetime(2026, 1, 1)) == "diffusion"
+
+
 def _get_full_path(folder, name):
     """folder 別に区別可能なパスを返す side_effect。
 

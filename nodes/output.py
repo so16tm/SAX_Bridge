@@ -60,8 +60,8 @@ def _expand_template(
     return re.sub(r"\{([^}]+)\}", replace, template)
 
 
-# ファイル名として使用できない文字を置換（パスセパレータは除く）
-_UNSAFE_FILENAME = re.compile(r'[<>:"|?*]')
+# ファイル名のパスセパレータ・制御文字も置換し、保存先ディレクトリ内に留める
+_UNSAFE_FILENAME = re.compile(r'[<>:"|?*\\/\x00-\x1f]')
 # ディレクトリパスセグメントとして使用できない文字を置換
 _UNSAFE_SEGMENT = re.compile(r'[<>:"|?*\\\0]')
 
@@ -205,6 +205,7 @@ class SAX_Bridge_Output(io.ComfyNode):
             ),
             category="SAX/Bridge/Output",
             is_output_node=True,
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo, io.Hidden.unique_id],
             inputs=[
                 io.Boolean.Input("save", default=True,
                     tooltip="True to save. False for preview only."),
@@ -275,7 +276,9 @@ class SAX_Bridge_Output(io.ComfyNode):
                 logger.info(f"[SAX_Bridge] Output: saved → {filepath}")
 
         next_index = filename_index + 1 if save else filename_index
-        return io.NodeOutput(src, ui={"filename_index": [next_index]})
+        node_id = getattr(cls.hidden, "unique_id", None)
+        preview = _write_preview_images(src, f"sax_output_{node_id}_", 1024)
+        return io.NodeOutput(src, ui={"filename_index": [next_index], "images": preview})
 
 
 class SAX_Bridge_Image_Preview(io.ComfyNode):
@@ -320,43 +323,50 @@ class SAX_Bridge_Image_Preview(io.ComfyNode):
         if images is None:
             return io.NodeOutput(ui={"images": []})
 
-        temp_dir = folder_paths.get_temp_directory()
         node_id = getattr(cls, "hidden", None)
         node_id = node_id.unique_id if node_id else None
         prefix = f"sax_preview_{node_id}_" if node_id else "sax_preview_"
 
-        for old in glob.glob(os.path.join(temp_dir, f"{prefix}*.webp")):
-            try:
-                os.remove(old)
-            except OSError:
-                pass
-
-        max_px  = cls._PREVIEW_MAX_PX.get(preview_quality)
-        results = []
-
-        for i in range(images.shape[0]):
-            frame  = images[i]
-            img_np = (frame.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
-
-            if img_np.shape[-1] == 1:
-                pil_img = Image.fromarray(img_np[..., 0], mode="L").convert("RGB")
-            else:
-                pil_img = Image.fromarray(img_np)
-
-            if max_px is not None:
-                w, h = pil_img.size
-                long_edge = max(w, h)
-                if long_edge > max_px:
-                    scale   = max_px / long_edge
-                    pil_img = pil_img.resize(
-                        (max(1, round(w * scale)), max(1, round(h * scale))),
-                        Image.LANCZOS,
-                    )
-
-            filename = f"{prefix}{uuid.uuid4().hex[:12]}.webp"
-            filepath = os.path.join(temp_dir, filename)
-            pil_img.save(filepath, format="WEBP", quality=85)
-
-            results.append({"filename": filename, "subfolder": "", "type": "temp"})
-
+        results = _write_preview_images(images, prefix, cls._PREVIEW_MAX_PX.get(preview_quality))
         return io.NodeOutput(ui={"images": results})
+
+
+def _write_preview_images(images, prefix: str, max_px: int | None) -> list[dict]:
+    """保存先が絶対パスの場合も、ComfyUI の temp 参照でプレビューを提供する。"""
+    temp_dir = folder_paths.get_temp_directory()
+    os.makedirs(temp_dir, exist_ok=True)
+
+    for old in glob.glob(os.path.join(temp_dir, f"{prefix}*.webp")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+
+    results = []
+
+    for i in range(images.shape[0]):
+        frame  = images[i]
+        img_np = (frame.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+
+        if img_np.shape[-1] == 1:
+            pil_img = Image.fromarray(img_np[..., 0], mode="L").convert("RGB")
+        else:
+            pil_img = Image.fromarray(img_np)
+
+        if max_px is not None:
+            w, h = pil_img.size
+            long_edge = max(w, h)
+            if long_edge > max_px:
+                scale   = max_px / long_edge
+                pil_img = pil_img.resize(
+                    (max(1, round(w * scale)), max(1, round(h * scale))),
+                    Image.LANCZOS,
+                )
+
+        filename = f"{prefix}{uuid.uuid4().hex[:12]}.webp"
+        filepath = os.path.join(temp_dir, filename)
+        pil_img.save(filepath, format="WEBP", quality=85)
+
+        results.append({"filename": filename, "subfolder": "", "type": "temp"})
+
+    return results

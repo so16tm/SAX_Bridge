@@ -7,6 +7,10 @@ from nodes.output import SAX_Bridge_Output, SAX_Bridge_Image_Preview
 from nodes.detailer import SAX_Bridge_Detailer, SAX_Bridge_Detailer_Enhanced
 from nodes.sampler import SAX_Bridge_KSampler
 from nodes.loader import SAX_Bridge_Loader, SAX_Bridge_Loader_Lora
+from nodes.loader_diffusion import SAX_Bridge_Loader_Diffusion
+from nodes.structure_lock import SAX_Bridge_Structure_Lock
+from nodes.mask_adjust import SAX_Bridge_Mask_Adjust
+from nodes.text_catalog import SAX_Bridge_Text_Catalog
 from nodes.pipe import SAX_Bridge_Pipe, SAX_Bridge_Pipe_Switcher
 from nodes.finisher import SAX_Bridge_Finisher
 from nodes.noise import SAX_Bridge_Noise_Image, SAX_Bridge_Noise_Latent
@@ -19,6 +23,7 @@ from nodes.image_collector import SAX_Bridge_Image_Collector
 from nodes.primitive_store import SAX_Bridge_Primitive_Store
 from nodes.sam3 import SAX_Bridge_Loader_SAM3, SAX_Bridge_Segmenter_Multi
 from nodes.debug import (
+    SAX_Bridge_Debug_Controller,
     SAX_Bridge_Assert,
     SAX_Bridge_Assert_Pipe,
     SAX_Bridge_Debug_Inspector,
@@ -26,6 +31,11 @@ from nodes.debug import (
 )
 
 ALL_V3_NODES = [
+    SAX_Bridge_Mask_Adjust,
+    SAX_Bridge_Loader_Diffusion,
+    SAX_Bridge_Structure_Lock,
+    SAX_Bridge_Text_Catalog,
+    SAX_Bridge_Debug_Controller,
     SAX_Bridge_Guidance,
     SAX_Bridge_Prompt,
     SAX_Bridge_Prompt_Concat,

@@ -395,15 +395,15 @@ def _order_records(
     edges = _build_graph(prompt)
     sorted_ids = _topological_sort(prompt, edges)
 
-    record_map: dict[str, dict[str, Any]] = {}
+    record_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for rec in records:
         if rec["node_id"] != "?":
-            record_map[rec["node_id"]] = rec
+            record_map[rec["node_id"]].append(rec)
 
     ordered: list[dict[str, Any]] = []
     for nid in sorted_ids:
         if nid in record_map:
-            ordered.append(record_map[nid])
+            ordered.extend(record_map[nid])
 
     # sorted_ids に含まれなかった記録も追加（node_id="?" や孤立ノード）
     seen = {r["node_id"] for r in ordered}
@@ -443,7 +443,7 @@ def _write_jsonl(
         logger.warning("JSONL output skipped: folder_paths unavailable")
         return None
 
-    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     filepath = debug_dir / f"sax_debug_{ts}.jsonl"
 
     try:

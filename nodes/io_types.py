@@ -1,4 +1,5 @@
 import os
+import folder_paths
 
 from comfy_api.latest import io
 
@@ -17,8 +18,10 @@ _APPLIED_LORAS_KEY = "_applied_loras"
 
 
 def _normalize_lora_name(name: str) -> str:
-    """LoRA名をパス末尾のファイル名（拡張子なし）に正規化する"""
-    return os.path.splitext(os.path.basename(name))[0]
+    """LoRA名を拡張子なしの相対パスへ正規化し、同名の別フォルダを区別する。"""
+    normalized = name.replace("\\", "/")
+    stem, extension = os.path.splitext(normalized)
+    return stem if extension.lower() in folder_paths.supported_pt_extensions else normalized
 
 
 def filter_new_loras(pipe: dict, loras: list) -> list:

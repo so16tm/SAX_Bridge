@@ -183,6 +183,7 @@ class SAX_Bridge_Loader_Diffusion(io.ComfyNode):
             "images": None,
             "seed": seed,
             "loader_settings": {
+                "ckpt_name": unet_name,
                 "steps": steps,
                 "cfg": cfg,
                 "sampler_name": sampler_name,

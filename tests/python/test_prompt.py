@@ -1,9 +1,65 @@
 """SAX_Bridge_Prompt ノードのテスト。"""
 
 import pytest
+import torch
 from unittest.mock import MagicMock, patch
 from nodes.prompt import SAX_Bridge_Prompt, _encode_with_break
 from nodes.io_types import filter_new_loras, record_applied_loras
+from nodes.prompt import _resolve_lora_name, _apply_loras
+
+
+def test_resolve_lora_prefers_exact_path_and_does_not_suffix_match(monkeypatch):
+    monkeypatch.setattr("nodes.prompt.folder_paths.get_filename_list", lambda _: ["other/foo.safetensors", "style/wrongfoo.safetensors", "style/foo.safetensors"])
+    assert _resolve_lora_name("style/foo.safetensors") == "style/foo.safetensors"
+    assert _resolve_lora_name("foo.safetensors") == "other/foo.safetensors"
+    monkeypatch.setattr("nodes.prompt.folder_paths.get_filename_list", lambda _: ["style/wrongfoo.safetensors"])
+    assert _resolve_lora_name("foo.safetensors") is None
+
+
+def test_lora_tracking_uses_resolved_path_and_deduplicates(monkeypatch):
+    monkeypatch.setattr("nodes.prompt._resolve_lora_name", lambda _: "style/foo.safetensors")
+    monkeypatch.setattr("nodes.prompt.folder_paths.get_full_path", lambda *a: "exists")
+    lora = ("foo", 1., 1., None, None, None, "default")
+    loader = MagicMock()
+    loader.load_lora.return_value = ("model", "clip")
+    monkeypatch.setattr("nodes.prompt.nodes.LoraLoader", lambda: loader)
+    assert _apply_loras("model", "clip", [lora, lora])[2] == ["style/foo.safetensors"]
+    loader.load_lora.assert_called_once()
+    loader.reset_mock()
+    assert _apply_loras("model", "clip", [lora], {"style/foo"})[2] == []
+    loader.load_lora.assert_not_called()
+
+
+def test_break_concatenates_extra_token_data(monkeypatch):
+    clip = MagicMock()
+    clip.layer_idx = None
+    clip.cond_stage_model.named_modules.return_value = []
+    clip.cond_stage_model.encode_token_weights.side_effect = [
+        (torch.ones(1, 2, 4), None, {"attention_mask": torch.tensor([[1, 0]]), "t5xxl_ids": torch.tensor([2, 3]), "t5xxl_weights": torch.tensor([1., 0.5])}),
+        (torch.ones(1, 3, 4), None, {"attention_mask": torch.tensor([[1, 1, 0]]), "t5xxl_ids": torch.tensor([4, 5, 6]), "t5xxl_weights": torch.tensor([1., 1., 1.])}),
+    ]
+    concat = MagicMock()
+    concat.concat.side_effect = lambda old, new: ([[torch.cat((old[0][0], new[0][0]), dim=1), old[0][1].copy()]],)
+    monkeypatch.setattr("nodes.prompt.ConditioningConcat", lambda: concat)
+    result = _encode_with_break(clip, "first BREAK second")
+    assert result[0][0].shape == (1, 5, 4)
+    assert result[0][1]["attention_mask"].tolist() == [[1, 0, 1, 1, 0]]
+    assert result[0][1]["t5xxl_ids"].tolist() == [2, 3, 4, 5, 6]
+    assert result[0][1]["t5xxl_weights"].tolist() == [1., 0.5, 1., 1., 1.]
+
+
+def test_vbar_attributes_restored_without_adding_missing_keys():
+    clip = MagicMock()
+    clip.layer_idx = None
+    module = torch.nn.Linear(1, 1)
+    module._v = object()
+    original = module._v
+    clip.cond_stage_model.named_modules.return_value = [("linear", module)]
+    clip.cond_stage_model.encode_token_weights.side_effect = RuntimeError("encode failed")
+    with pytest.raises(RuntimeError, match="encode failed"):
+        _encode_with_break(clip, "hello")
+    assert module._v is original
+    assert "_v_signature" not in module.__dict__
 
 
 class TestFilterNewLoras:
@@ -28,7 +84,7 @@ class TestFilterNewLoras:
         assert result[0][0] == "new_one.safetensors"
 
     def test_path_normalization(self):
-        pipe = {"_applied_loras": {"my_lora"}}
+        pipe = {"_applied_loras": {"subdir/my_lora"}}
         loras = [("subdir/my_lora.safetensors", 1.0, 1.0, None, None, None, "default")]
         assert filter_new_loras(pipe, loras) == []
 

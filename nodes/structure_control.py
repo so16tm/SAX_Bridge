@@ -12,6 +12,7 @@ Detailer / Upscaler が消費点で CN をロード・適用する
 VAE encode/decode は一切呼ばない（構造ヒントは pixel 空間で渡す）。
 """
 import logging
+import math
 import threading
 from dataclasses import dataclass
 from typing import Callable, Protocol
@@ -69,6 +70,13 @@ _HINT_FALLBACK_CHAINS = {
 
 # strength の実行時クランプ上限（UI の max と一致）
 _MAX_STRUCTURE_STRENGTH = 1.5
+
+
+def validate_structure_range(start_percent: float, end_percent: float) -> None:
+    """適用区間が空になる設定を、ノード入力と既存pipe設定の双方で拒否する。"""
+    if not (math.isfinite(start_percent) and math.isfinite(end_percent)
+            and 0.0 <= start_percent < end_percent <= 1.0):
+        raise ValueError("[SAX_Bridge] StructureControl: expected 0 <= start_percent < end_percent <= 1.")
 
 # 検出器系ヒントは controlnet_aux 依存のため遅延 import（tile は依存ゼロを維持）
 try:
@@ -484,6 +492,7 @@ def _apply_standard_cn(
     strength = max(0.0, min(float(cfg.get("strength", 0.6)), _MAX_STRUCTURE_STRENGTH))
     start_percent = float(cfg.get("start_percent", _START_PERCENT))
     end_percent = float(cfg.get("end_percent", _END_PERCENT))
+    validate_structure_range(start_percent, end_percent)
 
     effective_mode: str | None = None
     hint: torch.Tensor | None = None

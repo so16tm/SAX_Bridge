@@ -396,3 +396,60 @@ class TestLatentPersistent:
         max_n = max(norms)
         min_n = min(norms)
         assert (max_n - min_n) / max_n < 0.3
+
+
+class TestDetailerRegression:
+    def test_soft_mask_is_not_discarded(self):
+        images = torch.zeros(1, 32, 32, 3)
+        mask = torch.full((1, 32, 32), 0.25)
+        vae = _make_vae()
+        vae.decode.side_effect = lambda t: torch.ones(1, 32, 32, 3)
+        with patch("nodes.detailer.nodes.common_ksampler", side_effect=_mock_ksampler):
+            result = _run_detail_loop(vae=vae, images=images, mask=mask, **_common_kwargs())
+        assert result is not None
+        assert torch.allclose(result, torch.full_like(images, 0.25))
+
+    def test_single_mask_expands_to_image_batch_for_preprocess(self):
+        images = torch.rand(2, 32, 32, 3)
+        vae = _make_vae()
+        with patch("nodes.detailer.nodes.common_ksampler", side_effect=_mock_ksampler):
+            result = _run_detail_loop(
+                vae=vae, images=images, mask=torch.ones(1, 32, 32),
+                shadow_enhance=0.5, **_common_kwargs(),
+            )
+        assert result.shape == images.shape
+
+    def test_rgba_alpha_preserved_after_vae_decode(self):
+        images = torch.rand(1, 32, 32, 4)
+        original = images.clone()
+        vae = _make_vae()
+        kwargs = _common_kwargs()
+        kwargs["blend_feather"] = 5
+        with patch("nodes.detailer.nodes.common_ksampler", side_effect=_mock_ksampler):
+            result = _run_detail_loop(vae=vae, images=images, **kwargs)
+        assert result.shape == images.shape
+        assert torch.equal(result[..., 3], original[..., 3])
+        assert torch.equal(images, original)
+
+    def test_incompatible_mask_batch_rejected(self):
+        with pytest.raises(ValueError, match="mask batch"):
+            _run_detail_loop(vae=_make_vae(), images=torch.rand(1, 32, 32, 3),
+                             mask=torch.ones(2, 32, 32), **_common_kwargs())
+
+
+    def test_video_noise_preserves_latent_batch_with_frame_masks(self):
+        images = torch.zeros(3, 32, 32, 3)
+        vae = MagicMock()
+        vae.encode.return_value = torch.zeros(1, 4, 2, 4, 4)
+        vae.decode.return_value = torch.ones(1, 3, 32, 32, 3)
+        seen = []
+        def sampler(*args, **kwargs):
+            seen.append(args[8]["samples"].shape)
+            return ({"samples": args[8]["samples"]},)
+        with patch("nodes.detailer.nodes.common_ksampler", side_effect=sampler):
+            result = _run_detail_loop(
+                vae=vae, images=images, mask=torch.ones(3, 32, 32),
+                latent_noise_intensity=0.1, **_common_kwargs(),
+            )
+        assert seen == [torch.Size([1, 4, 2, 4, 4])]
+        assert result.shape == images.shape

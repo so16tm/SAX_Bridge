@@ -113,7 +113,7 @@ def get_bbox_from_mask(mask: torch.Tensor, padding: int = 0):
     if len(mask.shape) == 4:
         mask = mask.squeeze(1)
 
-    ys, xs = torch.where(mask > 0.5)[-2:]
+    ys, xs = torch.where(mask > 0)[-2:]
     if len(ys) == 0:
         return None
 
@@ -172,7 +172,11 @@ def uncrop_and_blend(original: torch.Tensor, cropped: torch.Tensor, mask: torch.
         crop_mask = feathered_mask.permute(0, 2, 3, 1)
 
     target_area = result[:, y_min:y_max+1, x_min:x_max+1, :]
-    blended_area = target_area * (1.0 - crop_mask) + cropped * crop_mask
+    channels = cropped.shape[-1]
+    blended_area = target_area[..., :channels] * (1.0 - crop_mask) + cropped * crop_mask
+    # VAE が復元しない Alpha 等は、丸め誤差を含むブレンドを通さず保持する。
+    if channels < target_area.shape[-1]:
+        blended_area = torch.cat([blended_area, target_area[..., channels:]], dim=-1)
     result[:, y_min:y_max+1, x_min:x_max+1, :] = torch.clamp(blended_area, 0.0, 1.0)
 
     return result
@@ -268,7 +272,7 @@ def _add_latent_noise(
         lat_noise = torch.randn(t.shape, generator=generator, dtype=t.dtype, device='cpu')
     else:
         lat_noise = torch.rand(t.shape, generator=generator, dtype=t.dtype, device='cpu') * 2.0 - 1.0
-    # ノイズは T 次元も独立乱数。mask は全フレーム共通の空間マスクとして broadcast される
+    # ノイズは T 次元も独立乱数。複数フレームの mask は latent の時間軸へ補間する。
     mask = broadcast_mask_to_latent(noise_mask, t)
     return t + lat_noise.to(t.device) * latent_noise_intensity * mask
 
@@ -304,7 +308,18 @@ def _run_detail_loop(
     if mask is None:
         b, h, w, c = images.shape
         mask = torch.ones((b, h, w), dtype=torch.float32, device=images.device)
-    elif mask.shape[1] != images.shape[1] or mask.shape[2] != images.shape[2]:
+    elif mask.ndim == 2:
+        mask = mask.unsqueeze(0)
+    elif mask.ndim == 4 and mask.shape[1] == 1:
+        mask = mask.squeeze(1)
+    if mask.ndim != 3:
+        raise ValueError("[SAX_Bridge] Detailer: mask must have shape (B, H, W).")
+    mask = mask.to(device=images.device, dtype=torch.float32).clamp(0.0, 1.0)
+    if mask.shape[0] == 1 and images.shape[0] > 1:
+        mask = mask.expand(images.shape[0], -1, -1)
+    elif mask.shape[0] != images.shape[0]:
+        raise ValueError("[SAX_Bridge] Detailer: mask batch must be 1 or match image batch.")
+    if mask.shape[1] != images.shape[1] or mask.shape[2] != images.shape[2]:
         mask = F.interpolate(
             mask.unsqueeze(1).float(),
             size=(images.shape[1], images.shape[2]),

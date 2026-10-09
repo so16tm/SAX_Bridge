@@ -7,6 +7,7 @@ VAE には依存しない純粋なテンソル形状操作のみを置く。
 from typing import Callable
 
 import torch
+import torch.nn.functional as F
 
 
 def apply_spatial_4d(
@@ -39,5 +40,10 @@ def broadcast_mask_to_latent(mask_bhw: torch.Tensor, latent: torch.Tensor) -> to
     """(B, H, W) 空間マスクを latent(4D/5D) にブロードキャスト可能な形へ整える。
 
     4D latent: (B, 1, H, W) / 5D latent: (B, 1, 1, H, W)。
+    単一動画に複数フレームのマスクがある場合は、ComfyUI reshape_mask と同じ
+    時間軸解釈と補間で (1, 1, T, H, W) に整える。
     """
+    if latent.ndim == 5 and latent.shape[0] == 1 and mask_bhw.shape[0] > 1:
+        frame_mask = mask_bhw.unsqueeze(0).unsqueeze(0)
+        return F.interpolate(frame_mask, size=latent.shape[2:], mode="trilinear", align_corners=False)
     return insert_temporal_if_5d(mask_bhw.unsqueeze(1), latent)

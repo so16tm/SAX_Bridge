@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Any
+import torch
 
 import folder_paths
 import nodes
@@ -8,7 +9,7 @@ from nodes import ConditioningConcat
 from comfy_api.latest import io
 
 from .picker_options import get_lora_options, get_wildcard_options
-from .io_types import PipeLine, filter_new_loras, record_applied_loras
+from .io_types import PipeLine, _APPLIED_LORAS_KEY, _normalize_lora_name, filter_new_loras, record_applied_loras
 
 
 logger = logging.getLogger("SAX_Bridge")
@@ -29,23 +30,6 @@ def _get_impact_wildcards():
             "Wildcard expansion will be skipped."
         )
         return None
-
-
-_lora_name_cache = None
-_lora_cache_mtime = 0.0
-
-
-def _get_lora_folders_mtime() -> float:
-    """LoRA フォルダ群の最新更新時刻を返す"""
-    try:
-        mtimes = [
-            os.path.getmtime(p)
-            for p in folder_paths.get_folder_paths("loras")
-            if os.path.isdir(p)
-        ]
-        return max(mtimes) if mtimes else 0.0
-    except OSError:
-        return 0.0
 
 
 def _encode_with_break(clip: Any, text: str) -> list:
@@ -78,10 +62,7 @@ def _encode_with_break(clip: Any, text: str) -> list:
         d = m.__dict__
         if "_v" in d:
             saved_modules.append((m, {
-                "_v": d["_v"],
-                "_v_signature": d.get("_v_signature"),
-                "_v_weight": d.get("_v_weight"),
-                "_v_bias": d.get("_v_bias"),
+                key: d[key] for key in ("_v", "_v_signature", "_v_weight", "_v_bias") if key in d
             }))
             del d["_v"]
 
@@ -99,8 +80,18 @@ def _encode_with_break(clip: Any, text: str) -> list:
             # CLIP (SD1.5/SDXL) は len(o)==2 のため挙動不変。
             if len(o) > 2:
                 cond_dict.update(o[2])
+            clip.add_hooks_to_dict(cond_dict)
             conditioning = [[cond, cond_dict]]
-            result = concat_node.concat(result, conditioning)[0] if result else conditioning
+            if result:
+                previous = result[0][1]
+                result = concat_node.concat(result, conditioning)[0]
+                # 本体ConditioningConcatは埋め込みのみ連結し、追加token情報を
+                # 最初のチャンクのまま残す。Anima等では全チャンク分が必要。
+                for key in ("attention_mask", "t5xxl_ids", "t5xxl_weights"):
+                    if key in previous and key in cond_dict:
+                        result[0][1][key] = torch.cat((previous[key], cond_dict[key]), dim=-1)
+            else:
+                result = conditioning
 
         return result
     finally:
@@ -109,13 +100,14 @@ def _encode_with_break(clip: Any, text: str) -> list:
             m.__dict__.update(saved)
 
 
-def _apply_loras(model, clip, loras):
+def _apply_loras(model, clip, loras, applied_loras=()):
     """
     extract_lora_values で取得した LoRA リストを適用する。
     loras: [(lora_name, model_weight, clip_weight, lbw, lbw_a, lbw_b, loader), ...]
     戻り値: (model, clip, applied_names) — applied_names は実際に適用できたLoRA名のリスト
     """
     applied_names = []
+    applied_keys = set(applied_loras)
     for lora_name, model_weight, clip_weight, lbw, lbw_a, lbw_b, loader in loras:
         lora_name_ext = lora_name.split(".")
         if ("." + lora_name_ext[-1]) not in folder_paths.supported_pt_extensions:
@@ -131,6 +123,10 @@ def _apply_loras(model, clip, loras):
 
         if path is None:
             logger.warning("[SAX_Bridge] LORA NOT FOUND: %s", orig_lora_name)
+            continue
+
+        key = _normalize_lora_name(lora_name)
+        if key in applied_keys:
             continue
 
         logger.info(
@@ -170,25 +166,28 @@ def _apply_loras(model, clip, loras):
             applied = True
 
         if applied:
-            applied_names.append(orig_lora_name)
+            applied_names.append(lora_name)
+            applied_keys.add(key)
 
     return model, clip, applied_names
 
 
 def _resolve_lora_name(name):
     """LoRA 名を解決する（フォルダ更新時に自動で再スキャン）"""
-    global _lora_name_cache, _lora_cache_mtime
     if os.path.exists(name):
         return name
+    # 本体のキャッシュはサブフォルダのmtimeまで追跡する。
+    # rootだけのmtimeによる独自キャッシュでは子フォルダへの追加を見逃す。
+    lora_names = folder_paths.get_filename_list("loras")
 
-    current_mtime = _get_lora_folders_mtime()
-    if _lora_name_cache is None or current_mtime > _lora_cache_mtime:
-        _lora_name_cache = folder_paths.get_filename_list("loras")
-        _lora_cache_mtime = current_mtime
-
-    for x in _lora_name_cache:
-        if x.endswith(name):
+    normalized = name.replace("\\", "/")
+    for x in lora_names:
+        if x.replace("\\", "/") == normalized:
             return x
+    if "/" not in normalized:
+        for x in lora_names:
+            if x.replace("\\", "/").rsplit("/", 1)[-1] == normalized:
+                return x
 
     return None
 
@@ -250,7 +249,7 @@ class SAX_Bridge_Prompt(io.ComfyNode):
         new_loras = filter_new_loras(pipe, loras)
         applied_names = []
         if new_loras:
-            model, clip, applied_names = _apply_loras(model, clip, new_loras)
+            model, clip, applied_names = _apply_loras(model, clip, new_loras, pipe.get(_APPLIED_LORAS_KEY, ()))
 
         conditioning = _encode_with_break(clip, clean_text)
 
@@ -352,7 +351,7 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         new_loras = filter_new_loras(pipe, loras)
         applied_names = []
         if new_loras:
-            model, clip, applied_names = _apply_loras(model, clip, new_loras)
+            model, clip, applied_names = _apply_loras(model, clip, new_loras, pipe.get(_APPLIED_LORAS_KEY, ()))
 
         conditioning = _encode_with_break(clip, clean_text)
 

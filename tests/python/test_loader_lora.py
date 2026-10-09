@@ -231,3 +231,23 @@ class TestLoaderLoraImmutability:
             )
         assert pipe["model"] is orig_model
         assert result.args[0] is not pipe
+
+
+def test_duplicate_entry_applied_once_without_mutating_input_tracking():
+    pipe = _make_pipe(applied=[])
+    entries = [{"lora": "sub/a.safetensors"}, {"lora": "sub/a.safetensors"}, {"lora": "other/a.safetensors"}]
+    p, loader = _patch_lora_loader()
+    with p:
+        result = SAX_Bridge_Loader_Lora.execute(pipe, True, json.dumps(entries))
+    assert loader.load_lora.call_count == 2
+    assert pipe[_APPLIED_LORAS_KEY] == set()
+    assert result[0][_APPLIED_LORAS_KEY] == {"sub/a", "other/a"}
+
+
+@pytest.mark.parametrize("bad", [None, 42, "bad", {"lora": None}, {"lora": "x", "strength": None}, {"lora": "x", "strength": "NaN"}])
+def test_malformed_entry_does_not_prevent_remaining_loras(bad):
+    p, loader = _patch_lora_loader()
+    with p:
+        result = SAX_Bridge_Loader_Lora.execute(_make_pipe(), True, json.dumps([bad, {"lora": "good.safetensors"}]))
+    loader.load_lora.assert_called_once()
+    assert result[0][_APPLIED_LORAS_KEY] == {"good"}

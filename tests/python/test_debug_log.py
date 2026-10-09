@@ -311,6 +311,10 @@ class TestFormatFlowReport:
 
 
 class TestOrderRecords:
+    def test_repeated_node_executions_are_all_preserved(self):
+        records = [self._make_record("1", "First"), self._make_record("1", "Second")]
+        assert _order_records(records, {"1": {"inputs": {}}}) == records
+
     def _make_record(self, node_id, display_name="Node"):
         return {
             "node_id": node_id,

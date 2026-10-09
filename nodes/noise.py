@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from comfy_api.latest import io
-from .latent_utils import insert_temporal_if_5d
+from .latent_utils import broadcast_mask_to_latent
 
 
 class SAXNoiseEngine:
@@ -31,6 +31,7 @@ class SAXNoiseEngine:
         kernel_1d = torch.exp(-(x**2) / (2 * sigma**2))
         kernel_1d = kernel_1d / kernel_1d.sum()
 
+        kernel_1d = kernel_1d.to(dtype=tensor.dtype)
         kernel_1d_h = kernel_1d.view(1, 1, -1, 1)
         kernel_1d_w = kernel_1d.view(1, 1, 1, -1)
 
@@ -40,8 +41,9 @@ class SAXNoiseEngine:
         kernel_1d_h = kernel_1d_h.repeat(channels, 1, 1, 1)
         kernel_1d_w = kernel_1d_w.repeat(channels, 1, 1, 1)
 
-        result = F.conv2d(tensor, kernel_1d_h, padding=(pad, 0), groups=channels)
-        result = F.conv2d(result, kernel_1d_w, padding=(0, pad), groups=channels)
+        # 画像外をゼロと扱うと、一様画像・全面マスクの端まで暗化する。
+        result = F.conv2d(F.pad(tensor, (0, 0, pad, pad), mode="replicate"), kernel_1d_h, groups=channels)
+        result = F.conv2d(F.pad(result, (pad, pad, 0, 0), mode="replicate"), kernel_1d_w, groups=channels)
         return result
 
     @staticmethod
@@ -140,6 +142,7 @@ class SAXNoiseEngine:
                 processed_mask, size=(h, w), mode="bilinear", align_corners=False
             )
         processed_mask = processed_mask.to(device=device)
+        processed_mask = cls._adjust_mask_batch(processed_mask, b).to(dtype=dtype)
         processed_mask = torch.clamp(processed_mask, 0.0, 1.0)
 
         noise = cls.generate_noise(img_tensor.shape, noise_type, seed, device, dtype)
@@ -200,7 +203,7 @@ class SAX_Bridge_Noise_Image(io.ComfyNode):
         else:
             processed_mask = torch.ones((b, 1, h, w), device=device, dtype=dtype)
 
-        processed_mask = processed_mask.to(device=device)
+        processed_mask = processed_mask.to(device=device, dtype=dtype)
 
         noise = SAXNoiseEngine.generate_noise(
             img_tensor.shape, noise_type, seed, device, dtype, color_mode=color_mode
@@ -257,13 +260,14 @@ class SAX_Bridge_Noise_Latent(io.ComfyNode):
             if processed_mask.shape[2] != h or processed_mask.shape[3] != w:
                 processed_mask = F.interpolate(processed_mask, size=(h, w), mode="area")
                 processed_mask = torch.clamp(processed_mask, min=0.0, max=1.0)
-            processed_mask = SAXNoiseEngine._adjust_mask_batch(processed_mask, b)
+            is_frame_mask = latent_tensor.ndim == 5 and b == 1 and processed_mask.shape[0] > 1
+            if not is_frame_mask:
+                processed_mask = SAXNoiseEngine._adjust_mask_batch(processed_mask, b)
             processed_mask = processed_mask.to(device=device, dtype=dtype)
         else:
             processed_mask = torch.ones((b, 1, h, w), device=device, dtype=dtype)
 
-        # 5次元 latent には時間軸 singleton を挿入してブロードキャストさせる
-        processed_mask = insert_temporal_if_5d(processed_mask, latent_tensor)
+        processed_mask = broadcast_mask_to_latent(processed_mask.squeeze(1), latent_tensor)
 
         noise = SAXNoiseEngine.generate_noise(latent_tensor.shape, noise_type, seed, device, dtype)
         result_tensor = latent_tensor + (noise * intensity * processed_mask)

@@ -11,6 +11,7 @@ VRAM管理は ComfyUI ModelPatcher 経由で行い、モデルの共有を可能
 import gc
 import json
 import logging
+import math
 import os
 from typing import Dict
 
@@ -493,7 +494,28 @@ class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
         except (json.JSONDecodeError, ValueError):
             segments = []
 
-        enabled = [s for s in segments if s.get("on", True)]
+        enabled = []
+        for entry in segments:
+            if not isinstance(entry, dict) or not entry.get("on", True):
+                continue
+            try:
+                prompt = entry.get("prompt", "")
+                mode = entry.get("mode", "positive")
+                threshold = float(entry.get("threshold", 0.2))
+                presence_weight = float(entry.get("presence_weight", 0.5))
+                grow = int(entry.get("mask_grow", 0))
+                if not isinstance(prompt, str) or mode not in ("positive", "negative"):
+                    raise ValueError("invalid prompt or mode")
+                if not all(math.isfinite(v) and 0.0 <= v <= 1.0 for v in (threshold, presence_weight)):
+                    raise ValueError("threshold and presence_weight must be finite values in [0, 1]")
+                if not -512 <= grow <= 512:
+                    raise ValueError("mask_grow must be in [-512, 512]")
+            except (TypeError, ValueError, OverflowError) as exc:
+                logger.warning("[SAX_Bridge] Segmenter: skipping invalid entry: %s", exc)
+                continue
+            if prompt.strip():
+                enabled.append(dict(prompt=prompt, mode=mode, threshold=threshold,
+                                    presence_weight=presence_weight, mask_grow=grow))
 
         img_h, img_w = images.shape[1], images.shape[2]
 
@@ -501,7 +523,7 @@ class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
             logger.info("[SAX_Bridge] Segmenter: no enabled entries, returning zero mask")
             empty_mask = torch.zeros(images.shape[0], img_h, img_w)
             # 画像はそのままプレビューとして返す
-            return (empty_mask, images)
+            return io.NodeOutput(empty_mask, images)
 
         comfy.model_management.load_models_gpu([sam3_model])
         processor    = sam3_model.processor
@@ -575,7 +597,9 @@ class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
         preview_mask_combined = torch.stack(batch_preview_masks).cpu()
 
         if mask is not None:
-            m = mask
+            m = mask.float()
+            if m.ndim != 3 or m.shape[0] not in (1, result_mask.shape[0]):
+                raise ValueError("[SAX_Bridge] Segmenter: ROI mask batch must be 1 or match image batch.")
             # バッチ次元を合わせる
             if m.shape[0] == 1 and result_mask.shape[0] > 1:
                 m = m.expand(result_mask.shape[0], -1, -1)
@@ -615,7 +639,7 @@ class SAX_Bridge_Segmenter_Multi(io.ComfyNode):
         preview_images = base_img * (1.0 - apply_alpha) + colormap_rgb * apply_alpha
 
         if images.shape[-1] == 4:  # RGBA の場合は Alpha ch を維持
-            preview_images = torch.cat([preview_images, images[..., 3:]], dim=-1)
+            preview_images = torch.cat([preview_images, images[..., 3:].to(preview_images)], dim=-1)
 
         preview_images = preview_images.clamp(0.0, 1.0)
 

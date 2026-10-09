@@ -1,7 +1,37 @@
 """SAX_Bridge_Noise_Image / SAX_Bridge_Noise_Latent ノードのテスト。"""
 
 import torch
+import pytest
 from nodes.noise import SAX_Bridge_Noise_Image, SAX_Bridge_Noise_Latent
+from nodes.noise import SAXNoiseEngine
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+def test_blur_preserves_uniform_input_and_dtype(dtype):
+    image = torch.ones((2, 3, 8, 8), dtype=dtype)
+    result = SAXNoiseEngine.gaussian_blur(image, 1.0)
+    assert result.dtype == dtype
+    assert torch.allclose(result, image, atol=0.01)
+
+
+def test_shared_noise_engine_matches_mask_batch_to_image_batch():
+    image = torch.full((3, 8, 8, 3), 0.5)
+    mask = torch.stack([torch.zeros(8, 8), torch.ones(8, 8)])
+    result = SAXNoiseEngine.apply_noise(image, mask, 0.2, seed=2)
+    assert result.shape == image.shape
+    assert torch.equal(result[0], image[0])
+    assert not torch.equal(result[2], image[2])
+
+
+def test_video_noise_uses_frame_masks_without_changing_batch():
+    samples = {"samples": torch.zeros(1, 4, 3, 2, 2)}
+    mask = torch.stack([torch.zeros(2, 2), torch.ones(2, 2)])
+    result = SAX_Bridge_Noise_Latent.execute(samples, 0.2, "gaussian", 5, 0, 0, mask)[0]["samples"]
+    assert result.shape == samples["samples"].shape
+    assert torch.count_nonzero(result[:, :, 0]) == 0
+    noise = SAXNoiseEngine.generate_noise(result.shape, "gaussian", 5, result.device, result.dtype)
+    assert torch.allclose(result[:, :, 1], noise[:, :, 1] * 0.1)
+    assert torch.allclose(result[:, :, 2], noise[:, :, 2] * 0.2)
 
 
 def _make_image(b=1, h=16, w=16, c=3, seed=0):

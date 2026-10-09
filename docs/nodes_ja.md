@@ -801,7 +801,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 ### SAX Assert
 
-`SAX_Bridge_Assert` — 任意の値が期待条件を満たすかを検証するノードです。不一致時にワークフロー全体を停止させるか、warning ログを出すだけかを `stop_on_fail` で選択できます。
+`SAX_Bridge_Assert` — 任意の値が期待条件を満たすかを検証するノードです。検証結果をノード UI とログへ表示します。失敗や評価エラーでもワークフローは停止しません。
 
 **入力**
 
@@ -811,7 +811,6 @@ applied_loras: {'lora_a'} (1 entries)
 | `mode` | Combo | assertion モード（下表参照） |
 | `expected` | String | 期待値（mode に応じて自動パース） |
 | `label` | String | UI 表示用ラベル |
-| `stop_on_fail` | Boolean | True: 失敗時に RuntimeError / False: warning ログのみ |
 
 **出力**: なし（ノード UI に PASS/FAIL 表示、PASS=緑 / FAIL=赤 / ERROR=橙の枠線）
 
@@ -848,9 +847,9 @@ applied_loras: {'lora_a'} (1 entries)
 |-----------|-----|------|
 | `value` | ANY | 対象（通常は PIPE_LINE） |
 | `path` | String | ドット区切りパス（例: `loader_settings.steps`） |
-| `mode` / `expected` / `label` / `stop_on_fail` | — | SAX Assert と同一 |
+| `mode` / `expected` / `label` | — | SAX Assert と同一 |
 
-**path 解決ルール**: 各セグメントを `dict[key]` → `getattr` → `value[int(seg)]`（インデックス）の順に試行。解決失敗時は `RuntimeError` に available keys/attrs を含めて送出します。
+**path 解決ルール**: 各セグメントを `dict[key]` → `getattr` → `value[int(seg)]`（インデックス）の順に試行。解決失敗時は available keys/attrs を含む ERROR を UI とログへ表示します。
 
 **出力**: なし（ノード UI に PASS/FAIL 表示）
 

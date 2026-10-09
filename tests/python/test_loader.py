@@ -57,6 +57,14 @@ class TestLoaderBasic:
         assert pipe["seed"] == 777
         assert seed_out == 777
 
+    def test_model_name_is_available_to_output_templates(self):
+        model, clip, vae = _make_checkpoint_mocks()
+        with patch("nodes.loader.comfy.sd.load_checkpoint_guess_config", return_value=(model, clip, vae, None)):
+            pipe = SAX_Bridge_Loader.execute(**_default_kwargs(ckpt_name="style/model.safetensors"))[0]
+        from nodes.output import _pipe_to_meta, _expand_filename
+        import datetime
+        assert _expand_filename("{model}", _pipe_to_meta(pipe), datetime.datetime(2026, 1, 1)) == "model"
+
     def test_pipe_has_empty_conditioning_placeholders(self):
         model, clip, vae = _make_checkpoint_mocks()
         with patch("nodes.loader.comfy.sd.load_checkpoint_guess_config",

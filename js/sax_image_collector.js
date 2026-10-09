@@ -83,12 +83,10 @@ const SOURCE_SPEC = {
     },
 };
 
-// Image_Collector は hasOutputSlots=false のため Coordinator の snapshot は空。
-// それでも mutate() トランザクション経由で構造変更することで、
-// TODO 6 (_captureDownstream 削除) 後も既存挙動を維持する。
+// 管理対象は入力ソースのみ。固定出力は source 増減に依存せず接続を保持する。
 function buildImageCollectorSpec(node) {
     return {
-        direction:         "output",
+        direction:         "input",
         getEntities:       () => node._remoteSources ?? [],
         setEntities:       (newSources) => { node._remoteSources = newSources; },
         // 1:N (slotCount 個の IMAGE slot)。hints は使用しない。
@@ -101,7 +99,7 @@ function buildImageCollectorSpec(node) {
         },
         // 構造同期は makeSourceListWidget 内 (action 内 _syncSlotLabels) で完結するため no-op。
         syncSlotStructure: () => {},
-        // Image_Collector は enabledSlots 編集機能なし → 段階1/2 fallback 不要、段階3 採用。
+        // input 方向では出力 snapshot / restore を行わないため resolver は不要。
         resolveLocalSlotBySlotName: null,
         resolveLocalSlotByGlobalIdx: null,
     };

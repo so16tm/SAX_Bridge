@@ -1699,7 +1699,12 @@ export function makeSourceListWidget(spec, coordinator) {
         }
         if (!src) return;
 
-        if (oldSource) mergeSourceAnchors(oldSource, src);
+        if (oldSource) {
+            mergeSourceAnchors(oldSource, src);
+            // Coordinator が記録した source identity を rebuild 後も保持する。
+            Object.assign(oldSource, src);
+            src = oldSource;
+        }
 
         src.sig = _sourceSignature(srcNode);
 
@@ -2189,14 +2194,15 @@ export function makeSourceListWidget(spec, coordinator) {
         }, 0);
     }
 
-    // updater は coordinator.mutate トランザクション外で実行される。
-    // capture は rebuildAllSources(→ coordinator.mutate) 先頭で updater 実行後の sources
-    // を基準に取得するため、呼出元で追加の coordinator.mutate ラップは不要 (二重 mutate を避ける)。
     function modifySource(node, srcIdx, updater) {
         const sources = _getSources(node);
         if (srcIdx < 0 || srcIdx >= sources.length) return;
-        try { updater(sources[srcIdx]); } catch (e) { console.warn(`[${widgetName}] modifySource updater error:`, e); return; }
-        rebuildAllSources(node);
+        _triggerReconcileIfMissing(node);
+        // enabledSlots を変更する前の物理ピン対応で capture する。
+        coordinator.mutate(() => {
+            updater(sources[srcIdx]);
+            _rebuildInner(node, [...sources]);
+        });
     }
 
     // B1: Collector 自身の削除時に pending timer 解除 + 登録解除を行う。

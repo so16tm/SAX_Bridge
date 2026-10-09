@@ -338,3 +338,28 @@ class TestUpscalerExecute:
         args, _ = mock_upscale.call_args
         assert args[1] == expected_size  # target_w
         assert args[2] == expected_size  # target_h
+
+
+class TestUpscalerAlphaRegression:
+    def test_img2img_preserves_alpha(self):
+        images = torch.rand(1, 16, 16, 4)
+        vae = MagicMock()
+        vae.encode.return_value = torch.zeros(1, 4, 2, 2)
+        vae.decode.return_value = torch.zeros(1, 16, 16, 3)
+        pipe = dict(images=images, vae=vae, model=MagicMock(), positive="positive", negative="negative")
+        with patch("nodes.common_ksampler", return_value=({"samples": vae.encode.return_value},)):
+            result = SAX_Bridge_Upscaler.execute(pipe, "None", "bilinear", 1.0, 0.5)
+        assert result[1].shape == images.shape
+        assert torch.equal(result[1][..., 3], images[..., 3])
+
+    def test_esrgan_receives_rgb_and_keeps_alpha(self):
+        from nodes.upscaler import _esrgan_upscale
+        images = torch.rand(1, 16, 16, 4)
+        engine = MagicMock()
+        engine.upscale.return_value = (torch.zeros(1, 32, 32, 3),)
+        with patch("comfy_extras.nodes_upscale_model.ImageUpscaleWithModel", return_value=engine), \
+             patch("comfy.utils.common_upscale", return_value=torch.full((1, 1, 32, 32), 0.7)):
+            result = _esrgan_upscale(MagicMock(), images, 32, 32, "bilinear")
+        assert engine.upscale.call_args.args[1].shape[-1] == 3
+        assert result.shape == (1, 32, 32, 4)
+        assert torch.allclose(result[..., 3], torch.full((1, 32, 32), 0.7))

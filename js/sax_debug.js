@@ -65,9 +65,10 @@ function makeDebugTextWidget() {
 
 function detectStatus(text) {
     if (!text) return "neutral";
-    if (text.includes("PASS")) return "pass";
-    if (text.includes("ERROR")) return "error";
-    if (text.includes("FAIL")) return "fail";
+    // label / actual に含まれる語ではなく、backend の結果フィールドを読む。
+    if (/^\[[\s\S]*\] PASS$/.test(text)) return "pass";
+    if (/^\[[\s\S]*\] FAIL: mode=/.test(text)) return "fail";
+    if (/^\[SAX Assert(?: Pipe)?\] "[\s\S]*" ERROR:/.test(text)) return "error";
     return "neutral";
 }
 

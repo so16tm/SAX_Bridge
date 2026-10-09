@@ -10,7 +10,7 @@ import folder_paths
 from comfy_api.latest import io
 
 from .io_types import PipeLine
-from .structure_control import _VALID_LOCK_MODES, set_structure_control
+from .structure_control import _VALID_LOCK_MODES, set_structure_control, validate_structure_range
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -85,6 +85,7 @@ class SAX_Bridge_Structure_Lock(io.ComfyNode):
         end_percent: float = 1.0,
     ) -> io.NodeOutput:
         # 配置した = 有効化の明示意図。不正設定は消費点まで遅延させず配置時点で fail-fast する。
+        validate_structure_range(start_percent, end_percent)
         if mode not in _VALID_LOCK_MODES:
             raise ValueError(
                 f"[SAX_Bridge] Structure Lock: unknown mode '{mode}'. "

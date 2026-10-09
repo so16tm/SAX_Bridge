@@ -34,13 +34,16 @@ def _esrgan_upscale(upscale_model, images: torch.Tensor, target_h: int, target_w
     images: (B, H, W, C) float32
     """
     from comfy_extras.nodes_upscale_model import ImageUpscaleWithModel
-    upscaled = ImageUpscaleWithModel().upscale(upscale_model, images)[0]  # (B, H', W', C)
+    upscaled = ImageUpscaleWithModel().upscale(upscale_model, images[..., :3])[0]
 
     if upscaled.shape[1] != target_h or upscaled.shape[2] != target_w:
         bchw = upscaled.permute(0, 3, 1, 2)
         bchw = comfy.utils.common_upscale(bchw, target_w, target_h, method, "disabled")
         upscaled = bchw.permute(0, 2, 3, 1)
 
+    if images.shape[-1] > 3:
+        extra_channels = _pixel_upscale(images[..., 3:], target_h, target_w, method)
+        upscaled = torch.cat([upscaled, extra_channels], dim=-1)
     return upscaled
 
 
@@ -195,7 +198,15 @@ class SAX_Bridge_Upscaler(io.ComfyNode):
                     samples_dict,
                     denoise=denoise,
                 )
-                upscaled = decode_image(p["vae"], sampler_result[0]["samples"])
+                decoded = decode_image(p["vae"], sampler_result[0]["samples"])
+                if upscaled.shape[-1] > decoded.shape[-1]:
+                    extra_channels = upscaled[..., decoded.shape[-1]:]
+                    if extra_channels.shape[1:3] != decoded.shape[1:3]:
+                        extra_channels = _pixel_upscale(
+                            extra_channels, decoded.shape[1], decoded.shape[2], method
+                        )
+                    decoded = torch.cat([decoded, extra_channels.to(decoded)], dim=-1)
+                upscaled = decoded
                 upscaled = torch.clamp(upscaled, 0.0, 1.0)
 
                 logger.info(

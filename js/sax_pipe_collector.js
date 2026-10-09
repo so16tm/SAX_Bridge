@@ -80,12 +80,10 @@ const SOURCE_SPEC = {
     },
 };
 
-// Pipe_Collector は実質 1:1 (slotCount=1 固定) だが、API は 1:N で統一。
-// hasOutputSlots=false のため Coordinator の output 側 capture は no-op に近いが、
-// mutate() トランザクション化により _captureDownstream 削除 (TODO 6) 後の既存挙動を維持。
+// 管理対象は入力ソースのみ。固定出力は source 増減に依存せず接続を保持する。
 function buildPipeCollectorSpec(node) {
     return {
-        direction:         "output",
+        direction:         "input",
         getEntities:       () => node._remoteSources ?? [],
         setEntities:       (newSources) => { node._remoteSources = newSources; },
         entityToSlots:     (_src, _hints) => [{ name: "PIPE", type: "PIPE_LINE" }],

@@ -42,8 +42,10 @@ def _gaussian_blur_latent(x: torch.Tensor, sigma: float, radius: int = 1) -> tor
     weight = kernel.unsqueeze(0).unsqueeze(0).expand(c, 1, -1, -1)
 
     def _blur_4d(t4: torch.Tensor) -> torch.Tensor:
+        # Loader が許容する8px幅はlatentでは1セル。reflectはpadding未満で失敗する。
+        pad_mode = "reflect" if min(t4.shape[-2:]) > radius else "replicate"
         return F.conv2d(
-            F.pad(t4, (radius, radius, radius, radius), mode="reflect"),
+            F.pad(t4, (radius, radius, radius, radius), mode=pad_mode),
             weight,
             padding=0,
             groups=c,

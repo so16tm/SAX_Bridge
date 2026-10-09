@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import torch
 
 import folder_paths
@@ -87,6 +88,7 @@ class SAX_Bridge_Loader(io.ComfyNode):
             "images": None,
             "seed": seed,
             "loader_settings": {
+                "ckpt_name": ckpt_name,
                 "steps": steps,
                 "cfg": cfg,
                 "sampler_name": sampler_name,
@@ -163,15 +165,24 @@ class SAX_Bridge_Loader_Lora(io.ComfyNode):
             logger.warning("[SAX_Bridge] Lora Loader: loras_json must be a JSON array.")
             return io.NodeOutput(pipe)
 
-        applied = pipe.get(_APPLIED_LORAS_KEY, set())
+        applied = set(pipe.get(_APPLIED_LORAS_KEY, ()))
         newly_applied = []
 
         for entry in entries:
+            if not isinstance(entry, dict):
+                logger.warning("[SAX_Bridge] Lora Loader: skipping non-object entry.")
+                continue
             if not entry.get("on", True):
                 continue
 
-            lora_name = entry.get("lora", "").strip()
-            strength  = float(entry.get("strength", 1.0))
+            try:
+                lora_name = entry.get("lora", "").strip()
+                strength = float(entry.get("strength", 1.0))
+                if not math.isfinite(strength):
+                    raise ValueError("strength must be finite")
+            except (AttributeError, TypeError, ValueError, OverflowError) as e:
+                logger.warning("[SAX_Bridge] Lora Loader: invalid entry: %s", e)
+                continue
 
             if not lora_name or strength == 0.0:
                 continue
@@ -187,6 +198,7 @@ class SAX_Bridge_Loader_Lora(io.ComfyNode):
                     model, clip, lora_name, strength, strength
                 )
                 newly_applied.append(lora_name)
+                applied.add(_normalize_lora_name(lora_name))
                 logger.debug(
                     f"[SAX_Bridge] Lora Loader: applied '{lora_name}' (strength={strength:.3f})"
                 )

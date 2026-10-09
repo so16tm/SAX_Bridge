@@ -12,10 +12,11 @@ from nodes.io_types import (
 class TestNormalizeLoraName:
     @pytest.mark.parametrize("raw,expected", [
         ("my_lora.safetensors", "my_lora"),
-        ("subdir/my_lora.safetensors", "my_lora"),
-        ("subdir\\nested\\my_lora.ckpt", "my_lora"),
+        ("subdir/my_lora.safetensors", "subdir/my_lora"),
+        ("subdir\\nested\\my_lora.ckpt", "subdir/nested/my_lora"),
         ("no_ext", "no_ext"),
         ("multi.dot.name.safetensors", "multi.dot.name"),
+        ("sub/multi.dot.name", "sub/multi.dot.name"),
         ("", ""),
     ])
     def test_normalize_variants(self, raw, expected):
@@ -40,9 +41,9 @@ class TestFilterNewLoras:
         assert len(result) == 1
         assert result[0][0] == "b.safetensors"
 
-    def test_normalized_match_ignores_path_and_ext(self):
-        # パス・拡張子の違いを無視して重複判定される
-        pipe = {_APPLIED_LORAS_KEY: {"lora1"}}
+    def test_normalized_match_preserves_path(self):
+        # 同じ相対パスは区切り文字・拡張子の違いを無視して重複判定される
+        pipe = {_APPLIED_LORAS_KEY: {"subdir/lora1"}}
         loras = [("subdir/lora1.ckpt", 1.0), ("lora2.safetensors", 0.5)]
         result = filter_new_loras(pipe, loras)
         assert len(result) == 1
@@ -75,8 +76,8 @@ class TestRecordAppliedLoras:
 
     def test_duplicate_normalized_names_merged(self):
         pipe = {}
-        record_applied_loras(pipe, ["sub/x.safetensors", "x.ckpt"])
-        assert pipe[_APPLIED_LORAS_KEY] == {"x"}
+        record_applied_loras(pipe, ["sub/x.safetensors", "sub/x.ckpt", "other/x.safetensors"])
+        assert pipe[_APPLIED_LORAS_KEY] == {"sub/x", "other/x"}
 
     def test_empty_list_creates_empty_set(self):
         pipe = {}

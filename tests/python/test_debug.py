@@ -486,6 +486,11 @@ class TestDebugText:
 # ---------------------------------------------------------------------------
 
 class TestAssert:
+    def test_multiple_tensor_comparison_reports_error(self):
+        torch = pytest.importorskip("torch")
+        result = SAX_Bridge_Assert.execute(torch.tensor([1, 2]), "equals", "1")
+        assert "ERROR" in result.ui["text"][0]
+
     def test_pass(self):
         result = SAX_Bridge_Assert.execute(42, "not_none", "", "test")
         assert "PASS" in result.ui["text"][0]

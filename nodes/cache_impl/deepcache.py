@@ -26,6 +26,9 @@ class DeepCacheState:
         self.total_steps = 0
         self.cached_h = None  # スキップ終了地点の出力
         self.cached_negative = None  # CFGネガティブの最終出力キャッシュ
+        self.cached_signature = None
+        self.cached_context = None
+        self.cached_y = None
         self.last_timestep = None
         self.logged = False
 
@@ -46,6 +49,9 @@ class DeepCacheState:
         self.current_step = -1
         self.cached_h = None
         self.cached_negative = None
+        self.cached_signature = None
+        self.cached_context = None
+        self.cached_y = None
         self.steps_computed = 0
         self.steps_cached = 0
         self.cfg_skipped = 0
@@ -125,7 +131,31 @@ def deepcache_diffusion_model_wrapper(executor, x, timesteps, context, y=None, c
 
     if state is None:
         # stateがない場合はDeepCacheを適用せず、元のexecutorを呼び出す
-        return executor(x, timesteps, context, y, control, transformer_options, **kwargs)
+        return executor(x, timesteps, context, y=y, control=control, transformer_options=transformer_options, **kwargs)
+
+    # UNetの手動forwardは、他モデル・ControlNet・Attention等の追加パッチを
+    # 完全には再現できない。その場合は本体に委譲し、以前のキャッシュを破棄する。
+    if (not hasattr(model, "input_blocks") or not hasattr(model, "output_blocks")
+            or x.ndim != 4 or control is not None
+            or transformer_options.get("patches") or transformer_options.get("patches_replace")
+            or model.default_num_video_frames is not None
+            or kwargs):
+        state.cached_h = state.cached_negative = None
+        return executor(x, timesteps, context, y=y, control=control, transformer_options=transformer_options, **kwargs)
+
+    signature = (tuple(x.shape), tuple(transformer_options.get("cond_or_uncond", ())))
+    same_context = (state.cached_context is not None and context is not None
+                    and torch.equal(state.cached_context, context))
+    same_y = ((state.cached_y is None and y is None)
+              or (state.cached_y is not None and y is not None and torch.equal(state.cached_y, y)))
+    # CFGを別バッチで評価するVRAM節約経路や領域別conditioning間で使い回さない。
+    if state.cached_signature != signature or not same_context or not same_y:
+        state.cached_h = state.cached_negative = None
+    state.cached_signature = signature
+    state.cached_context = context.detach().clone() if context is not None else None
+    state.cached_y = y.detach().clone() if y is not None else None
+    transformer_options["original_shape"] = list(x.shape)
+    transformer_options["transformer_index"] = 0
 
     # ステップ更新
     timestep_val = timesteps[0].item()
@@ -239,8 +269,8 @@ def deepcache_diffusion_model_wrapper(executor, x, timesteps, context, y=None, c
 
         # 2. 中間をスキップし、キャッシュされた h を使用
         h_cache = state.cached_h.to(h.device, dtype=h.dtype)
-        if h_cache.shape[0] > h.shape[0]:
-            h_cache = h_cache[:h.shape[0]]
+        if do_cfg_skip:
+            h_cache = h_cache[pos_start:pos_end]
         h = h_cache
 
         # 3. 続きの Output Blocks を実行
@@ -333,7 +363,7 @@ def deepcache_diffusion_model_wrapper(executor, x, timesteps, context, y=None, c
             result = torch.cat([result, neg_cache], dim=0)
     else:
         # 通常計算時のみキャッシュ更新（DeepCache全体スキップ時は不正確なネガティブが混ざるため除外）
-        if batch_size > 1 and not is_skip and neg_idx != -1:
+        if batch_size > 1 and not is_skip and len(cond_or_uncond) == 2 and set(cond_or_uncond) == {0, 1}:
             real_batch = batch_size // 2
             neg_start = neg_idx * real_batch
             neg_end = neg_start + real_batch

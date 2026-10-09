@@ -1,6 +1,7 @@
 """SAX_Bridge_Guidance ノードのテスト。"""
 
 import torch
+import pytest
 from unittest.mock import MagicMock
 from nodes.guidance import (
     SAX_Bridge_Guidance,
@@ -11,6 +12,14 @@ from nodes.guidance import (
     _gaussian_blur_latent,
     _ALL_MODES,
 )
+
+
+@pytest.mark.parametrize("shape", [(1, 4, 1, 8), (1, 4, 8, 1), (1, 4, 1, 1), (1, 4, 2, 1, 8)])
+def test_blur_accepts_minimum_loader_dimensions(shape):
+    x = torch.ones(shape)
+    result = _gaussian_blur_latent(x, sigma=1.0)
+    assert result.shape == shape
+    assert torch.allclose(result, x)
 
 
 class TestStrengthToParams:

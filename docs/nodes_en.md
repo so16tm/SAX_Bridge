@@ -801,7 +801,7 @@ applied_loras: {'lora_a'} (1 entries)
 
 ### SAX Assert
 
-`SAX_Bridge_Assert` — Asserts that a value meets the expected condition. Use `stop_on_fail` to choose between halting the workflow on mismatch or just emitting a warning log.
+`SAX_Bridge_Assert` — Asserts that a value meets the expected condition. Results are displayed in the node UI and logs. Failures and evaluation errors do not halt the workflow.
 
 **Inputs**
 
@@ -811,7 +811,6 @@ applied_loras: {'lora_a'} (1 entries)
 | `mode` | Combo | Assertion mode (see table below) |
 | `expected` | String | Expected value (auto-parsed based on mode) |
 | `label` | String | UI label |
-| `stop_on_fail` | Boolean | True: raise RuntimeError on fail / False: warn only |
 
 **Outputs**: None (PASS/FAIL shown in node UI with color-coded border: PASS=green / FAIL=red / ERROR=orange)
 
@@ -848,9 +847,9 @@ applied_loras: {'lora_a'} (1 entries)
 |-----------|------|-------------|
 | `value` | ANY | Target (typically PIPE_LINE) |
 | `path` | String | Dot-separated path (e.g. `loader_settings.steps`) |
-| `mode` / `expected` / `label` / `stop_on_fail` | — | Same as SAX Assert |
+| `mode` / `expected` / `label` | — | Same as SAX Assert |
 
-**Path resolution**: Each segment is tried in order as `dict[key]` → `getattr` → integer index. On failure, a `RuntimeError` is raised listing the available keys/attrs.
+**Path resolution**: Each segment is tried in order as `dict[key]` → `getattr` → integer index. On failure, an ERROR listing the available keys/attrs is displayed in the UI and logs.
 
 **Outputs**: None (PASS/FAIL shown in node UI)
 

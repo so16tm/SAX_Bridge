@@ -82,6 +82,7 @@ class SAX_Bridge_Image_Collector(io.ComfyNode):
         frames: list[torch.Tensor] = []
         ref_h: int | None = None
         ref_w: int | None = None
+        total = 0
 
         for i in range(MAX_SLOTS):
             val = kwargs.get(f"slot_{i}")
@@ -91,6 +92,8 @@ class SAX_Bridge_Image_Collector(io.ComfyNode):
                 logger.debug(f"[SAX_Bridge] Collector: slot_{i} は 4D テンソルではないためスキップ")
                 continue
             _, h, w, c = val.shape
+            if val.shape[0] == 0 or h == 0 or w == 0:
+                continue
             if c not in (1, 3, 4):
                 logger.debug(f"[SAX_Bridge] Collector: slot_{i} のチャンネル数 ({c}) が想定外のためスキップ")
                 continue
@@ -98,19 +101,19 @@ class SAX_Bridge_Image_Collector(io.ComfyNode):
             if ref_h is None:
                 ref_h, ref_w = h, w
 
-            for bi in range(val.shape[0]):
+            total += val.shape[0]
+            # 上限を超えるフレームは CPU へ転送せず、サイズの基準にも使わない。
+            for bi in range(min(val.shape[0], MAX_OUTPUT_IMAGES - len(frames))):
                 frames.append(val[bi : bi + 1].cpu())   # [1, H, W, C]
 
         if not frames:
             return io.NodeOutput(torch.zeros(1, 8, 8, 3, dtype=torch.float32))
 
-        total = len(frames)
         if total > MAX_OUTPUT_IMAGES:
             logger.warning(
                 f"[SAX_Bridge] Collector: 収集枚数 {total} が上限 {MAX_OUTPUT_IMAGES} を超えました。"
                 " ソース数またはバッチサイズを減らしてください。"
             )
-            frames = frames[:MAX_OUTPUT_IMAGES]
 
         normalized = [_normalize_channels(f) for f in frames]
         resized    = [_resize_letterbox(f, ref_h, ref_w) for f in normalized]

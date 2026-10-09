@@ -25,7 +25,7 @@ const SOURCE_SPEC = {
 
     buildSource(srcNode, collectorNode, offset, remaining) {
         const srcOutputs = srcNode.outputs ?? [];
-        const allCount   = Math.min(srcOutputs.length, MAX_SLOTS, remaining);
+        const allCount   = Math.min(srcOutputs.length, MAX_SLOTS);
         if (allCount === 0) return null;
 
         // rebuildAllSources 時: 一時ヒントがあれば旧 enabledSlots を引き継ぐ。
@@ -51,6 +51,9 @@ const SOURCE_SPEC = {
             // ヒントなし（新規追加、または sig 変化時のリビルド）: 全スロット有効
             enabledSlots = Array.from({ length: allCount }, (_, i) => i);
         }
+        // 上流の選択候補数と Collector の残り物理ピン数を分ける。
+        // 残りが少なくても、無効にした先頭ピンの代わりに末尾を選択できる。
+        enabledSlots = enabledSlots.slice(0, remaining);
 
         // B3: 上流出力の identity (name/type) を常に現在の srcNode から fresh 生成する。
         // 初回 identity の保持 (改名前 name を rebuild で上書きしない) は rebuild 経路
@@ -144,11 +147,17 @@ const SOURCE_SPEC = {
     syncSlotLabels(node, sources) {
         let absIdx = 0;
         for (const src of sources) {
+            const srcNode = app.graph.getNodeById(src.sourceId);
             const enabled = src.enabledSlots ?? Array.from({ length: src.slotCount ?? 0 }, (_, i) => i);
             for (let li = 0; li < enabled.length; li++) {
                 const gi   = enabled[li];
-                const name = src.slotNames?.[gi] || `out_${absIdx}`;
-                const type = src.slotTypes?.[gi] || "*";
+                const resolved = resolveAnchorToOutputSlot(srcNode, {
+                    name: src.slotNames?.[gi], type: src.slotTypes?.[gi], originalSlotIndex: gi,
+                });
+                const current = resolved ? srcNode.outputs[resolved.slotIndex] : null;
+                // 接続 identity は保存名を保持し、公開ピンの型と表示名は現在値に追従する。
+                const name = current?.label ?? current?.name ?? src.slotNames?.[gi] ?? `out_${absIdx}`;
+                const type = current?.type ?? src.slotTypes?.[gi] ?? "*";
                 if (node.inputs[absIdx]) {
                     node.inputs[absIdx].name = `slot_${absIdx}`;
                     node.inputs[absIdx].type = "*";
@@ -227,6 +236,8 @@ function buildNodeCollectorSpec(node) {
         resolveLocalSlotBySlotName: (entity, slotName) => {
             const globalIdx = entity?.slotNames?.indexOf(slotName) ?? -1;
             if (globalIdx < 0) return null;
+            // 同名ピンは名前だけでは識別できない。保存 global index で解決する。
+            if (entity.slotNames.lastIndexOf(slotName) !== globalIdx) return null;
             const localIdx = entity?.enabledSlots?.indexOf(globalIdx) ?? -1;
             return localIdx >= 0 ? localIdx : null;
         },

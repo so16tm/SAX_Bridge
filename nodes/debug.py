@@ -501,6 +501,8 @@ def _run_assertion(
     """Assertion 実行の共通処理。PASS/FAIL/ERROR を UI テキストで返す。"""
     try:
         passed, expected_parsed = _evaluate_assertion(actual, mode, expected_raw)
+        # Tensor 等の多要素比較結果は bool に変換できないため ERROR として扱う。
+        passed = bool(passed)
     except Exception as exc:
         err_msg = f'[SAX {node_name}] "{label}" ERROR: {exc}'
         logger.warning(f"[SAX_Bridge] {err_msg}")

@@ -37,9 +37,8 @@
  *           (syncSlotStructure が add/remove で増減させる)」ノード (PrimitiveStore / TextCatalog) のみ指定する。
  *           この経路は entity 数に合わせて出力ピンを addOutput/removeOutput し、生存 link の上流端
  *           (origin_slot) のみ in-place で付け替えて下流端を保つ。
- *           固定出力を持つ Image/Pipe Collector (direction="output" だが出力ピンが Python 定義で
- *           Coordinator 非管理・syncSlotStructure が no-op) では **指定してはならない** (固定出力ピンが
- *           addOutput/removeOutput で破壊される)。未指定 (falsy) のノードは従来の remove-all + connect
+ *           固定出力を持つ Image/Pipe Collector は direction="input" とし、出力を管理しない。
+ *           output 方向で未指定 (falsy) のノードは従来の remove-all + connect
  *           再接続経路 (#restoreByReconnect) に入る。
  * @property {() => object[]} getEntities
  *           現状の entity 配列を返すコールバック。entity は items / sources など各ノードの最小単位。
@@ -141,6 +140,16 @@ export class DynamicSlotCoordinator {
      */
     #hints = null;
 
+    /** 次の mutation が capture を始める前に確定させる遅延 restore。 */
+    #pendingRestore = null;
+
+    #flushPendingRestore() {
+        const pending = this.#pendingRestore;
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        pending.run();
+    }
+
     /**
      * @param {object} node            LiteGraph ノード
      * @param {CoordinatorSpec} spec   Coordinator の仕様
@@ -165,6 +174,7 @@ export class DynamicSlotCoordinator {
      * @param {MutateOptions} [opts]
      */
     mutate(action, opts) {
+        this.#flushPendingRestore();
         const options = opts ?? {};
         const skipCapture = options.skipCapture === true;
 
@@ -228,6 +238,7 @@ export class DynamicSlotCoordinator {
      * onConfigure 直後 (LiteGraph link 復元後の setTimeout(0) 内) で利用する。
      */
     captureFromExisting() {
+        this.#flushPendingRestore();
         const entities = this.#spec.getEntities();
         this.#captureSnapshots(entities);
     }
@@ -247,6 +258,7 @@ export class DynamicSlotCoordinator {
      * @throws {Error} spec.setEntities が定義されていない場合
      */
     applyAfterCapture(newEntities, opts) {
+        this.#flushPendingRestore();
         if (typeof this.#spec.setEntities !== "function") {
             throw new Error("DynamicSlotCoordinator.applyAfterCapture requires spec.setEntities");
         }
@@ -293,6 +305,7 @@ export class DynamicSlotCoordinator {
      * @throws {Error} spec.setEntities が定義されていない場合
      */
     applySaveOnly(newEntities, opts) {
+        this.#flushPendingRestore();
         if (typeof this.#spec.setEntities !== "function") {
             throw new Error("DynamicSlotCoordinator.applySaveOnly requires spec.setEntities");
         }
@@ -314,6 +327,7 @@ export class DynamicSlotCoordinator {
      * @throws {Error} spec.setEntities が定義されていない場合
      */
     commitState(newEntities, opts) {
+        this.#flushPendingRestore();
         if (typeof this.#spec.setEntities !== "function") {
             throw new Error("DynamicSlotCoordinator.commitState requires spec.setEntities");
         }
@@ -378,8 +392,8 @@ export class DynamicSlotCoordinator {
      * ため、restore 前の破壊的 syncSlotStructure 呼出 (removeOutput で下流を切る) を抑止する。
      *
      * 判定は **spec.linkPreserving === true の明示 opt-in** に限定する。direction="output" かつ
-     * resolver 両未定義という条件は Image/Pipe Collector (固定出力・syncSlotStructure no-op) も満たすため、
-     * !hasResolvers での暗黙判定では固定出力ピンが addOutput/removeOutput で破壊される回帰となる。
+     * resolver 両未定義でも固定出力を持つ spec があるため、
+     * !hasResolvers での暗黙判定では固定出力ピンを破壊しうる。
      * 明示フラグにより link-preserving 経路を PrimitiveStore / TextCatalog のみに限定する。
      * @returns {boolean}
      */
@@ -424,7 +438,8 @@ export class DynamicSlotCoordinator {
             this.#restoreFromSnapshots();
             return false;
         }
-        setTimeout(() => {
+        const run = () => {
+            this.#pendingRestore = null;
             this.#hints = hintsForAsync;
             try {
                 this.#restoreFromSnapshots();
@@ -432,7 +447,10 @@ export class DynamicSlotCoordinator {
                 for (const id of capturedEntityIds) this.#cleanupSnapshot(id);
                 this.#hints = null;
             }
-        }, 0);
+        };
+        // 複数の source 追加など同じタスク内の連続 mutation が snapshot を
+        // 上書きする前に、前トランザクションの restore を完了させる。
+        this.#pendingRestore = { run, timer: setTimeout(run, 0) };
         return true;
     }
 
@@ -550,7 +568,7 @@ export class DynamicSlotCoordinator {
      *   段階 1: spec.resolveLocalSlotBySlotName(entity, slotName) → localSlotIdx
      *   段階 2: spec.resolveLocalSlotByGlobalIdx(entity, globalSlotIdx) → localSlotIdx
      *   段階 3: skip (両 spec フィールド未定義時は ds.localSlotIdx をそのまま採用、
-     *           1:1 ノードや Image/Pipe Collector の互換動作)
+     *           resolver を持たない output spec の互換動作)
      *
      * 削除 entity (`_remoteSources.splice(idx, 1)` 等) は `getEntities()` ループで
      * 自動的に走査対象外となり partial restore が成立する (snapshot は cleanup 側で破棄)。
@@ -564,7 +582,7 @@ export class DynamicSlotCoordinator {
         // 適用範囲判定は #isLinkPreserving() に一元化する (#syncAndRestore と同一判定)。
         // link-preserving 経路 (PrimitiveStore / TextCatalog: spec.linkPreserving === true) は
         // 下流端 (target_*) を一切触らず、動的入力下流 (Autogrow 等) を縮小・再採番させずに
-        // リンクを維持する。それ以外 (Image/Pipe/Node Collector) は従来の remove-all + connect
+        // リンクを維持する。Node Collector は従来の remove-all + connect
         // 再接続経路 (#restoreByReconnect) を維持する。
         if (this.#isLinkPreserving()) {
             this.#restoreLinkPreserving(entities, graph);
@@ -579,8 +597,8 @@ export class DynamicSlotCoordinator {
      * 到達するのは spec.linkPreserving !== true のノード:
      * - NodeCollector (1:N, resolver 定義済): snapshot 1 件ごとに段階1/2/3 で localSlotIdx を解決する
      *   (旧 `_restoreDownstream` のロジック準拠)。
-     * - Image/Pipe Collector (固定出力, resolver 未定義): 段階3 (ds.localSlotIdx をそのまま採用) で
-     *   従来通り全出力 slot を remove-all → connect 再接続する (固定出力ピンは破壊しない)。
+     * - resolver 未定義の output spec: 段階3 (ds.localSlotIdx をそのまま採用)。
+     * Image/Pipe Collector は input 方向のため、この経路に入らず固定出力リンクを保持する。
      * 1:1 link-preserving 経路は #restoreLinkPreserving に分離済。
      *
      * @param {object[]} entities
@@ -620,8 +638,7 @@ export class DynamicSlotCoordinator {
 
             // resolver の有無で段階3 (ds.localSlotIdx 直接採用) の扱いが変わる。
             // NodeCollector (resolver 定義済) は段階1/2 で解決し、失敗時は skip (誤接続防止)。
-            // Image/Pipe Collector (resolver 未定義) は段階3 で ds.localSlotIdx をそのまま採用する
-            // (固定出力に対し localSlotIdx は capture 時点の物理位置と一致、旧 _restoreDownstream 互換)。
+            // resolver 未定義の output spec は段階3で ds.localSlotIdx をそのまま採用する。
             const hasResolvers
                 = typeof this.#spec.resolveLocalSlotBySlotName === "function"
                 || typeof this.#spec.resolveLocalSlotByGlobalIdx === "function";
@@ -640,7 +657,7 @@ export class DynamicSlotCoordinator {
                     const resolved = this.#spec.resolveLocalSlotByGlobalIdx(entity, ds.globalSlotIdx);
                     if (typeof resolved === "number" && resolved >= 0) localSlotIdx = resolved;
                 }
-                // 段階 3: resolver 未定義 (Image/Pipe Collector) は ds.localSlotIdx を直接採用する。
+                // 段階 3: resolver 未定義の output spec は ds.localSlotIdx を直接採用する。
                 // resolver 定義済 (NodeCollector) で段階1/2 が両方失敗した場合は skip し誤接続を防ぐ
                 // (enabledSlots 編集で globalIdx が消失したケース)。
                 if (localSlotIdx < 0) {

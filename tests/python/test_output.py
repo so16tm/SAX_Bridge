@@ -9,6 +9,8 @@ from nodes.output import (
     _expand_template,
     _build_indexed_name,
     _build_metadata_str,
+    _expand_filename,
+    _write_preview_images,
 )
 
 
@@ -64,6 +66,10 @@ class TestBuildMetadataStr:
 
 
 class TestOutputExecute:
+    @pytest.fixture(autouse=True)
+    def mock_preview(self, monkeypatch):
+        monkeypatch.setattr("nodes.output._write_preview_images", MagicMock(return_value=[]))
+
     def _make_pipe(self):
         import torch
         return {
@@ -145,3 +151,31 @@ class TestImagePreviewExecute:
     def test_none_images_returns_empty(self):
         result = SAX_Bridge_Image_Preview.execute(cell_w=200, max_cols=1, images=None)
         assert result.ui["images"] == []
+
+
+class TestOutputRegression:
+    def test_filename_cannot_escape_output_directory(self):
+        filename = _expand_filename("../../outside\\image\x00", {}, datetime.datetime(2026, 1, 1))
+        assert "/" not in filename and "\\" not in filename and "\x00" not in filename
+
+    def test_no_save_still_generates_preview(self, tmp_path, monkeypatch):
+        import torch
+        from PIL import Image
+        monkeypatch.setattr("nodes.output.folder_paths.get_temp_directory", lambda: str(tmp_path))
+        monkeypatch.setattr(SAX_Bridge_Output, "hidden", MagicMock(prompt=None, extra_pnginfo=None, unique_id="42"))
+        image = torch.rand(1, 16, 16, 3)
+        with patch("nodes.output._save_image") as save_image:
+            result = SAX_Bridge_Output.execute(
+                False, "", "test", 7, 3, "suffix", "png", 90, False, image=image,
+            )
+        save_image.assert_not_called()
+        assert result[0] is image
+        assert result.ui["filename_index"] == [7]
+        assert result.ui["images"][0]["type"] == "temp"
+        with Image.open(tmp_path / result.ui["images"][0]["filename"]) as preview:
+            assert preview.size == (16, 16)
+
+    def test_output_requests_metadata_hidden_fields(self):
+        from comfy_api.latest import io
+        assert io.Hidden.prompt in SAX_Bridge_Output.define_schema().hidden
+        assert io.Hidden.extra_pnginfo in SAX_Bridge_Output.define_schema().hidden

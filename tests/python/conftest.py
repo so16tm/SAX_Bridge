@@ -10,6 +10,7 @@ import sys
 import types
 from unittest.mock import MagicMock
 from pathlib import Path
+import tempfile
 
 # ---------------------------------------------------------------------------
 # 自動スタブ MetaPathFinder（comfy.* / comfy_extras.* を自動モック）
@@ -168,12 +169,13 @@ class _FolderPathsMod(types.ModuleType):
 
 folder_paths = _FolderPathsMod("folder_paths")
 folder_paths.get_filename_list = MagicMock(return_value=[])
-folder_paths.get_output_directory = MagicMock(return_value="/tmp/comfyui_output")
-folder_paths.get_temp_directory = MagicMock(return_value="/tmp/comfyui_temp")
+_test_temp_root = Path(tempfile.gettempdir()) / "sax_bridge_tests"
+folder_paths.get_output_directory = MagicMock(return_value=str(_test_temp_root / "output"))
+folder_paths.get_temp_directory = MagicMock(return_value=str(_test_temp_root / "temp"))
 folder_paths.get_folder_paths = MagicMock(return_value=[])
 folder_paths.supported_pt_extensions = {".safetensors", ".ckpt", ".pt"}
 folder_paths.get_full_path = MagicMock(return_value=None)
-folder_paths.models_dir = "/tmp/comfyui_models"
+folder_paths.models_dir = str(_test_temp_root / "models")
 sys.modules["folder_paths"] = folder_paths
 
 # ---------------------------------------------------------------------------

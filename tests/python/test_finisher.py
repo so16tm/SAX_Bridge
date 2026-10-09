@@ -62,6 +62,14 @@ class TestApplySmooth:
 
 
 class TestApplySharpen:
+    def test_flat_image_has_no_artificial_border(self):
+        rgb = torch.full((1, 3, 8, 8), 0.5)
+        assert torch.allclose(_apply_sharpen(rgb, 1.0, 2.0), rgb, atol=1e-6)
+
+    def test_half_precision_is_supported(self):
+        rgb = torch.full((1, 3, 8, 8), 0.5, dtype=torch.float16)
+        result = _apply_sharpen(rgb, 1.0, 1.0)
+        assert result.dtype == rgb.dtype and torch.isfinite(result).all()
     def test_zero_strength_passthrough(self):
         rgb = _make_rgb()
         result = _apply_sharpen(rgb, 0.0, 1.0)
@@ -336,3 +344,16 @@ class TestFinisherExecute:
         assert result[1].shape == pipe["images"].shape
         assert result[1].min() >= 0.0
         assert result[1].max() <= 1.0
+
+
+class TestColorCorrectionRegression:
+    def test_single_pixel_reference_is_finite(self):
+        rgb = torch.rand(2, 3, 8, 8)
+        reference = torch.full((1, 3, 1, 1), 0.4)
+        result = _apply_color_correction(rgb, reference, 1.0)
+        assert torch.isfinite(result).all()
+        assert torch.allclose(result.mean(dim=(2, 3)), torch.full((2, 3), 0.4))
+
+    def test_incompatible_reference_batch_rejected(self):
+        with pytest.raises(ValueError, match="reference batch"):
+            _apply_color_correction(torch.rand(1, 3, 8, 8), torch.rand(2, 3, 8, 8), 1.0)

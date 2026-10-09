@@ -864,7 +864,7 @@ function makeToggleWidget(node, item, index) {
                 const scene = config.scenes[config.currentScene];
                 if (!scene) return false;
                 const key    = itemKey(item);
-                const newVal = !(scene[key] ?? true);
+                const newVal = !getItemCurrentValue(item);
                 scene[key]   = newVal;
                 saveConfig(node, config);
                 applyItem(item, newVal);

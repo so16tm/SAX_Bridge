@@ -22,10 +22,13 @@ def _apply_color_correction(rgb: torch.Tensor, reference: torch.Tensor, strength
     strength  : 0.0〜1.0 (0=無補正, 1=完全マッチ)
     """
     eps = 1e-6
+    reference = reference.to(device=rgb.device, dtype=rgb.dtype)
+    if reference.shape[0] not in (1, rgb.shape[0]):
+        raise ValueError("[SAX_Bridge] Finisher: reference batch must be 1 or match image batch.")
     ref_mean = reference.mean(dim=(2, 3), keepdim=True)
-    ref_std = reference.std(dim=(2, 3), keepdim=True).clamp(min=eps)
+    ref_std = reference.std(dim=(2, 3), keepdim=True, correction=0).clamp(min=eps)
     src_mean = rgb.mean(dim=(2, 3), keepdim=True)
-    src_std = rgb.std(dim=(2, 3), keepdim=True).clamp(min=eps)
+    src_std = rgb.std(dim=(2, 3), keepdim=True, correction=0).clamp(min=eps)
 
     corrected = (rgb - src_mean) * (ref_std / src_std) + ref_mean
     return rgb * (1.0 - strength) + corrected * strength
@@ -43,12 +46,14 @@ def _apply_sharpen(rgb: torch.Tensor, strength: float, sigma: float) -> torch.Te
     if strength <= 0.0:
         return rgb
     kernel_size = max(3, int(6 * sigma + 1) | 1)
-    x = torch.arange(kernel_size, dtype=torch.float32, device=rgb.device) - kernel_size // 2
+    x = torch.arange(kernel_size, dtype=rgb.dtype, device=rgb.device) - kernel_size // 2
     g = torch.exp(-0.5 * (x / sigma) ** 2)
     g = g / g.sum()
     kernel = (g.unsqueeze(0) * g.unsqueeze(1)).unsqueeze(0).unsqueeze(0)
     kernel = kernel.expand(rgb.shape[1], 1, kernel_size, kernel_size).contiguous()
-    blurred = F.conv2d(rgb, kernel, padding=kernel_size // 2, groups=rgb.shape[1])
+    pad = kernel_size // 2
+    blurred = F.conv2d(F.pad(rgb, (pad, pad, pad, pad), mode="replicate"), kernel,
+                       groups=rgb.shape[1])
     return torch.clamp(rgb + strength * (rgb - blurred), 0.0, 1.0)
 
 

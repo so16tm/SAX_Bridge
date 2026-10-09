@@ -80,3 +80,12 @@ class TestBroadcastMaskToLatent:
         out = broadcast_mask_to_latent(mask, latent)
         assert out.shape == (2, 1, 1, 8, 8)
         assert (latent * out).shape == latent.shape
+
+
+    def test_frame_masks_do_not_expand_single_video_batch(self):
+        mask = torch.stack([torch.zeros(8, 8), torch.ones(8, 8)])
+        latent = torch.zeros(1, 4, 3, 8, 8)
+        out = broadcast_mask_to_latent(mask, latent)
+        assert out.shape == (1, 1, 3, 8, 8)
+        assert (latent * out).shape == latent.shape
+        assert torch.allclose(out[0, 0, :, 0, 0], torch.tensor([0.0, 0.5, 1.0]))
