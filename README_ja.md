@@ -137,6 +137,8 @@ SAM3 側の `mask_grow` と本ノードの `grow` は加算的に効くため、
 
 詳細は [ノードリファレンス: SAX Text Catalog](docs/nodes_ja.md#sax-text-catalog) を参照してください。
 
+新しい **SAX Text Catalog V2** は独立したノードとして追加され、固定文とシードで再現可能な候補抽選をレシピ単位で組み合わせます。1万件までの素材を検索・一括選択・仮想化リストで管理でき、V1 と同じワークフローで併用できます。詳しくは [V2 ノードリファレンス](docs/nodes_ja.md#sax-text-catalog-v2) を参照してください。
+
 [↑ トップへ](#sax_bridge)
 
 ---

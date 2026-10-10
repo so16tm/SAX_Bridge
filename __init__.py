@@ -7,6 +7,7 @@ from .nodes import pipe_collector as pipe_collector_node
 from .nodes import image_collector as image_collector_node
 from .nodes import primitive_store as primitive_store_node
 from .nodes import text_catalog as text_catalog_node
+from .nodes import text_catalog_v2 as text_catalog_v2_node
 from .nodes import guidance as guidance_node
 from .nodes import sam3 as sam3_node
 from .nodes import mask_adjust as mask_adjust_node
@@ -82,6 +83,7 @@ for v3_node in [
     cache_node.SAX_Bridge_Cache,
     primitive_store_node.SAX_Bridge_Primitive_Store,
     text_catalog_node.SAX_Bridge_Text_Catalog,
+    text_catalog_v2_node.SAX_Bridge_Text_Catalog_V2,
     toggle_manager_node.SAX_Bridge_Toggle_Manager,
 ]:
     _schema = v3_node.GET_SCHEMA()

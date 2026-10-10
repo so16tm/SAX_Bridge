@@ -137,6 +137,8 @@ The SAM3 `mask_grow` and this node's `grow` are additive. When fanning out, set 
 
 See [Node Reference: SAX Text Catalog](docs/nodes_en.md#sax-text-catalog) for full details.
 
+**SAX Text Catalog V2** is a separate node for combining fixed text and seeded, reproducible candidate draws through recipes. It manages up to 10,000 materials with search, bulk selection, and a virtualized list, and can coexist with V1 in the same workflow. See the [V2 node reference](docs/nodes_en.md#sax-text-catalog-v2).
+
 [↑ Back to top](#sax_bridge)
 
 ---

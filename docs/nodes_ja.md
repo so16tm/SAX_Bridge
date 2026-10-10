@@ -26,7 +26,7 @@
 | [Output](#output) | 出力・プレビュー | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | ノード・画像・Pipe の集約 | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
 | [Debug](#debug) | デバッグ・テスト用 | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
-| [Utility](#utility) | Pipe 内部ヘルパー | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
+| [Utility](#utility) | Pipe 内部ヘルパー | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Text Catalog V2](#sax-text-catalog-v2) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
@@ -1152,6 +1152,50 @@ applied_loras: {'lora_a'} (1 entries)
 
 > **データ保管範囲**: ノード単位（items_json でワークフローに含まれる）。グローバル共有はしません。
 > **接続したいプロンプトが複数ある場合**: 1 つの Item を複数 Relation から参照することもできます。
+
+[↑ トップへ](#top)
+
+---
+
+### SAX Text Catalog V2
+
+`SAX_Bridge_Text_Catalog_V2` — 名前付きテキストを明示的な候補と組合せレシピで選び、固定文とランダム選択を再現可能に結合する独立ノードです。V1 の `SAX_Bridge_Text_Catalog` と同じワークフローで併用できます。V1 のデータを置き換えたり、自動移行したりはしません。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `config_json` | String (hidden, optional) | カタログ、レシピ、グループを格納する version 2 JSON。入力を省略した場合は空モデルを使い、ノード UI が自動管理。空文字や不正な JSON はエラー |
+| `seed` | Int (0〜9007199254740991) | 抽選シード。ComfyUI の control after generate で実行ごとに更新可能 |
+
+**出力**: `text` STRING（空文字を除き、前後の空白を除去して改行結合） / `selection_json` STRING（実行時の選択記録）
+
+#### JSON 契約
+
+```json
+{
+  "version": 2,
+  "catalog": { "items": [{ "id": "item-1", "name": "quality", "text": "high quality", "tags": ["quality"] }] },
+  "recipes": [{ "id": "default", "name": "Default", "groups": [{ "id": "fixed", "name": "Fixed", "mode": "all", "item_ids": ["item-1"], "count": 1, "on": true }] }],
+  "active_recipe_id": "default"
+}
+```
+
+- `all` は候補配列の順にすべてを選択します。`random` は `count` 件を重複なしで選び、結果は候補配列の順に出力します。`count: 0` は有効です。候補が不足すると実行エラーになります。
+- 抽選は `seed`・recipe ID・group ID からグループごとに独立して決まります。ほかのグループの有効状態や順番を変えても抽選結果は変わりません。同じ Item を複数グループで選ぶことはできます。
+- 同じ `seed` と設定なら選択は再現されます。実行ごとに結果を変える場合は ComfyUI の control after generate を `randomize` または `increment` にします。
+- 候補は明示的に選択します。タグで絞り込んだ素材から複数候補を追加できます。
+- 不正 JSON、未知の schema version、孤立した参照、上限超過はエラーになります。上限は Items 10,000、Recipes 32、Recipe あたり Groups 32、Group あたり候補 10,000、`count` 0〜10,000、Item あたり Tags 8、ID 128 文字、名前 256 文字、テキスト 65,536 文字、`config_json` 32 MiB、結合出力 32 MiB です。
+
+#### UI と編集
+
+- 左ペインは素材ライブラリです。1,000 件を超える素材も名前・本文・タグの検索、タグ絞り込み、インライン編集、一括タグ付け、複数選択で管理できます。候補の追加時もタグや検索結果からまとめて選べます。
+- 大量の素材を表示するときは仮想化により、可視範囲の DOM とスクロールを保ちながら一覧を操作できます。
+- 右ペインは組合せです。Recipe の保存・複製、固定またはランダム Group、件数と候補の編集、ON/OFF、並べ替えができます。
+- 素材を直接編集でき、共有中の素材を複製して差し替えられます。
+- 編集はノードへ自動反映され、Undo / Redo と実行後の結果表示に対応します。
+
+> **データ保管範囲**: ノード単位（`config_json` に保存され、ワークフローに含まれます）。V1 のデータとは独立しています。
 
 [↑ トップへ](#top)
 

@@ -26,7 +26,7 @@
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
 | [Debug](#debug) | Debugging & testing | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
-| [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
+| [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Text Catalog V2](#sax-text-catalog-v2) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
@@ -1152,6 +1152,50 @@ With `merge_outputs` ON (`merged`), surviving texts are stripped, empty strings 
 
 > **Data Scope**: Per-node (saved in `items_json`, included in the workflow). No global sharing.
 > **Sharing one Item across multiple Relations**: A single Item can be referenced by multiple Relations to fan out the same text.
+
+[↑ Back to top](#top)
+
+---
+
+### SAX Text Catalog V2
+
+`SAX_Bridge_Text_Catalog_V2` — An independent node that combines explicitly selected text candidates through recipes, including fixed text and reproducible random selection. It can run alongside `SAX_Bridge_Text_Catalog` (V1); it does not replace or automatically migrate V1 data.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `config_json` | String (hidden, optional) | Version 2 JSON for the catalog, recipes, and groups. Omitting the input uses an empty model; the node UI manages it automatically. Empty strings and invalid JSON are errors |
+| `seed` | Int (0 to 9007199254740991) | Random selection seed. ComfyUI's control after generate can update it for each run |
+
+**Outputs**: `text` STRING (trimmed non-empty texts joined by newlines) / `selection_json` STRING (record of the selections made for this run)
+
+#### JSON Contract
+
+```json
+{
+  "version": 2,
+  "catalog": { "items": [{ "id": "item-1", "name": "quality", "text": "high quality", "tags": ["quality"] }] },
+  "recipes": [{ "id": "default", "name": "Default", "groups": [{ "id": "fixed", "name": "Fixed", "mode": "all", "item_ids": ["item-1"], "count": 1, "on": true }] }],
+  "active_recipe_id": "default"
+}
+```
+
+- `all` selects every candidate in array order. `random` selects `count` distinct candidates and emits them in candidate array order. `count: 0` is valid; too few candidates cause an execution error.
+- Each group's draw is independently determined by `seed`, recipe ID, and group ID. Changing another group's enabled state or order does not change the draw. The same item may be selected by multiple groups.
+- The same seed and configuration reproduce the same selections. Set ComfyUI's control after generate to `randomize` or `increment` to vary selections between runs.
+- Candidates are selected explicitly. Multiple candidates can be added from tag-filtered materials.
+- Invalid JSON, unknown schema versions, orphan references, and values over the limits are errors. Limits: 10,000 items, 32 recipes, 32 groups per recipe, 10,000 candidates per group, `count` from 0 to 10,000, 8 tags per item, 128-character IDs, 256-character names, 65,536-character text, 32 MiB `config_json`, and 32 MiB combined output.
+
+#### UI and Editing
+
+- The left pane manages more than 1,000 materials through name/text/tag search, tag filtering, inline editing, bulk tagging, and multi-select. Candidates can also be selected in bulk from tag-filtered or searched results.
+- Large material lists use virtualization to keep the DOM and scrolling responsive while navigating visible rows.
+- The right pane builds combinations: save or duplicate recipes; edit fixed or random groups, count, and candidates; toggle groups; and reorder them.
+- Materials can be edited directly. Shared material can be duplicated and replaced without changing other uses.
+- Edits apply to the node automatically, with Undo / Redo and post-run result display.
+
+> **Data scope**: Per node (`config_json` is saved in and travels with the workflow). V2 data is independent from V1 data.
 
 [↑ Back to top](#top)
 

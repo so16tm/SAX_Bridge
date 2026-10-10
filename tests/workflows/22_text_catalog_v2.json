@@ -1,0 +1,123 @@
+{
+  "id": "test-22-text-catalog-v2",
+  "revision": 0,
+  "last_node_id": 6,
+  "last_link_id": 3,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Text_Catalog",
+      "pos": [120, 160],
+      "size": [320, 260],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        { "name": "merged", "type": "STRING", "links": [1] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Text_Catalog" },
+      "title": "Text Catalog V1（共存確認）",
+      "widgets_values": [
+        "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"v1-item\",\"name\":\"v1-text\",\"text\":\"V1 remains independent\",\"tags\":[\"compatibility\"]}],\"tag_definitions\":[\"compatibility\"]},\"relations\":[{\"item_id\":\"v1-item\",\"on\":true}]}",
+        "Select the LoRA to add to the text",
+        "Select the Wildcard to add to the text",
+        true
+      ]
+    },
+    {
+      "id": 2,
+      "type": "SAX_Bridge_Text_Catalog_V2",
+      "pos": [520, 160],
+      "size": [520, 440],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        { "name": "text", "type": "STRING", "links": [2] },
+        { "name": "selection_json", "type": "STRING", "links": [3] }
+      ],
+      "properties": { "Node name for S&R": "SAX_Bridge_Text_Catalog_V2" },
+      "title": "Text Catalog V2（seed 123）",
+      "widgets_values": [
+        "{\"version\":2,\"catalog\":{\"items\":[{\"id\":\"quality\",\"name\":\"fixed_quality\",\"text\":\"high quality, detailed\",\"tags\":[\"quality\"]},{\"id\":\"candidate-a\",\"name\":\"soft_light\",\"text\":\"soft natural light\",\"tags\":[\"lighting\"]},{\"id\":\"candidate-b\",\"name\":\"film_grain\",\"text\":\"subtle film grain\",\"tags\":[\"style\"]},{\"id\":\"candidate-c\",\"name\":\"studio\",\"text\":\"clean studio background\",\"tags\":[\"background\"]}]},\"recipes\":[{\"id\":\"default\",\"name\":\"Default\",\"groups\":[{\"id\":\"quality-group\",\"name\":\"Fixed quality\",\"mode\":\"all\",\"item_ids\":[\"quality\"],\"count\":1,\"on\":true},{\"id\":\"variation-group\",\"name\":\"Random variation\",\"mode\":\"random\",\"item_ids\":[\"candidate-a\",\"candidate-b\",\"candidate-c\"],\"count\":2,\"on\":true}]}],\"active_recipe_id\":\"default\"}",
+        123,
+        "fixed"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "Note",
+      "pos": [120, 500],
+      "size": [920, 280],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "title": "手動テスト：SAX Text Catalog V2",
+      "widgets_values": [
+        "このワークフローは V1 と V2 の共存と、両ノードの実行を確認する。V1 の version 1 データは V2 と独立して保持される。V2 は seed=123 のまま実行し、固定品質テキスト 1 件と、3 候補から重複なしで選ばれる 2 件が出力されることを確認する。selection_json と text の候補順も確認する。続けて保存・再読込、V2 の複製と片方のみの編集、編集直後の Queue、Undo / Redo、候補数より大きい count での実行エラーを確認する。手順は tests/MANUAL_TEST.md の O 節を参照。"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "SAX_Bridge_Debug_Text",
+      "pos": [900, 40],
+      "size": [300, 100],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        { "name": "value", "type": "*", "link": 1 }
+      ],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Debug_Text" },
+      "title": "V1 出力（実行確認）",
+      "widgets_values": []
+    },
+    {
+      "id": 5,
+      "type": "SAX_Bridge_Debug_Text",
+      "pos": [900, 180],
+      "size": [300, 100],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        { "name": "value", "type": "*", "link": 2 }
+      ],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Debug_Text" },
+      "title": "V2 text 出力（実行確認）",
+      "widgets_values": []
+    },
+    {
+      "id": 6,
+      "type": "SAX_Bridge_Debug_Text",
+      "pos": [900, 320],
+      "size": [300, 100],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        { "name": "value", "type": "*", "link": 3 }
+      ],
+      "outputs": [],
+      "properties": { "Node name for S&R": "SAX_Bridge_Debug_Text" },
+      "title": "V2 selection_json 出力（実行確認）",
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [1, 1, 0, 4, 0, "STRING"],
+    [2, 2, 0, 5, 0, "STRING"],
+    [3, 2, 1, 6, 0, "STRING"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

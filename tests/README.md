@@ -104,6 +104,7 @@ Level 1 (pytest / JS テスト) と ruff は push・PR ごとに GitHub Actions
 | `16_lora_loader.json` | L-1 | Loader → Lora Loader (loras_json mutation シリアライズ) |
 | `17_sam3_multi.json` | L-2 | SAM3 Loader → Multi Segmenter + LoadImage (segments_json mutation シリアライズ) |
 | `18_toggle_manager.json` | L-3 | Toggle Manager 単一インスタンス (managed/scenes シリアライズ、07 と切り分け) |
+| `22_text_catalog_v2.json` | O | SAX Text Catalog V1 / V2 共存、固定 Group + 3 候補から 2 件のランダム選択 |
 
 ### 環境依存パラメータ
 
