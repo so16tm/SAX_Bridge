@@ -61,6 +61,18 @@ def test_seed_reproduces_and_changing_seed_can_change_selection():
     assert len({resolve(data, n)[0] for n in range(10)}) > 1
 
 
+def test_queued_primitive_random_seed_changes_v2_selection(monkeypatch):
+    from nodes.primitive_store import SAX_Bridge_Primitive_Store
+
+    payload = json.dumps([{"type": "SEED", "mode": "random", "value": 37}])
+    draws = iter([101, 202, 303])
+    monkeypatch.setattr("nodes.primitive_store.random.randint", lambda *args: next(draws))
+    data = config(items=30, count=7)
+    results = [resolve(data, SAX_Bridge_Primitive_Store.execute(payload)[0]) for _ in range(3)]
+    assert [report["seed"] for _, report in results] == [101, 202, 303]
+    assert len({text for text, _ in results}) == 3
+
+
 def test_does_not_consume_global_rng():
     before = random.getstate()
     resolve(config())

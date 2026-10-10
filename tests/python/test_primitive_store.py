@@ -36,9 +36,28 @@ def test_random_seed_invalidates_cache():
     assert math.isnan(SAX_Bridge_Primitive_Store.IS_CHANGED(payload))
 
 
-def test_ui_random_seed_is_used_without_redrawing():
+def test_queued_random_seeds_are_redrawn_for_each_execution(monkeypatch):
     payload = json.dumps([{"type": "SEED", "mode": "random", "value": 37, "max": 100}])
-    assert SAX_Bridge_Primitive_Store.execute(payload).args[0] == 37
+    draws = iter([12, 54, 89])
+    bounds = []
+
+    def draw_seed(low, high):
+        bounds.append((low, high))
+        return next(draws)
+
+    monkeypatch.setattr("nodes.primitive_store.random.randint", draw_seed)
+    # 登録済みキューの items_json は固定済み。UI の実行完了イベントでは更新できない。
+    results = [SAX_Bridge_Primitive_Store.execute(payload).args[0] for _ in range(3)]
+    assert results == [12, 54, 89]
+    assert bounds == [(0, 100)] * 3
+
+
+def test_queued_fixed_seed_is_reproducible(monkeypatch):
+    payload = json.dumps([{"type": "SEED", "mode": "fixed", "value": 37, "max": 100}])
+    def unexpected_draw(*args):
+        pytest.fail("fixed seed must not be redrawn")
+    monkeypatch.setattr("nodes.primitive_store.random.randint", unexpected_draw)
+    assert [SAX_Bridge_Primitive_Store.execute(payload).args[0] for _ in range(3)] == [37] * 3
 
 
 Store = SAX_Bridge_Primitive_Store

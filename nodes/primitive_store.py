@@ -57,10 +57,11 @@ class SAX_Bridge_Primitive_Store(io.ComfyNode):
             v = item.get("value", 0)
             try:
                 if t == "SEED":
-                    # UI は before/after の指定時点で value を更新する。
-                    # 再抽選すると表示 seed と実際の生成 seed が一致しない。
-                    if item.get("mode") == "random" and "value" not in item:
-                        v = random.randint(0, 2**53 - 1)
+                    # 登録済みキューは UI 更新前の value を共有することがある。
+                    # random は実行ごとに抽選し、固定値の再現には fixed を使う。
+                    if item.get("mode") == "random":
+                        maximum = min(2**53 - 1, max(0, int(item.get("max", 2**53 - 1))))
+                        v = random.randint(0, maximum)
                     result[i] = int(round(float(v)))
                 elif t == "INT":
                     result[i] = int(round(float(v)))

@@ -12,6 +12,7 @@ import {
     autoResize,
 } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
+import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 
 const EXT_NAME      = "SAX.TextCatalog";
 const NODE_TYPE     = "SAX_Bridge_Text_Catalog";
@@ -110,67 +111,6 @@ function sanitizeForDialog(s, maxLen = 80) {
 /** 隠しウィジェットを描画から除外する（Primitive Store と同パターン、type は変更しない） */
 function hideWidget(widget) {
     _hideWidgetCommon(widget, { mode: "minimal" });
-}
-
-// ---------------------------------------------------------------------------
-// danbooru タグオートコンプリート（pyssss ComfyUI-Custom-Scripts 連携）
-// ---------------------------------------------------------------------------
-
-/**
- * pyssss `TextAreaAutoComplete` の動的ロード。
- * pyssss が未導入 or 配信パスが異なる場合は null を返してフォールバック（手動入力）。
- *
- * 結果はモジュールスコープでメモ化し、Dialog 開閉ごとの再 import を避ける。
- */
-let _pysssssAutoCompletePromise = null;
-
-function loadPysssssAutoComplete() {
-    if (_pysssssAutoCompletePromise) return _pysssssAutoCompletePromise;
-    const candidatePaths = [
-        "/extensions/pysssss/js/common/autocomplete.js",
-        "/extensions/ComfyUI-Custom-Scripts/js/common/autocomplete.js",
-    ];
-    _pysssssAutoCompletePromise = (async () => {
-        for (const path of candidatePaths) {
-            try {
-                const mod = await import(path);
-                if (mod?.TextAreaAutoComplete) {
-                    // globalSeparator はインスタンス間で共有される static プロパティ。
-                    // pyssss 既定（""）を ", " に上書きして区切りを補完時に自動挿入する
-                    if (mod.TextAreaAutoComplete.globalSeparator === "") {
-                        mod.TextAreaAutoComplete.globalSeparator = ", ";
-                    }
-                    return mod.TextAreaAutoComplete;
-                }
-            } catch {
-                // 次の候補パスへ
-            }
-        }
-        return null;
-    })();
-    return _pysssssAutoCompletePromise;
-}
-
-/**
- * textarea に danbooru タグオートコンプリートをアタッチする。
- * pyssss 未導入時は何もしない（手動入力にフォールバック）。
- *
- * Manager Dialog のオーバーレイ (z-index 10000) より前に出すため、
- * dropdown の z-index を個別に引き上げる。pyssss 既定は 9999。
- */
-async function attachAutoComplete(textarea) {
-    const TextAreaAutoComplete = await loadPysssssAutoComplete();
-    if (!TextAreaAutoComplete) return;
-    // textarea が既に DOM から外されていた場合はアタッチしない
-    if (!textarea.isConnected) return;
-    try {
-        const instance = new TextAreaAutoComplete(textarea);
-        if (instance?.dropdown) {
-            instance.dropdown.style.zIndex = "10001";
-        }
-    } catch {
-        // pyssss 側の API 変更等で例外発生 → 黙ってフォールバック
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -764,6 +704,7 @@ function showManagerDialog(node, getState, applyDraft, initialItemId = null) {
     /** リストの可視高の変化（初回レイアウト・ウィンドウリサイズ）を拾う observer。 */
     let listResizeObserver = null;
     let editorEl   = null;
+    let autocompleteTextArea = null;
     let tagFilterRowEl = null;
     let leftTitleEl = null;
 
@@ -1021,6 +962,8 @@ function showManagerDialog(node, getState, applyDraft, initialItemId = null) {
 
     function renderEditor() {
         if (!editorEl) return;
+        if (autocompleteTextArea) detachAutoComplete(autocompleteTextArea);
+        autocompleteTextArea = null;
         editorEl.innerHTML = "";
 
         const item = draft.items.find(it => it.id === selectedId);
@@ -1095,6 +1038,7 @@ function showManagerDialog(node, getState, applyDraft, initialItemId = null) {
         editorEl.appendChild(textArea);
         // pyssss ComfyUI-Custom-Scripts が導入されていれば danbooru タグ補完を有効化。
         // 未導入時は黙って手動入力にフォールバックする
+        autocompleteTextArea = textArea;
         attachAutoComplete(textArea);
 
         // -- LoRA / Wildcard 挿入ボタン（カーソル位置に構文を挿入） --
@@ -1174,6 +1118,8 @@ function showManagerDialog(node, getState, applyDraft, initialItemId = null) {
         maxHeight: "85vh",
         className: "__sax_text_catalog_manager",
         onClose() {
+            if (autocompleteTextArea) detachAutoComplete(autocompleteTextArea);
+            autocompleteTextArea = null;
             listResizeObserver?.disconnect();
             listResizeObserver = null;
         },

@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 import { showDialog, showConfirmDialog, hideWidget } from "./sax_ui_base.js";
 import { LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow } from "./sax_text_catalog_v2_model.js";
 import { installQuickControls } from "./sax_text_catalog_v2_quick.js";
+import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 
 const NODE_TYPE = "SAX_Bridge_Text_Catalog_V2";
 const states = new WeakMap();
@@ -119,6 +120,7 @@ function openCatalog(node) {
         input.addEventListener("input", event => { if (!search || !event.isComposing) onInput(input.value); });
         if (search) input.addEventListener("compositionend", () => onInput(input.value));
         input.addEventListener("blur", () => { buffer.flush(); state.history.boundary(); pendingKey = null; });
+        if (area) attachAutoComplete(input);
         return input;
     };
     const itemField = (item, prop, where, area = false) => field(item[prop], prop === "text" ? "本文" : "素材名", `${where}:${item.id}:${prop}`,
@@ -357,6 +359,7 @@ function openCatalog(node) {
         for (const target of content.querySelectorAll("[data-scroll]")) state.scroll.set(target.dataset.scroll, target.scrollTop);
         const scroll = state.scroll;
         listObserver?.disconnect(); listObserver = null;
+        for (const input of content.querySelectorAll("[data-focus]")) detachAutoComplete(input);
         content.replaceChildren();
         preview = null;
         itemMap = new Map(config.catalog.items.map(item => [item.id, item]));
@@ -388,6 +391,7 @@ function openCatalog(node) {
 
     state.close = showDialog({ title: "SAX Text Catalog V2", className: "sax-catalog-v2", width: 1180, maxHeight: "98vh", gap: 10,
         onClose: () => {
+            for (const input of content.querySelectorAll("[data-focus]")) detachAutoComplete(input);
             if (state.discard) buffer.cancel(); else buffer.flush();
             for (const target of content.querySelectorAll("[data-scroll]")) state.scroll.set(target.dataset.scroll, target.scrollTop);
             listObserver?.disconnect(); widget(node).serializeValue = serializeValue;
@@ -412,7 +416,7 @@ function openCatalog(node) {
             report("ノードに自動反映 · ワークフローの保存は別途必要です");
             // テキスト入力中のCtrl+Zはブラウザの編集履歴を維持する。
             dlg.addEventListener("keydown", event => {
-                if (event.isComposing) return;
+                if (event.isComposing || event.defaultPrevented) return;
                 if (event.key === "Escape") { event.preventDefault(); close(); }
                 else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !["INPUT", "TEXTAREA"].includes(event.target.tagName)) {
                     event.preventDefault(); restore(event.shiftKey ? "redo" : "undo");

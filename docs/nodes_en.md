@@ -1044,6 +1044,8 @@ applied_loras: {'lora_a'} (1 entries)
 | `STR` | String | Click to open text input dialog |
 | `BOL` | Boolean | Click to toggle instantly (ON / OFF) |
 
+`SEED` in `random` mode draws a value from `0` to `Max` on each queued execution, including jobs submitted together. To reproduce a result, use `fixed` mode with the seed used for that result.
+
 > Renaming is not supported. To rename, delete and re-add the item.
 
 [↑ Back to top](#top)
