@@ -1,19 +1,24 @@
 import { app } from "../../scripts/app.js";
 import { showDialog, showConfirmDialog, hideWidget } from "./sax_ui_base.js";
 import { LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow } from "./sax_text_catalog_v2_model.js";
+import { installQuickControls } from "./sax_text_catalog_v2_quick.js";
 
 const NODE_TYPE = "SAX_Bridge_Text_Catalog_V2";
 const states = new WeakMap();
 const STYLE = `
-.sax-catalog-v2 *{box-sizing:border-box}.sax-catalog-v2>div{width:min(1180px,96vw)!important;height:88vh;max-height:94vh!important;padding:20px!important;border-radius:14px!important}
+.sax-catalog-v2 *{box-sizing:border-box}.sax-catalog-v2>div{width:98vw!important;height:96vh;max-height:98vh!important;padding:14px!important;border-radius:12px!important}
 .sax-catalog-v2 button,.sax-catalog-v2 input,.sax-catalog-v2 select,.sax-catalog-v2 textarea{font:inherit;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#45454b);border-radius:7px;padding:7px 9px;min-width:0}
 .sax-catalog-v2 button{cursor:pointer;white-space:nowrap}.sax-catalog-v2 button:hover{border-color:var(--primary-background,#5686d6)}.sax-catalog-v2 button:disabled{opacity:.4;cursor:default}.sax-catalog-v2 :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:2px}
 .sax-catalog-v2 input[type=checkbox]{accent-color:var(--primary-background,#5686d6);width:16px;height:16px;flex-shrink:0}.sax-catalog-v2 textarea{resize:vertical;min-height:92px;line-height:1.65;width:100%}.sax-catalog-v2 input[type=number]{width:76px}
 .sax-catalog-v2 .cv2-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sax-catalog-v2 .cv2-grow{min-width:100px}.sax-catalog-v2 .cv2-row>.cv2-grow{flex:1}.sax-catalog-v2 .cv2-pane>input,.sax-catalog-v2 .cv2-editor>input{flex:none;height:36px}.sax-catalog-v2 .cv2-pane>.cv2-row,.sax-catalog-v2 .cv2-pane>.cv2-muted{flex-shrink:0}.sax-catalog-v2 .cv2-row>input[type=number]{flex:none;min-width:76px;width:76px}.sax-catalog-v2 .cv2-muted{opacity:.68;font-size:12px}.sax-catalog-v2 .cv2-primary{background:var(--primary-background,#386cb8);color:white;border-color:transparent}
-.sax-catalog-v2 .cv2-layout{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(360px,1.4fr);gap:20px;min-height:0;flex:1}.sax-catalog-v2 .cv2-pane{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}.sax-catalog-v2 .cv2-pane+div{border-left:1px solid var(--border-color,#45454b);padding-left:20px}
-.sax-catalog-v2 .cv2-scroll{overflow:auto;min-height:0;flex:1;scrollbar-gutter:stable}.sax-catalog-v2 .cv2-list{max-height:38%;min-height:100px}.sax-catalog-v2 .cv2-item{display:flex;align-items:center;gap:8px;padding:7px 5px;border-bottom:1px solid var(--border-color,#45454b)}.sax-catalog-v2 .cv2-item[data-active=true]{background:color-mix(in srgb,var(--primary-background,#5686d6) 16%,transparent);border-radius:7px}.sax-catalog-v2 .cv2-item button{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;border:0;background:transparent}
-.sax-catalog-v2 .cv2-card{border:1px solid var(--border-color,#45454b);border-radius:10px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:10px}.sax-catalog-v2 .cv2-card[data-off=true]{opacity:.55}.sax-catalog-v2 .cv2-editor{display:flex;flex-direction:column;gap:8px;padding:2px 4px 10px}.sax-catalog-v2 .cv2-candidate{padding-top:10px;border-top:1px solid var(--border-color,#45454b);margin-top:10px}.sax-catalog-v2 .cv2-error{color:var(--error-text,#ed9494);white-space:pre-wrap}.sax-catalog-v2 .cv2-status{min-height:20px}.sax-catalog-v2 summary{cursor:pointer}.sax-catalog-v2 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 monospace;max-height:180px;overflow:auto;margin:6px 0}.sax-catalog-v2 label{display:flex;align-items:center;gap:6px}.sax-catalog-v2 .cv2-empty{padding:24px 8px;opacity:.65;line-height:1.8}.sax-catalog-v2 .cv2-warning{font-size:12px;color:var(--error-text,#ed9494)}
-@media(max-width:760px){.sax-catalog-v2>div{padding:12px!important}.sax-catalog-v2 .cv2-layout{display:flex;flex-direction:column;overflow:auto}.sax-catalog-v2 .cv2-pane{min-height:380px;flex-shrink:0}.sax-catalog-v2 .cv2-pane+div{padding:14px 0 0;border-left:0;border-top:1px solid var(--border-color,#45454b)}.sax-catalog-v2 .cv2-list{max-height:170px}}
+.sax-catalog-v2 .cv2-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px;min-height:0;flex:1;overflow:hidden}.sax-catalog-v2 .cv2-layout[data-hidden=true],.sax-catalog-v2 .cv2-layout[data-mode=library]{grid-template-columns:minmax(0,1fr)}.sax-catalog-v2 .cv2-layout[data-hidden=true]>.cv2-library{display:none}.sax-catalog-v2 .cv2-pane{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}.sax-catalog-v2 .cv2-work{border-left:1px solid var(--border-color,#45454b);padding-left:16px}.sax-catalog-v2 .cv2-layout[data-hidden=true]>.cv2-work{border-left:0;padding-left:0}
+.sax-catalog-v2 .cv2-scroll{overflow:auto;min-height:0;flex:1;scrollbar-gutter:stable}.sax-catalog-v2 .cv2-list{min-height:0}.sax-catalog-v2 .cv2-item{display:flex;align-items:center;gap:8px;padding:7px 5px;border-bottom:1px solid var(--border-color,#45454b)}.sax-catalog-v2 .cv2-item[data-active=true]{background:color-mix(in srgb,var(--primary-background,#5686d6) 16%,transparent);border-radius:7px}.sax-catalog-v2 .cv2-item button{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;border:0;background:transparent}.sax-catalog-v2 .cv2-item .cv2-muted{white-space:nowrap}
+.sax-catalog-v2 .cv2-card{border:1px solid var(--border-color,#45454b);border-radius:9px;padding:10px;margin-bottom:10px;display:flex;flex-direction:column;gap:8px}.sax-catalog-v2 .cv2-card[data-off=true]{opacity:.55}.sax-catalog-v2 .cv2-editor{display:flex;flex-direction:column;gap:10px;min-height:0;flex:1}.sax-catalog-v2 .cv2-editor>textarea{flex:1;min-height:320px;resize:none;padding:16px;line-height:1.8}.sax-catalog-v2 .cv2-candidate{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border-color,#45454b)}.sax-catalog-v2 .cv2-candidate>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.sax-catalog-v2 .cv2-error{color:var(--error-text,#ed9494);white-space:pre-wrap}.sax-catalog-v2 .cv2-status{min-height:16px;flex-shrink:0}.sax-catalog-v2 summary{cursor:pointer}.sax-catalog-v2 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 monospace;max-height:180px;overflow:auto;margin:6px 0}.sax-catalog-v2 label{display:flex;align-items:center;gap:6px}.sax-catalog-v2 .cv2-empty{padding:24px 8px;opacity:.65;line-height:1.8}.sax-catalog-v2 .cv2-warning{font-size:12px;color:var(--error-text,#ed9494)}.sax-catalog-v2 .cv2-menu{position:relative;flex:none}.sax-catalog-v2 .cv2-menu>summary{list-style:none;border:1px solid var(--border-color,#45454b);border-radius:7px;padding:7px 10px}.sax-catalog-v2 .cv2-menu>div{position:absolute;right:0;top:100%;z-index:2;display:flex;flex-direction:column;gap:6px;min-width:170px;padding:10px;border:1px solid var(--border-color,#45454b);border-radius:8px;background:var(--comfy-menu-bg,#222)}.sax-catalog-v2 .cv2-filter>div,.sax-catalog-v2 .cv2-tags>input{margin-top:8px}.sax-catalog-v2 .cv2-tabs{flex-wrap:nowrap}.sax-catalog-v2 .cv2-tabs>strong{margin-right:auto}.sax-catalog-v2 .cv2-tabs button[aria-pressed=true]{background:var(--primary-background,#386cb8);color:white;border-color:transparent}.sax-catalog-v2 .cv2-preview{flex:none;max-height:26vh;overflow:auto}.sax-catalog-v2 .cv2-filter,.sax-catalog-v2 .cv2-tags{flex:none}.sax-catalog-v2 .cv2-work>.cv2-row{flex-shrink:0}
+@media(max-width:760px){.sax-catalog-v2>div{padding:10px!important}.sax-catalog-v2 .cv2-tabs{gap:5px;flex-wrap:wrap}.sax-catalog-v2 .cv2-tabs>strong{display:none}.sax-catalog-v2 .cv2-tabs button{padding:6px 8px}.sax-catalog-v2 .cv2-layout{display:flex;gap:0}.sax-catalog-v2 .cv2-pane{flex:1;width:100%;min-height:0}.sax-catalog-v2 .cv2-layout[data-mobile=work]>.cv2-library{display:none}.sax-catalog-v2 .cv2-layout[data-mobile=library]>.cv2-work{display:none}.sax-catalog-v2 .cv2-work{padding-left:0;border-left:0}.sax-catalog-v2 .cv2-editor>textarea{min-height:0}.sax-catalog-v2 .cv2-list{max-height:none}}
+.sax-catalog-v2 .cv2-table .cv2-item,.sax-catalog-v2 .cv2-columns{display:grid;grid-template-columns:20px minmax(160px,1fr) minmax(120px,.7fr) minmax(180px,1.4fr) 80px;gap:12px}.sax-catalog-v2 .cv2-table .cv2-item>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sax-catalog-v2 .cv2-columns{padding:0 5px}.sax-catalog-v2 .cv2-table .cv2-item button{min-width:0}.sax-catalog-v2 .cv2-table .cv2-filter{max-width:560px}
+.sax-catalog-v2 .cv2-card .cv2-menu>div{position:static;margin-top:6px}.sax-catalog-v2 .cv2-card>details>summary,.sax-catalog-v2 .cv2-tags>summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sax-catalog-v2 .cv2-filter>summary{max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:1000px){.sax-catalog-v2 .cv2-tabs>strong{display:none}}
+@media(max-width:760px){.sax-catalog-v2 .cv2-table .cv2-item,.sax-catalog-v2 .cv2-columns{grid-template-columns:20px minmax(120px,1fr) minmax(80px,.6fr) 60px;gap:8px}.sax-catalog-v2 .cv2-excerpt{display:none}.sax-catalog-v2 .cv2-layout[data-mode=library]>.cv2-library{display:flex}}
 `;
 
 function el(tag, className = "", text = "") {
@@ -33,7 +38,7 @@ function seed(node) { return node.widgets?.find(w => w.name === "seed")?.value; 
 function stateFor(node) {
     let state = states.get(node);
     if (!state) {
-        state = { selected: new Set(), activeItem: null, query: "", tag: "", tagQuery: "", openGroups: new Set(), pages: new Map(), scroll: new Map(), history: null, result: null, close: null, refresh: null, status: null, flush: null };
+        state = { mode: "library", sort: "catalog", selectionAnchor: null, libraryHidden: false, mobilePane: "work", filtersOpen: false, tagsOpen: false, previewOpen: false, selected: new Set(), activeItem: null, query: "", tag: "", tagQuery: "", openGroups: new Set(), pages: new Map(), scroll: new Map(), history: null, result: null, close: null, refresh: null, status: null, flush: null, getConfig: null, quickCommit: null };
         states.set(node, state);
     }
     return state;
@@ -52,7 +57,8 @@ function openCatalog(node) {
     }
     if (!state.history || state.history.current !== widget(node).value) state.history = new EditHistory(widget(node).value);
     const recipe = () => config.recipes.find(r => r.id === config.active_recipe_id);
-    let content, status, preview, undoButton, redoButton;
+    let content, status, preview, undoButton, redoButton, paneButton;
+    const modeButtons = new Map();
     let referenceCounts = new Map();
     let itemMap = new Map(config.catalog.items.map(item => [item.id, item]));
     let listObserver = null;
@@ -92,6 +98,8 @@ function openCatalog(node) {
         if (redraw) render(); else { syncFields(); renderPreview(); updateHistory(); }
         return true;
     };
+    state.getConfig = () => config;
+    state.quickCommit = change => commit(change);
     const updateHistory = () => { undoButton.disabled = !state.history.undoStack.length; redoButton.disabled = !state.history.redoStack.length; };
     const restore = direction => {
         buffer.flush(); pendingKey = null;
@@ -141,7 +149,7 @@ function openCatalog(node) {
         if (to >= 0 && to < groups.length) [groups[at], groups[to]] = [groups[to], groups[at]];
     });
     const renderPreview = () => {
-        if (!preview) return;
+        if (!preview || !state.previewOpen) return;
         preview.replaceChildren();
         for (const warning of recipeWarnings(config)) preview.append(el("div", "cv2-warning", warning));
         const enabled = recipe().groups.filter(g => g.on);
@@ -164,15 +172,33 @@ function openCatalog(node) {
         }
     };
 
-    function renderLibrary(pane) {
-        pane.append(row(el("strong", "", "ライブラリ"), hint(`${config.catalog.items.length} / ${LIMITS.items}件`), button("＋ 新規", () => {
-            const id = newId();
-            if (commit(next => next.catalog.items.push({ id, name: "新しい素材", text: "", tags: [] }))) {
-                state.activeItem = id; state.query = ""; state.tag = ""; render();
-                content.querySelector(`[data-focus="library:${id}:name"]`)?.focus();
-            }
-        }, { disabled: config.catalog.items.length >= LIMITS.items })));
+    const menu = (label, ...actions) => {
+        const details = el("details", "cv2-menu");
+        details.append(el("summary", "", label), row(...actions)); return details;
+    };
+    const switchMode = mode => { buffer.flush(); state.mode = mode; state.mobilePane = "work"; render(); };
+    const deleteItems = async ids => {
+        const count = ids.reduce((n, id) => n + (referenceCounts.get(id) || 0), 0);
+        if (await showConfirmDialog({ title: "素材を削除", message: `${ids.length}件の素材を削除します。${count}件のグループ参照からも外れます。Undoで戻せます。`, danger: true, okLabel: "削除", cancelLabel: "キャンセル" })) {
+            if (!state.close) return;
+            commit(next => removeItems(next, ids)); render();
+        }
+    };
+    const newItem = () => {
+        const id = newId();
+        if (commit(next => next.catalog.items.push({ id, name: "新しい素材", text: "", tags: [] }))) {
+            state.activeItem = id; state.query = ""; state.tag = ""; switchMode("items");
+            content.querySelector(`[data-focus="library:${id}:name"]`)?.focus();
+        }
+    };
+    function renderLibrary(pane, full = false) {
+        if (full) pane.className += " cv2-table";
+        const managing = state.mode === "library";
+        pane.append(row(el("strong", "", full ? "アイテムライブラリ" : "アイテム"), hint(`${config.catalog.items.length}件`), ...(state.mode !== "composition" ? [button("＋ 新規", newItem, { disabled: config.catalog.items.length >= LIMITS.items })] : [])));
         const search = field(state.query, "名前・本文・タグを検索", "search", value => { state.query = value; render(); }, { search: true });
+        const filters = el("details", "cv2-filter"); filters.open = state.filtersOpen;
+        filters.addEventListener("toggle", () => { if (filters.isConnected) state.filtersOpen = filters.open; });
+        filters.append(el("summary", "cv2-muted", state.tag ? `絞り込み · ${state.tag}` : "絞り込み"));
         const tags = el("select"); tags.setAttribute("aria-label", "タグで絞り込み"); tags.dataset.focus = "tag-filter";
         tags.append(new Option("すべてのタグ", ""));
         const allTags = [...new Set(config.catalog.items.flatMap(i => i.tags))].sort();
@@ -180,59 +206,86 @@ function openCatalog(node) {
         if (state.tag && !visibleTags.includes(state.tag)) visibleTags.unshift(state.tag);
         for (const tag of visibleTags) tags.append(new Option(tag, tag));
         tags.value = state.tag; tags.addEventListener("change", () => { state.tag = tags.value; render(); });
-        pane.append(search, row(field(state.tagQuery, "タグを検索", "tag-search", value => { state.tagQuery = value; render(); }, { search: true }), tags));
-        if (allTags.length > 12) pane.append(hint(`タグ${allTags.length}種類 · 検索結果の先頭12件を表示`));
+        filters.append(row(field(state.tagQuery, "タグを検索", "tag-search", value => { state.tagQuery = value; render(); }, { search: true }), tags));
+        if (allTags.length > 12) filters.append(hint(`タグ${allTags.length}種類 · 検索結果の先頭12件を表示`));
+        const controls = row(search, filters);
+        if (full) {
+            const sort = el("select"); sort.setAttribute("aria-label", "並べ替え");
+            for (const [value, name] of [["catalog", "登録順"], ["name", "名前順"], ["used", "使用件数順"]]) sort.append(new Option(name, value));
+            sort.value = state.sort; sort.addEventListener("change", () => { state.sort = sort.value; render(); }); controls.append(sort);
+        }
+        pane.append(controls);
         const visible = filteredItems(config, state.query, state.tag);
-        pane.append(row(button("表示中を選択", () => { for (const item of visible) state.selected.add(item.id); render(); }, { disabled: !visible.length }), button("選択解除", () => { state.selected.clear(); render(); }, { disabled: !state.selected.size }), hint(`${selectedIds().length}件選択`)));
-        const list = el("div", "cv2-scroll cv2-list"); list.dataset.scroll = "items";
-        if (!visible.length) list.append(el("div", "cv2-empty", config.catalog.items.length ? "一致する素材がありません" : "「＋ 新規」で素材を作成します。\n素材を選択して組み合わせに追加できます。"));
+        if (state.sort === "name") visible.sort((a, b) => a.name.localeCompare(b.name));
+        else if (state.sort === "used") visible.sort((a, b) => (referenceCounts.get(b.id) || 0) - (referenceCounts.get(a.id) || 0));
+        const selecting = managing || state.mode === "composition";
+        if (selecting) {
+            const selected = selectedIds();
+            const selectionRow = row(button("表示中を選択", () => { for (const item of visible) state.selected.add(item.id); render(); }, { disabled: !visible.length }), button("選択解除", () => { state.selected.clear(); render(); }, { disabled: !selected.length }), hint(`${selected.length}件選択 / 検索結果${visible.length}件`));
+            if (managing && selected.length) {
+                const bulkTag = field("", "一括操作するタグ（カンマ区切り）", "bulk-tags", () => {});
+                const updateTags = remove => {
+                    const target = parseTags(bulkTag.value);
+                    commit(next => { for (const item of next.catalog.items) if (state.selected.has(item.id)) item.tags = remove ? item.tags.filter(t => !target.includes(t)) : [...new Set([...item.tags, ...target])]; });
+                };
+                selectionRow.append(menu("一括操作", bulkTag, button("タグ追加", () => updateTags(false)), button("タグ除去", () => updateTags(true)), button("選択アイテムを削除", () => deleteItems(selected))));
+            }
+            pane.append(selectionRow);
+        }
+        if (full) { const columns = el("div", "cv2-columns cv2-muted"); columns.append(el("span"), el("span", "", "名前"), el("span", "", "タグ"), el("span", "cv2-excerpt", "本文"), el("span", "", "使用数")); pane.append(columns); }
+        const list = el("div", "cv2-scroll cv2-list"); list.dataset.scroll = full ? "library-items" : "items";
+        if (!visible.length) list.append(el("div", "cv2-empty", config.catalog.items.length ? "一致する素材がありません" : "「＋ 新規」でアイテムを作成します。"));
         const paintRows = () => {
             if (!visible.length) return;
             const { start, end, top, bottom } = visibleWindow(visible.length, list.scrollTop, list.clientHeight || 220);
             list.replaceChildren();
             const before = el("div"); before.style.height = `${top}px`; list.append(before);
-            for (const item of visible.slice(start, end)) {
+            for (const [offset, item] of visible.slice(start, end).entries()) {
                 const line = el("div", "cv2-item"); line.style.height = "40px"; line.dataset.active = String(item.id === state.activeItem);
-                const check = el("input"); check.type = "checkbox"; check.checked = state.selected.has(item.id); check.setAttribute("aria-label", `${item.name}を選択`);
-                check.addEventListener("change", () => { if (check.checked) state.selected.add(item.id); else state.selected.delete(item.id); render(); });
-                const choose = button(item.name || "無題の素材", () => { state.activeItem = item.id; render(); });
-                choose.dataset.itemname = item.id;
-                choose.title = item.text.slice(0, 500); line.append(check, choose, hint(`${referenceCounts.get(item.id) || 0}件で使用`)); list.append(line);
+                if (selecting) {
+                    const check = el("input"); check.type = "checkbox"; check.checked = state.selected.has(item.id); check.setAttribute("aria-label", `${item.name}を選択`);
+                    const at = start + offset;
+                    check.addEventListener("click", event => {
+                        const anchor = visible.findIndex(i => i.id === state.selectionAnchor);
+                        if (event.shiftKey && anchor >= 0) for (const ranged of visible.slice(Math.min(at, anchor), Math.max(at, anchor) + 1)) { if (check.checked) state.selected.add(ranged.id); else state.selected.delete(ranged.id); }
+                        if (check.checked) state.selected.add(item.id); else state.selected.delete(item.id);
+                        state.selectionAnchor = item.id; render();
+                    }); line.append(check);
+                }
+                const choose = button(item.name || "無題の素材", () => {
+                    if (state.mode === "composition") { if (state.selected.has(item.id)) state.selected.delete(item.id); else state.selected.add(item.id); render(); }
+                    else { state.activeItem = item.id; switchMode("items"); }
+                });
+                choose.dataset.itemname = item.id; choose.title = item.text.slice(0, 500); line.append(choose);
+                if (full) line.append(hint(item.tags.join(" · ")), el("span", "cv2-muted cv2-excerpt", item.text.slice(0, 180).replace(/\s+/g, " ")));
+                line.append(hint(`${referenceCounts.get(item.id) || 0}${full ? "件" : ""}`)); list.append(line);
             }
             const after = el("div"); after.style.height = `${bottom}px`; list.append(after);
         };
         list.addEventListener("scroll", paintRows); paintRows();
         if (typeof ResizeObserver !== "undefined") { listObserver = new ResizeObserver(paintRows); listObserver.observe(list); }
         pane.append(list);
-        const selected = selectedIds();
-        if (selected.length) {
-            pane.append(row(button("固定で追加", () => addGroup("all"), { disabled: recipe().groups.length >= LIMITS.groups }), button("ランダムで追加", () => addGroup("random"), { primary: true, disabled: recipe().groups.length >= LIMITS.groups })));
-            const bulkTag = field("", "一括追加するタグ（カンマ区切り）", "bulk-tags", () => {});
-            pane.append(row(bulkTag, button("タグ追加", () => {
-                const added = parseTags(bulkTag.value);
-                commit(next => { for (const item of next.catalog.items) if (state.selected.has(item.id)) item.tags = [...new Set([...item.tags, ...added])]; });
-            }), button("削除", async () => {
-                const count = selected.reduce((n, id) => n + (referenceCounts.get(id) || 0), 0);
-                if (await showConfirmDialog({ title: "素材を削除", message: `${selected.length}件の素材を削除します。${count}件のグループ参照からも外れます。Undoで戻せます。`, danger: true, okLabel: "削除", cancelLabel: "キャンセル" })) {
-                    if (!state.close) return;
-                    commit(next => removeItems(next, selected)); state.selected.clear(); render();
-                }
-            })));
-        }
-        const active = config.catalog.items.find(i => i.id === state.activeItem);
-        const editor = el("div", "cv2-scroll cv2-editor"); editor.dataset.scroll = "editor";
-        if (active) {
-            editor.append(row(hint("素材を直接編集"), hint(`使用${referenceCounts.get(active.id) || 0}件に反映`), button("複製", () => {
-                const copy = { ...structuredClone(active), id: newId(), name: `${active.name.slice(0, 250)} コピー` };
-                if (commit(next => next.catalog.items.push(copy))) { state.activeItem = copy.id; render(); }
-            }, { disabled: config.catalog.items.length >= LIMITS.items })), itemField(active, "name", "library"), itemField(active, "text", "library", true));
-            editor.append(field(active.tags.join(", "), "タグ（カンマ区切り・最大8件）", `tags:${active.id}`, value => {
-                const parsed = parseTags(value);
-                if (parsed.length > LIMITS.tags || parsed.some(tag => [...tag].length > LIMITS.name)) { report("未反映: タグは8件・各256文字までです", true); return; }
-                commit(next => { next.catalog.items.find(i => i.id === active.id).tags = parsed; }, `tags:${active.id}`, false);
-            }, { max: 8 * (LIMITS.name + 2) }));
-        } else editor.append(el("div", "cv2-empty", "素材名をクリックすると、ここで本文を編集できます。"));
-        pane.append(editor);
+        if (state.mode === "composition" && selectedIds().length) pane.append(row(button("固定で追加", () => addGroup("all"), { disabled: recipe().groups.length >= LIMITS.groups }), button("ランダムで追加", () => addGroup("random"), { primary: true, disabled: recipe().groups.length >= LIMITS.groups })));
+    }
+
+    function renderItemEditor(pane) {
+        const active = itemMap.get(state.activeItem);
+        if (!active) { pane.append(el("div", "cv2-empty", "ライブラリでアイテムを選択するか、新規作成してください。"), button("＋ 新規", newItem)); return; }
+        const editor = el("div", "cv2-editor"); editor.dataset.scroll = "editor";
+        const duplicate = () => {
+            const copy = { ...structuredClone(active), id: newId(), name: `${active.name.slice(0, 250)} コピー` };
+            if (commit(next => next.catalog.items.push(copy))) { state.activeItem = copy.id; render(); content.querySelector(`[data-focus="library:${copy.id}:name"]`)?.focus(); }
+        };
+        editor.append(row(itemField(active, "name", "library"), hint(`使用${referenceCounts.get(active.id) || 0}件に反映`), menu("操作", button("アイテムを複製", duplicate, { disabled: config.catalog.items.length >= LIMITS.items }), button("アイテムを削除", () => deleteItems([active.id])))));
+        const tags = el("details", "cv2-tags"); tags.open = state.tagsOpen;
+        tags.addEventListener("toggle", () => { if (tags.isConnected) state.tagsOpen = tags.open; });
+        tags.append(el("summary", "cv2-muted", active.tags.length ? `タグ · ${active.tags.join(" · ")}` : "タグを編集"));
+        tags.append(field(active.tags.join(", "), "タグ（カンマ区切り・最大8件）", `tags:${active.id}`, value => {
+            const parsed = parseTags(value);
+            if (parsed.length > LIMITS.tags || parsed.some(tag => [...tag].length > LIMITS.name)) { report("未反映: タグは8件・各256文字までです", true); return; }
+            commit(next => { next.catalog.items.find(i => i.id === active.id).tags = parsed; }, `tags:${active.id}`, false);
+        }, { max: 8 * (LIMITS.name + 2) }));
+        editor.append(tags, itemField(active, "text", "library", true)); pane.append(editor);
     }
 
     function renderRecipe(pane) {
@@ -240,24 +293,24 @@ function openCatalog(node) {
         const select = el("select", "cv2-grow"); select.setAttribute("aria-label", "組み合わせ");
         for (const item of config.recipes) { const option = new Option(item.name || "無題の組み合わせ", item.id); option.dataset.recipename = item.id; select.append(option); }
         select.value = current.id; select.addEventListener("change", () => commit(next => { next.active_recipe_id = select.value; }));
-        pane.append(row(el("strong", "", "組み合わせ"), select, button("＋", () => commit(next => {
-            const id = newId(); next.recipes.push({ id, name: `組み合わせ ${next.recipes.length + 1}`, groups: [] }); next.active_recipe_id = id;
-        }), { disabled: config.recipes.length >= LIMITS.recipes })));
-        pane.append(row(field(current.name, "組み合わせ名", `recipe:${current.id}`, value => commit(next => { next.recipes.find(r => r.id === current.id).name = value; }, `recipe:${current.id}`, false)), button("複製", () => commit(next => {
+        const metadata = menu("操作", field(current.name, "組み合わせ名", `recipe:${current.id}`, value => commit(next => { next.recipes.find(r => r.id === current.id).name = value; }, `recipe:${current.id}`, false)), button("組み合わせを複製", () => commit(next => {
             const copy = structuredClone(current); copy.id = newId(); copy.name = `${copy.name.slice(0, 250)} コピー`; copy.groups.forEach(g => { g.id = newId(); }); next.recipes.push(copy); next.active_recipe_id = copy.id;
-        }), { disabled: config.recipes.length >= LIMITS.recipes }), button("削除", async () => {
+        }), { disabled: config.recipes.length >= LIMITS.recipes }), button("組み合わせを削除", async () => {
             if (await showConfirmDialog({ title: "組み合わせを削除", message: "この組み合わせを削除します。素材はライブラリに残ります。Undoで戻せます。", danger: true, okLabel: "削除", cancelLabel: "キャンセル" })) {
                 if (!state.close) return;
                 commit(next => { next.recipes = next.recipes.filter(r => r.id !== current.id); next.active_recipe_id = next.recipes[0].id; });
             }
-        }, { disabled: config.recipes.length === 1 })));
+        }, { disabled: config.recipes.length === 1 }));
+        pane.append(row(select, button("＋ 組み合わせ", () => commit(next => {
+            const id = newId(); next.recipes.push({ id, name: `組み合わせ ${next.recipes.length + 1}`, groups: [] }); next.active_recipe_id = id;
+        }), { disabled: config.recipes.length >= LIMITS.recipes }), metadata));
         const groups = el("div", "cv2-scroll"); groups.dataset.scroll = "groups";
-        if (!current.groups.length) groups.append(el("div", "cv2-empty", "左で素材を選び、「固定で追加」または「ランダムで追加」。\n複数グループを上から順に結合します。"));
+        if (!current.groups.length) groups.append(el("div", "cv2-empty", "一覧でアイテムを選び、「固定で追加」または「ランダムで追加」。グループを上から順に結合します。"));
         for (const [index, group] of current.groups.entries()) {
             const card = el("div", "cv2-card"); card.dataset.off = String(!group.on);
             const enabled = el("input"); enabled.type = "checkbox"; enabled.checked = group.on; enabled.setAttribute("aria-label", "グループを有効化");
             enabled.addEventListener("change", () => editGroup(group.id, g => { g.on = enabled.checked; }));
-            card.append(row(enabled, field(group.name, "グループ名", `group:${group.id}`, value => editGroup(group.id, g => { g.name = value; }, `group:${group.id}`, false)), button("↑", () => moveGroup(group.id, -1), { disabled: !index }), button("↓", () => moveGroup(group.id, 1), { disabled: index === current.groups.length - 1 }), button("外す", () => commit(next => { const r = next.recipes.find(r => r.id === next.active_recipe_id); r.groups = r.groups.filter(g => g.id !== group.id); }))));
+            card.append(row(enabled, field(group.name, "グループ名", `group:${group.id}`, value => editGroup(group.id, g => { g.name = value; }, `group:${group.id}`, false)), menu("操作", button("上へ移動", () => moveGroup(group.id, -1), { disabled: !index }), button("下へ移動", () => moveGroup(group.id, 1), { disabled: index === current.groups.length - 1 }), button("グループを外す", () => commit(next => { const r = next.recipes.find(r => r.id === next.active_recipe_id); r.groups = r.groups.filter(g => g.id !== group.id); })))));
             const mode = el("select"); mode.setAttribute("aria-label", "選択方式"); mode.append(new Option("すべて使用", "all"), new Option("ランダム選択", "random")); mode.value = group.mode;
             mode.addEventListener("change", () => editGroup(group.id, g => { g.mode = mode.value; }));
             const modeRow = row(mode, hint(`候補 ${group.item_ids.length}件`));
@@ -265,9 +318,9 @@ function openCatalog(node) {
                 if (value === "" || !/^\d+$/.test(value) || Number(value) > LIMITS.items) { report("未反映: 抽選数は0〜10000の整数で指定してください", true); return; }
                 editGroup(group.id, g => { g.count = Number(value); }, `count:${group.id}`, false);
             }, { type: "number" }), hint("件を選ぶ"));
+            modeRow.append(menu("候補を変更", button("左の選択を候補に設定", () => editGroup(group.id, g => { g.item_ids = selectedIds(); }), { disabled: !selectedIds().length }), button("左で候補を選択", () => { state.selected = new Set(group.item_ids); state.query = ""; state.tag = ""; state.mobilePane = "library"; state.libraryHidden = false; render(); })));
             card.append(modeRow);
-            card.append(row(button("左の選択を候補に設定", () => editGroup(group.id, g => { g.item_ids = selectedIds(); }), { disabled: !selectedIds().length }), button("左で候補を選択", () => { state.selected = new Set(group.item_ids); state.query = ""; state.tag = ""; render(); })));
-            const candidates = el("details"); candidates.open = state.openGroups.has(group.id) || group.item_ids.length === 1;
+            const candidates = el("details"); candidates.dataset.group = group.id; candidates.open = state.openGroups.has(group.id) || group.item_ids.length === 1;
             candidates.addEventListener("toggle", () => {
                 if (!candidates.isConnected) return;
                 const wasOpen = state.openGroups.has(group.id);
@@ -277,39 +330,55 @@ function openCatalog(node) {
             const names = group.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name || "無題");
             candidates.append(el("summary", "cv2-muted", names.length ? `${names.join(" · ")}${group.item_ids.length > 4 ? ` … 全${group.item_ids.length}件` : ""}` : "候補がありません"));
             const page = Math.min(state.pages.get(group.id) || 0, Math.max(0, Math.ceil(group.item_ids.length / 20) - 1));
-            if (group.item_ids.length > 20) candidates.append(row(button("前の20件", () => { state.pages.set(group.id, page - 1); render(); }, { disabled: page === 0 }), hint(`${page * 20 + 1}–${Math.min((page + 1) * 20, group.item_ids.length)} / ${group.item_ids.length}件`), button("次の20件", () => { state.pages.set(group.id, page + 1); render(); }, { disabled: (page + 1) * 20 >= group.item_ids.length })));
-            for (const [offset, id] of (candidates.open ? group.item_ids.slice(page * 20, (page + 1) * 20) : []).entries()) {
-                const at = page * 20 + offset;
-                const item = itemMap.get(id);
-                const candidate = el("div", "cv2-candidate cv2-editor");
-                candidate.append(row(itemField(item, "name", group.id), hint(`使用${referenceCounts.get(id) || 0}件に反映`)), itemField(item, "text", group.id, true));
-                candidate.append(row(button("複製して差し替え", () => commit(next => {
-                    const original = next.catalog.items.find(i => i.id === id); const copy = { ...structuredClone(original), id: newId(), name: `${original.name.slice(0, 250)} コピー` };
-                    next.catalog.items.push(copy); next.recipes.find(r => r.id === next.active_recipe_id).groups.find(g => g.id === group.id).item_ids[at] = copy.id;
-                }), { disabled: config.catalog.items.length >= LIMITS.items }), button("↑", () => editGroup(group.id, g => { [g.item_ids[at - 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at - 1]]; }), { disabled: !at }), button("↓", () => editGroup(group.id, g => { [g.item_ids[at + 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at + 1]]; }), { disabled: at === group.item_ids.length - 1 }), button("候補から外す", () => editGroup(group.id, g => { g.item_ids = g.item_ids.filter(value => value !== id); }))));
-                candidates.append(candidate);
+            if (candidates.open) {
+                if (group.item_ids.length > 20) candidates.append(row(button("前の20件", () => { state.pages.set(group.id, page - 1); render(); }, { disabled: page === 0 }), hint(`${page * 20 + 1}–${Math.min((page + 1) * 20, group.item_ids.length)} / ${group.item_ids.length}件`), button("次の20件", () => { state.pages.set(group.id, page + 1); render(); }, { disabled: (page + 1) * 20 >= group.item_ids.length })));
+                for (const [offset, id] of group.item_ids.slice(page * 20, (page + 1) * 20).entries()) {
+                    const at = page * 20 + offset;
+                    const label = el("span", "", itemMap.get(id)?.name || "無題の素材"); label.dataset.itemname = id;
+                    const candidate = el("div", "cv2-candidate"); candidate.dataset.candidate = id;
+                    candidate.append(label, menu("⋯", button("候補を上へ", () => editGroup(group.id, g => { [g.item_ids[at - 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at - 1]]; }), { disabled: !at }), button("候補を下へ", () => editGroup(group.id, g => { [g.item_ids[at + 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at + 1]]; }), { disabled: at === group.item_ids.length - 1 }), button("候補から外す", () => editGroup(group.id, g => { g.item_ids = g.item_ids.filter(value => value !== id); }))));
+                    candidates.append(candidate);
+                }
             }
             card.append(candidates); groups.append(card);
         }
         pane.append(groups);
-        preview = el("div"); pane.append(preview); renderPreview();
+        const details = el("details", "cv2-preview"); details.open = state.previewOpen;
+        details.append(el("summary", "cv2-muted", "出力プレビュー・実行結果"));
+        preview = el("div"); details.append(preview);
+        details.addEventListener("toggle", () => { if (details.isConnected) { state.previewOpen = details.open; renderPreview(); } });
+        pane.append(details); renderPreview();
     }
 
     function render() {
         const active = document.activeElement;
         const focus = active?.dataset?.focus;
         const selection = focus && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
-        const scroll = content.children.length ? new Map([...content.querySelectorAll("[data-scroll]")].map(e => [e.dataset.scroll, e.scrollTop])) : state.scroll;
+        for (const target of content.querySelectorAll("[data-scroll]")) state.scroll.set(target.dataset.scroll, target.scrollTop);
+        const scroll = state.scroll;
         listObserver?.disconnect(); listObserver = null;
         content.replaceChildren();
+        preview = null;
         itemMap = new Map(config.catalog.items.map(item => [item.id, item]));
         const itemIds = new Set(config.catalog.items.map(i => i.id));
         referenceCounts = new Map();
         for (const r of config.recipes) for (const g of r.groups) for (const id of g.item_ids) referenceCounts.set(id, (referenceCounts.get(id) || 0) + 1);
         for (const id of state.selected) if (!itemIds.has(id)) state.selected.delete(id);
         if (!config.catalog.items.some(i => i.id === state.activeItem)) state.activeItem = config.catalog.items[0]?.id ?? null;
-        const left = el("div", "cv2-pane"), right = el("div", "cv2-pane"); content.append(left, right);
-        renderLibrary(left); renderRecipe(right); updateHistory();
+        content.dataset.mode = state.mode;
+        content.dataset.hidden = String(state.libraryHidden && state.mode !== "library");
+        content.dataset.mobile = state.mobilePane;
+        for (const [mode, control] of modeButtons) control.setAttribute("aria-pressed", String(state.mode === mode));
+        paneButton.disabled = state.mode === "library";
+        const mobile = typeof matchMedia !== "undefined" && matchMedia("(max-width:760px)").matches;
+        paneButton.textContent = mobile ? (state.mobilePane === "work" ? "一覧を表示" : "作業を表示") : (state.libraryHidden ? "一覧を表示" : "一覧を隠す");
+        if (state.mode === "library") { const pane = el("div", "cv2-pane cv2-library"); content.append(pane); renderLibrary(pane, true); }
+        else {
+            const left = el("div", "cv2-pane cv2-library"), right = el("div", "cv2-pane cv2-work"); content.append(left, right);
+            renderLibrary(left);
+            if (state.mode === "items") renderItemEditor(right); else renderRecipe(right);
+        }
+        updateHistory();
         for (const target of content.querySelectorAll("[data-scroll]")) if (scroll.has(target.dataset.scroll)) { target.scrollTop = scroll.get(target.dataset.scroll); target.dispatchEvent(new Event("scroll")); }
         if (focus) {
             const input = [...content.querySelectorAll("[data-focus]")].find(e => e.dataset.focus === focus);
@@ -317,17 +386,28 @@ function openCatalog(node) {
         }
     }
 
-    state.close = showDialog({ title: "SAX Text Catalog V2", className: "sax-catalog-v2", width: 1180, maxHeight: "94vh", gap: 12,
+    state.close = showDialog({ title: "SAX Text Catalog V2", className: "sax-catalog-v2", width: 1180, maxHeight: "98vh", gap: 10,
         onClose: () => {
             if (state.discard) buffer.cancel(); else buffer.flush();
-            state.scroll = new Map([...content.querySelectorAll("[data-scroll]")].map(e => [e.dataset.scroll, e.scrollTop]));
+            for (const target of content.querySelectorAll("[data-scroll]")) state.scroll.set(target.dataset.scroll, target.scrollTop);
             listObserver?.disconnect(); widget(node).serializeValue = serializeValue;
-            state.close = null; state.refresh = null; state.status = null; state.flush = null;
+            state.close = null; state.refresh = null; state.status = null; state.flush = null; state.getConfig = null; state.quickCommit = null;
         },
         build(dlg, close) {
+            // 共通ダイアログのタイトルを操作行へまとめて作業領域を確保する。
+            dlg.children[0].style.display = "none";
             const style = el("style"); style.textContent = STYLE; dlg.append(style);
             undoButton = button("元に戻す", () => restore("undo")); redoButton = button("やり直す", () => restore("redo"));
-            dlg.append(row(hint("直接編集・自動反映"), undoButton, redoButton, button("閉じる", close)));
+            const controls = row(el("strong", "", "SAX Text Catalog V2")); controls.className += " cv2-tabs";
+            for (const [mode, label] of [["library", "ライブラリ"], ["items", "アイテム編集"], ["composition", "組み合わせ"]]) {
+                const control = button(label, () => switchMode(mode)); modeButtons.set(mode, control); controls.append(control);
+            }
+            paneButton = button("一覧を表示", () => {
+                if (typeof matchMedia !== "undefined" && matchMedia("(max-width:760px)").matches) { state.libraryHidden = false; state.mobilePane = state.mobilePane === "work" ? "library" : "work"; }
+                else state.libraryHidden = !state.libraryHidden;
+                render();
+            });
+            controls.append(paneButton, undoButton, redoButton, button("閉じる", close)); dlg.append(controls);
             content = el("div", "cv2-layout"); status = el("div", "cv2-status cv2-muted"); dlg.append(content, status);
             report("ノードに自動反映 · ワークフローの保存は別途必要です");
             // テキスト入力中のCtrl+Zはブラウザの編集履歴を維持する。
@@ -348,7 +428,7 @@ function openCatalog(node) {
 function initialize(node) {
     const value = widget(node);
     if (value) hideWidget(value, { mode: "minimal" });
-    if (!node.widgets?.some(w => w.name === "カタログを開く")) node.addWidget("button", "カタログを開く", null, () => openCatalog(node), { serialize: false });
+    if (!node.widgets?.some(w => w.name === "カタログを開く" || w.name === "管理・編集")) node.addWidget("button", "カタログを開く", null, () => openCatalog(node), { serialize: false });
     node.size[0] = Math.max(node.size[0] ?? 0, 310);
     const seedWidget = node.widgets?.find(w => w.name === "seed");
     if (seedWidget && !seedWidget._saxV2Chained) {
@@ -356,6 +436,11 @@ function initialize(node) {
         seedWidget.callback = function (...args) { const result = callback?.apply(this, args); states.get(node)?.refresh?.(); return result; };
         seedWidget._saxV2Chained = true;
     }
+    installQuickControls(node, {
+        read: () => stateFor(node).getConfig?.(),
+        commit: change => stateFor(node).quickCommit?.(change),
+        state: () => stateFor(node),
+    });
 }
 
 app.registerExtension({

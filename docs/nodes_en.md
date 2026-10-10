@@ -1189,10 +1189,14 @@ With `merge_outputs` ON (`merged`), surviving texts are stripped, empty strings 
 
 #### UI and Editing
 
-- The left pane manages more than 1,000 materials through name/text/tag search, tag filtering, inline editing, bulk tagging, and multi-select. Candidates can also be selected in bulk from tag-filtered or searched results.
-- Large material lists use virtualization to keep the DOM and scrolling responsive while navigating visible rows.
-- The right pane builds combinations: save or duplicate recipes; edit fixed or random groups, count, and candidates; toggle groups; and reorder them.
-- Materials can be edited directly. Shared material can be duplicated and replaced without changing other uses.
+- Switch saved recipes, toggle individual groups, and change random selection counts directly on the node. Groups are displayed eight at a time. Seed and post-run seed behavior are also controlled on the node.
+- Open the management/editor window for bulk item operations, text editing, and recipe construction. Routine recipe switching and group toggling do not require opening this window.
+- Separate views handle the library, item editing, and combinations.
+- The library uses the full window for names, tags, text excerpts, and usage counts. Search names/text/tags, sort, select ranges with Shift, select all search results, and apply bulk tag changes or deletion.
+- The list is virtualized: only visible rows are rendered even with 10,000 materials. Each activity uses the available space instead of squeezing a text editor below the list.
+- The item editor provides dedicated name, tag, and large text fields. Hide the navigation list to focus on the text.
+- The combinations view manages item references: switch or duplicate recipes, configure fixed or random groups, choose candidates and counts, toggle groups, and reorder them. Item text editing fields are absent from this view.
+- Combinations reference original items by ID, so item edits affect every use. To use independent text, duplicate an item in the item editor, then choose that copy as a candidate in the combinations view.
 - Edits apply to the node automatically, with Undo / Redo and post-run result display.
 
 > **Data scope**: Per node (`config_json` is saved in and travels with the workflow). V2 data is independent from V1 data.
