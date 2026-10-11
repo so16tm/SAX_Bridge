@@ -1,0 +1,77 @@
+// 多数のワイルドカードの階層表示・編集・保存を実ブラウザーで確認する。
+const { chromium } = require(process.env.SAX_PLAYWRIGHT_PATH || 'playwright');
+const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const root = path.resolve(__dirname, '../..');
+const roots = [{id:'comfy',label:'ComfyUI/wildcards'},{id:'addon',label:'custom_nodes/addon/wildcards'}];
+const files = Array.from({length:10000},(_,i)=>({root_id:'comfy',name:`batch/dir${Math.floor(i/100)}/item${i}`}));
+files.push({root_id:'addon',name:'batch/dir99/item9999',shadowed:true});
+let text = 'alpha\r\nbeta\r\ngamma\r\ndelta', sha = '1', failSave = false, writes = 0;
+const html = `<meta charset="utf-8"><style>body{background:#222;color:#ddd}</style><button id="launch">編集</button><script type="module">
+import {openWildcardEditor} from '/js/sax_wildcard_editor.js';document.querySelector('#launch').onclick=openWildcardEditor;
+</script>`;
+const server = http.createServer(async(req,res)=>{
+  res.setHeader('Content-Type','text/javascript; charset=utf-8');
+  const url = new URL(req.url,'http://localhost');
+  if(url.pathname==='/'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end(html);return;}
+  if(url.pathname==='/scripts/app.js'){res.end('export const app={registerExtension(){}};');return;}
+  if(url.pathname==='/scripts/api.js'){res.end('export const api={fetchApi:(url,options)=>fetch(url,options)};');return;}
+  if(url.pathname==='/sax/wildcards'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({roots,files}));return;}
+  if(url.pathname==='/sax/wildcards/file'){
+    res.setHeader('Content-Type','application/json');
+    if(req.method==='PUT'){
+      let body='';for await(const chunk of req)body+=chunk;
+      const value=JSON.parse(body);await new Promise(resolve=>setTimeout(resolve,100));
+      if(failSave){res.statusCode=409;res.end(JSON.stringify({error:'他の編集による競合'}));return;}
+      writes++;text=value.content;sha=String(Number(sha)+1);res.end(JSON.stringify({...value,sha}));return;
+    }
+    res.end(JSON.stringify({root_id:url.searchParams.get('root_id'),name:url.searchParams.get('name'),content:text,sha}));return;
+  }
+  const file=path.resolve(root,'.'+url.pathname);
+  if(!file.startsWith(root+path.sep)||!fs.existsSync(file)){res.statusCode=404;res.end();return;}
+  res.setHeader('Content-Type','text/javascript; charset=utf-8');res.end(fs.readFileSync(file));
+});
+(async()=>{
+  let browser;await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    browser=await chromium.launch({headless:true,channel:'msedge'});
+    const page=await browser.newPage({viewport:{width:1280,height:960}});page.setDefaultTimeout(10000);
+    const errors=[];page.on('pageerror',e=>{errors.push(e.message);console.error(e.message);});
+    await page.goto(`http://127.0.0.1:${server.address().port}`);await page.locator('#launch').click();
+    await page.getByText('ファイル一覧 · 10001件',{exact:true}).waitFor();
+    const tree=page.getByRole('tree',{name:'ワイルドカードファイル'});
+    await tree.locator('[data-key="folder:comfy:batch"]').click();
+    assert.equal(await tree.locator('[data-key="folder:comfy:batch"]').getAttribute('aria-expanded'),'true');
+    assert.ok(await tree.getByRole('treeitem').count()<50);
+    await page.getByRole('button',{name:'すべて開く',exact:true}).click();
+    assert.ok(await tree.getByRole('treeitem').count()<50);
+    await tree.getByRole('treeitem').first().focus();await page.keyboard.press('End');
+    assert.ok(await tree.getByRole('treeitem').count()<50);
+    assert.equal(await page.evaluate(()=>document.activeElement.dataset.key),'file:addon:batch/dir99/item9999');
+    await page.getByRole('button',{name:'折りたたむ',exact:true}).click();assert.equal(await tree.getByRole('treeitem').count(),2);
+    const search=page.getByRole('textbox',{name:'ファイル・フォルダーを検索',exact:true});await search.fill('item9999');
+    await tree.locator('[data-key="file:comfy:batch/dir99/item9999"]').waitFor();
+    assert.equal(await tree.getByRole('treeitem').count(),8);
+    await tree.locator('[data-key="file:comfy:batch/dir99/item9999"]').click();
+    const editor=page.getByRole('textbox',{name:'ワイルドカード本文',exact:true});await editor.waitFor();
+    await page.waitForFunction(()=>document.querySelector('.sax-wc-text').value==='alpha\nbeta\ngamma\ndelta');
+    assert.equal(await tree.locator('[data-key="file:comfy:batch/dir99/item9999"]').getAttribute('aria-selected'),'true');
+    assert.equal(await page.getByRole('button',{name:'保存',exact:true}).isEnabled(),false);
+    await editor.evaluate(n=>{n.focus();n.setSelectionRange(6,17);});
+    await page.getByRole('button',{name:'選択行を上へ',exact:true}).click();assert.equal(await editor.inputValue(),'beta\ngamma\nalpha\ndelta');
+    await page.getByRole('button',{name:'選択行を下へ',exact:true}).click();assert.equal(await editor.inputValue(),'alpha\nbeta\ngamma\ndelta');
+    await page.getByRole('button',{name:'＋ 候補',exact:true}).click();assert.equal(await editor.inputValue(),'alpha\nbeta\ngamma\nnew item\ndelta');
+    await page.getByRole('button',{name:'選択行を削除',exact:true}).click();assert.equal(await editor.inputValue(),'alpha\nbeta\ngamma\ndelta');
+    await editor.fill('変更した本文\n2行目');await editor.press('Control+s');
+    await page.waitForFunction(()=>document.querySelector('.sax-wc-text').disabled);
+    await page.waitForFunction(()=>!document.querySelector('.sax-wc-text').disabled);assert.equal(writes,1);assert.equal(text,'変更した本文\r\n2行目');
+    failSave=true;await editor.fill('未保存の内容');await editor.press('Control+s');await page.getByRole('alert').filter({hasText:'競合'}).waitFor();
+    assert.equal(await editor.inputValue(),'未保存の内容');assert.equal(await page.getByRole('button',{name:'保存',exact:true}).isEnabled(),true);
+    failSave=false;await editor.press('Control+s');await page.waitForFunction(()=>document.querySelector('.sax-wc-tip').textContent.includes('保存済み'));
+    await search.fill('');await page.getByRole('button',{name:'一覧更新',exact:true}).click();
+    await page.waitForFunction(()=>!document.querySelector('.sax-wc-files').textContent.includes('item9999') || document.querySelectorAll('.sax-wc-tree-item').length>8);
+    await page.screenshot({path:path.join(root,'work/wildcard-editor-tree.png')});
+    await page.setViewportSize({width:600,height:800});assert.ok(await page.locator('.sax-wc-modal').evaluate(n=>n.scrollWidth<=n.clientWidth));
+    await editor.press('Escape');await page.locator('.sax-wc-modal').waitFor({state:'detached'});
+    assert.deepEqual(errors,[]);console.log('PASS: 10001ファイルの階層・開閉・検索・仮想表示・キー操作・複数行編集・保存・競合保持・狭幅');
+  }finally{await browser?.close();server.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});
