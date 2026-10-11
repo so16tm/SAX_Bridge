@@ -54,6 +54,23 @@ const server=http.createServer(async(req,res)=>{
  const cardSize=await page.locator('.se-card').first().evaluate(e=>({height:e.offsetHeight,overflow:e.scrollWidth>e.clientWidth}));assert.ok(cardSize.height<=80&&!cardSize.overflow,JSON.stringify(cardSize));
  assert.ok(await page.locator('.se-candidate').count()<30);assert.equal(await page.locator('.se-candidate-copy>.se-muted').first().textContent(),doc.catalog.items[0].text);
  const originalRecipe=await page.evaluate(()=>structuredClone(shared().session.document.recipes[0]));
+ await page.getByRole('combobox',{name:'構成要素の追加方法',exact:true}).selectOption('separate');
+ await page.getByPlaceholder('名前・本文・タグを検索').fill('アイテム99');
+ await page.getByRole('button',{name:'一覧を全選択',exact:true}).click();
+ await page.getByRole('button',{name:'選んだアイテムを追加',exact:true}).click();
+ assert.equal(await page.evaluate(()=>shared().session.document.recipes[0].groups.length),2);
+ assert.equal(await page.locator('.se-selectionbar strong').textContent(),'111件選択');
+ await page.getByRole('button',{name:'すべて解除',exact:true}).click();
+ await page.getByPlaceholder('名前・本文・タグを検索').fill('');
+ await page.locator('.se-candidate input').nth(0).click();await page.locator('.se-candidate input').nth(1).click();
+ await page.getByRole('button',{name:'選んだアイテムを追加',exact:true}).click();
+ assert.equal(await page.locator('.se-card').count(),4);
+ assert.equal(await page.evaluate(()=>{const d=shared().session.document,g=d.recipes[0].groups.slice(-2);return g.every(x=>x.item_ids.length===1&&x.mode==='all'&&x.count===1&&x.name===d.catalog.items.find(i=>i.id===x.item_ids[0]).name)&&g[0].id!==g[1].id;}),true);
+ await page.getByRole('button',{name:'元に戻す',exact:true}).click();assert.equal(await page.locator('.se-card').count(),2);
+ await page.getByRole('button',{name:'やり直す',exact:true}).click();assert.equal(await page.locator('.se-card').count(),4);
+ await page.getByRole('button',{name:'元に戻す',exact:true}).click();
+ await page.getByRole('combobox',{name:'構成要素の追加方法',exact:true}).selectOption('combined');
+
  await page.locator('.se-candidate input').nth(0).click();await page.locator('.se-candidate input').nth(4).click({modifiers:['Shift']});assert.equal(await page.locator('.se-selectionbar strong').textContent(),'5件選択');
  await page.getByRole('checkbox',{name:'選択済みだけ',exact:true}).check();assert.equal(await page.locator('.se-candidate').count(),5);
  await page.getByRole('button',{name:'一覧の選択を解除',exact:true}).click();assert.equal(await page.locator('.se-candidate').count(),0);assert.equal(await page.locator('.se-selectionbar strong').textContent(),'0件選択');

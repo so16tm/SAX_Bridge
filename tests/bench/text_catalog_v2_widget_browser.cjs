@@ -63,6 +63,9 @@ const server = http.createServer((req, res) => {
         const nameOrder = docs[0].catalog.items.slice().sort((a,b)=>a.name.localeCompare(b.name,'ja')).map(i=>i.id);
         assert.deepEqual(await itemOrder(), nameOrder);
         await page.locator('.se-tag-filter summary').click();
+        const tagRows = await page.locator('.se-tag-options label').evaluateAll(rows=>rows.map(n=>({height:n.getBoundingClientRect().height,top:n.getBoundingClientRect().top})));
+        assert.ok(tagRows.every(n=>n.height===24));
+        assert.ok(tagRows.slice(1).every((n,i)=>n.top-tagRows[i].top===24));
         await page.getByPlaceholder('名前・本文を検索').click();
         assert.equal(await page.locator('.se-tag-filter').evaluate(n=>n.open),false);
         await page.locator('.se-tag-filter summary').click();
