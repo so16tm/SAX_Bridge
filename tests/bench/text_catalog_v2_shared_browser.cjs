@@ -50,7 +50,35 @@ const server=http.createServer(async(req,res)=>{
  await page.evaluate(()=>{const w=node.widgets.find(w=>w.name==='__sax_shared_sets');w.mouse({type:'pointerdown'},[170,48])});await page.waitForSelector('.se-record');assert.equal(await page.locator('.se-record').count(),5);
  await page.getByRole('button',{name:'閉じる',exact:true}).click();
  console.log('filter passed'); // セット編集と本文編集は分離されている。
- await page.evaluate(()=>{const w=node.widgets.find(w=>w.name==='__sax_shared_sets');w.mouse({type:'pointerdown'},[75,48])});await page.waitForSelector('.se-card');assert.equal(await page.locator('.se-card').count(),2);assert.equal(await page.locator('textarea').count(),0);await page.getByRole('button',{name:'閉じる',exact:true}).click();
+ await page.evaluate(()=>{const w=node.widgets.find(w=>w.name==='__sax_shared_sets');w.mouse({type:'pointerdown'},[75,48])});await page.waitForSelector('.se-card');assert.equal(await page.locator('.se-card').count(),2);assert.equal(await page.locator('textarea').count(),0);
+ const cardSize=await page.locator('.se-card').first().evaluate(e=>({height:e.offsetHeight,overflow:e.scrollWidth>e.clientWidth}));assert.ok(cardSize.height<=80&&!cardSize.overflow,JSON.stringify(cardSize));
+ assert.ok(await page.locator('.se-candidate').count()<30);assert.equal(await page.locator('.se-candidate-copy>.se-muted').first().textContent(),doc.catalog.items[0].text);
+ const originalRecipe=await page.evaluate(()=>structuredClone(shared().session.document.recipes[0]));
+ await page.locator('.se-candidate input').nth(0).click();await page.locator('.se-candidate input').nth(4).click({modifiers:['Shift']});assert.equal(await page.locator('.se-selectionbar strong').textContent(),'5件選択');
+ await page.getByRole('checkbox',{name:'選択済みだけ',exact:true}).check();assert.equal(await page.locator('.se-candidate').count(),5);
+ await page.getByRole('button',{name:'一覧の選択を解除',exact:true}).click();assert.equal(await page.locator('.se-candidate').count(),0);assert.equal(await page.locator('.se-selectionbar strong').textContent(),'0件選択');
+ await page.getByRole('checkbox',{name:'選択済みだけ',exact:true}).uncheck();await page.getByPlaceholder('名前・本文・タグを検索').fill('アイテム99');
+ await page.getByRole('button',{name:'一覧を全選択',exact:true}).click();assert.equal(await page.locator('.se-selectionbar strong').textContent(),'111件選択');
+ await page.getByPlaceholder('名前・本文・タグを検索').fill('アイテム0');assert.equal(await page.locator('.se-selectionbar strong').textContent(),'111件選択');
+ await page.getByRole('button',{name:'選んだアイテムを追加',exact:true}).click();assert.equal(await page.locator('.se-card').count(),3);
+ assert.equal(await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids.length),111);
+ const addedIds=await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids.slice());
+ await page.locator('.se-card').last().getByRole('button',{name:'出力順',exact:true}).click();
+ assert.ok(await page.locator('.se-order-item').count()<40);
+ await page.locator('.se-order-item').first().getByRole('button',{name:'アイテムを下へ',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids.slice(0,2)),[addedIds[1],addedIds[0]]);
+ await page.locator('.se-order-item input').first().fill('111');await page.locator('.se-order-item input').first().press('Enter');
+ assert.equal(await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids.at(-1)),addedIds[1]);
+ const dragFirst=await page.locator('.se-order-item').first().getAttribute('data-item-id');
+ await page.locator('.se-order-handle').first().dragTo(page.locator('.se-order-item').nth(2));
+ assert.equal(await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids[2]),dragFirst);
+ await page.locator('.se-order-handle').nth(2).focus();await page.keyboard.press('ArrowUp');
+ assert.equal(await page.evaluate(()=>document.activeElement.closest('.se-order-item')?.dataset.itemId),dragFirst);
+ const orderedIds=await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids.slice());
+ await page.locator('.se-card').last().getByRole('button',{name:'候補を変更',exact:true}).click();assert.equal(await page.getByRole('checkbox',{name:'選択済みだけ',exact:true}).isChecked(),true);assert.equal(await page.locator('.se-selectionbar strong').textContent(),'111件選択');
+ const removedId=await page.locator('.se-candidate').first().getAttribute('data-item-id');await page.locator('.se-candidate input').first().click();await page.getByRole('button',{name:'候補を更新',exact:true}).click();assert.deepEqual(await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids),orderedIds.filter(id=>id!==removedId));
+ await page.screenshot({path:path.join(root,'work/shared-v2-compact-sets.png')});
+ await page.evaluate(recipe=>shared().session.mutate([{type:'recipe.put',recipe}]),originalRecipe);await page.getByRole('button',{name:'閉じる',exact:true}).click();
  console.log('sets passed'); // 全行表示と並び替え、有効切替。
  const rows=await page.evaluate(()=>{const w=node.widgets.find(w=>w.name==='__sax_shared_sets');w.mouse({type:'pointerdown',clientY:100},[45,25]);window.dispatchEvent(new PointerEvent('pointerup',{clientY:152}));w.mouse({type:'pointerdown'},[20,25]);return JSON.parse(node.widgets[0].value).rows});assert.equal(rows[0].recipe_id,'s2');assert.equal(rows[0].on,false);
  await page.evaluate(()=>{const g=shared().session.document.recipes[0].groups;Type.prototype.onExecuted.call(node,{text:['実行時出力'],selection_json:[JSON.stringify({version:3,catalog_id:'browser-test',revision:1,seed:123,rows:[{id:'r1',recipe_id:'s1',name:'旅人',on:true,groups:g.map(v=>({...v,group_id:v.id,candidate_ids:v.item_ids,item_ids:v.item_ids.slice(0,2),items:v.item_ids.slice(0,2).map(id=>({id,name:'実行時'+id,text:'実行時本文',tags:[]}))}))}]})]})});

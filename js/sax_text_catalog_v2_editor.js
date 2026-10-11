@@ -14,6 +14,30 @@ const STYLE = `
 .sax-shared-editor>div{padding:10px!important;gap:6px!important}.sax-shared-editor .se-header{flex-wrap:nowrap;gap:5px;min-width:0}.sax-shared-editor .se-header strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-size:12px}.sax-shared-editor .se-header button,.sax-shared-editor .se-filterbar button,.sax-shared-editor .se-filterbar input,.sax-shared-editor .se-filterbar select{padding:3px 7px;height:28px;font-size:12px}.sax-shared-editor .se-header .se-status{flex:none;max-width:180px;min-height:0;gap:4px;font-size:11px}.sax-shared-editor .se-status>span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}.sax-shared-editor .se-list-view{gap:5px}.sax-shared-editor .se-filterbar{gap:5px}.sax-shared-editor .se-filterbar select{max-width:180px}.sax-shared-editor .se-filterbar .se-grow{min-width:140px}.sax-shared-editor .se-wildcard{font-size:11px;padding:3px 6px;margin-top:5px}.sax-shared-editor .se-columns{line-height:18px}.sax-shared-editor .se-error-message{font-size:12px;white-space:pre-wrap}
 @media(max-width:760px){.sax-shared-editor .se-header{flex-wrap:wrap}.sax-shared-editor .se-header strong{flex-basis:100%}.sax-shared-editor .se-header .se-status{margin-left:auto;max-width:130px}.sax-shared-editor .se-filterbar select{flex:1;max-width:none;min-width:80px}.sax-shared-editor .se-filterbar .se-grow{flex-basis:100%}}
 .sax-shared-expanded>div{width:min(1000px,96vw)!important}.sax-shared-expanded textarea{width:100%;font:13px/1.7 sans-serif;background:var(--comfy-input-bg,#242426);color:var(--input-text,#ddd);border:1px solid var(--border-color,#45454b);border-radius:6px;padding:8px}.sax-shared-expanded button{font:inherit;padding:4px 8px;background:var(--comfy-input-bg,#242426);color:var(--input-text,#ddd);border:1px solid var(--border-color,#45454b);border-radius:6px;cursor:pointer}.sax-shared-expanded .se-row{display:flex;gap:8px;align-items:center}.sax-shared-expanded .se-grow{flex:1}
+.sax-shared-editor .se-set-view{gap:6px}
+.sax-shared-editor .se-set-view button,.sax-shared-editor .se-set-view input:not([type=checkbox]),.sax-shared-editor .se-set-view select{height:28px;padding:3px 7px;font-size:12px}
+.sax-shared-editor .se-set-meta{flex-wrap:nowrap}.sax-shared-editor .se-set-meta>select{max-width:220px;flex:1}.sax-shared-editor .se-set-meta>input{flex:2;width:0}
+.sax-shared-editor .se-layout{grid-template-columns:minmax(320px,1.2fr) minmax(320px,1fr);gap:12px}
+.sax-shared-editor .se-card{padding:6px 8px;margin-bottom:5px;border-radius:5px}
+.sax-shared-editor .se-card[data-editing=true]{border-color:var(--primary-background,#5686d6)}
+.sax-shared-editor .se-card>.se-row{gap:5px;margin-bottom:0;flex-wrap:nowrap;min-width:0}
+.sax-shared-editor .se-card>.se-row+ .se-row{margin-top:4px}
+.sax-shared-editor .se-card input.se-grow{min-width:60px;width:0}
+.sax-shared-editor .se-group-icon{width:26px;padding:0!important;flex:none}
+.sax-shared-editor .se-group-preview{flex:1;min-width:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:11px}
+.sax-shared-editor .se-candidate{height:48px;gap:8px;padding:4px 6px;cursor:pointer}
+.sax-shared-editor .se-candidate[data-selected=true]{background:color-mix(in srgb,var(--primary-background,#5686d6) 13%,transparent)}
+.sax-shared-editor .se-candidate-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sax-shared-editor .se-candidate-copy>span{display:block;line-height:17px;font-size:12px}
+.sax-shared-editor .se-candidate-copy>.se-muted{font-size:11px}
+.sax-shared-editor .se-candidate-tags{max-width:25%;font-size:11px}
+.sax-shared-editor .se-selectionbar{font-size:12px;gap:6px}
+.sax-shared-editor .se-selectionbar .se-muted{margin-left:auto;font-size:11px}
+.sax-shared-editor .se-order-scroll{height:240px;flex:none;margin-top:6px;border-top:1px solid var(--border-color,#45454b)}
+.sax-shared-editor .se-order-item{position:absolute;left:0;right:0;height:42px;display:flex;align-items:center;gap:5px;padding:4px 0;border-bottom:1px solid var(--border-color,#45454b)}
+.sax-shared-editor .se-order-item>input{width:54px;flex:none}.sax-shared-editor .se-order-item .se-candidate-copy>span{font-size:11px}
+.sax-shared-editor .se-order-handle{cursor:grab}.sax-shared-editor .se-order-item[data-drop=true]{outline:1px solid var(--primary-background,#5686d6)}
+@media(max-width:760px){.sax-shared-editor .se-layout{grid-template-columns:1fr}.sax-shared-editor .se-set-meta{flex-wrap:wrap}.sax-shared-editor .se-set-meta>input{min-width:160px}.sax-shared-editor .se-candidate-tags{display:none}}
 `;
 
 function el(tag, cls = "", text = "") { const n = document.createElement(tag); n.className = cls; n.textContent = text; return n; }
@@ -70,6 +94,10 @@ export function openSharedEditor(session, options = {}) {
     if (options.recipeId) { if (mode === "items") { pref.recipeFilter = options.recipeId; pref.query = ""; pref.tag = ""; pref.scroll = 0; } else pref.recipeId = options.recipeId; }
     let content, status, conflict, errorMessage, close, virtual = null, active = null, unsubscribe, localError = "", saveTimer, refreshing = false;
     let itemMap = new Map(), selected = new Set(), candidateSelection = new Set(), candidateGroup = null, candidateQuery = "", candidateTag = "", resultRecipe = "", outputTab = false, selectionAnchor = null;
+    let candidatesOnly = false, candidateAnchor = null;
+    const setScroll = { candidates: 0, groups: 0 };
+    let orderGroup = null, orderScroll = 0;
+    const orderLists = [];
     const showCandidates = new Set();
     const doc = () => session.document;
     function sortItems(values, resolve = value => value) {
@@ -234,52 +262,144 @@ export function openSharedEditor(session, options = {}) {
     function editGroup(groupId, change) { const r = recipe(); if (!r) return; const next = structuredClone(r); const g = next.groups.find(g => g.id === groupId); if (!g) return; change(g, next); putRecipe(next); }
     function renderSets() {
         const r = recipe(); if (r) pref.recipeId = r.id;
-        const setSelect = select(doc().recipes.map(s => [s.id, s.name]), r?.id ?? "", value => { pref.recipeId = value; candidateGroup = null; candidateSelection.clear(); render(); });
+        const setSelect = select(doc().recipes.map(s => [s.id, s.name]), r?.id ?? "", value => { pref.recipeId = value; candidateGroup = null; candidateSelection.clear(); candidatesOnly = false; candidateAnchor = null; render(); });
         const create = () => { const next = { id: newId(), name: "新しいテキストセット", groups: [] }; if (putRecipe(next)) { pref.recipeId = next.id; render(); } };
         content.append(row(el("strong", "", "テキストセット"), setSelect, btn("＋ 作成", create), btn("コピー", () => { if (!r) return; const next = structuredClone(r); next.id = newId(); next.name += " コピー"; for (const g of next.groups) g.id = newId(); if (putRecipe(next)) { pref.recipeId = next.id; render(); } }), btn("削除", async () => { if (r && await showConfirmDialog({ title: "テキストセットを削除", message: `${r.name}を共有カタログから削除します。参照しているワークフローではセットの選び直しが必要です。`, danger: true, okLabel: "削除" })) { mutate([{ type: "recipe.delete", id: r.id }]); pref.recipeId = null; render(); } })));
         if (!r) { content.append(el("div", "se-empty", "「＋ 作成」でテキストセットを作成してください。")); return; }
-        const name = input(r.name, value => { const next = structuredClone(recipe()); next.name = value; putRecipe(next); }); name.maxLength = 256; name.className = "se-grow"; content.append(row(el("span", "", "セット名"), name));
+        const name = input(r.name, value => { const next = structuredClone(recipe()); next.name = value; putRecipe(next); }); name.maxLength = 256; name.className = "se-grow"; name.setAttribute("aria-label", "セット名");
+        const meta = content.lastChild; meta.classList.add("se-set-meta"); meta.insertBefore(name, meta.children[2]);
         const layout = el("div", "se-layout"), left = el("div", "se-pane"), right = el("div", "se-pane"); layout.append(left, right); content.append(layout);
-        left.append(el("strong", "", candidateGroup ? "候補アイテムを変更" : "追加するアイテムを選択"));
-        const q = input(candidateQuery, value => { candidateQuery = value; renderCandidates(); }); q.placeholder = "名前・タグを検索"; q.className = "se-grow";
+        left.append(el("strong", "", candidateGroup ? `「${r.groups.find(g => g.id === candidateGroup)?.name || "構成要素"}」の候補を変更` : "追加するアイテムを選択"));
+        const q = input(candidateQuery, value => { candidateQuery = value; renderCandidates(); }); q.placeholder = "名前・本文・タグを検索"; q.className = "se-grow";
         const tag = select([["", "タグ：すべて"], ...[...new Set(doc().catalog.items.flatMap(i => i.tags))].sort().map(t => [t, t])], candidateTag, value => { candidateTag = value; renderCandidates(); });
-        left.append(row(q, tag, sortControl(() => renderCandidates()))); const scroll = el("div", "se-scroll"); left.append(scroll);
-        let candidateVirtual = new VirtualRows(scroll, entry => { const i = itemMap.get(entry.itemId); const n = el("div", "se-candidate"); n.append(check(candidateSelection.has(i.id), yes => { if (yes) candidateSelection.add(i.id); else candidateSelection.delete(i.id); count.textContent = `${candidateSelection.size}件選択`; }), el("span", "se-grow", i.name), el("span", "se-muted", i.tags.join(", "))); return n; });
+        const filter = row(q, tag, sortControl(() => renderCandidates())); filter.classList.add("se-filterbar"); left.append(filter);
+        const scroll = el("div", "se-scroll se-candidate-scroll"); left.append(scroll);
+        function chooseCandidate(id, yes, range = false) {
+            const entries = candidateVirtual.entries;
+            const from = entries.findIndex(e => e.itemId === candidateAnchor), to = entries.findIndex(e => e.itemId === id);
+            const ids = range && from >= 0 && to >= 0 ? entries.slice(Math.min(from, to), Math.max(from, to) + 1).map(e => e.itemId) : [id];
+            for (const itemId of ids) { if (yes) candidateSelection.add(itemId); else candidateSelection.delete(itemId); }
+            candidateAnchor = id; renderCandidates();
+        }
+        const candidateVirtual = new VirtualRows(scroll, entry => {
+            const i = itemMap.get(entry.itemId), n = el("div", "se-candidate"); n.dataset.itemId = i.id;
+            const checkbox = el("input"); checkbox.type = "checkbox"; checkbox.checked = candidateSelection.has(i.id); checkbox.setAttribute("aria-label", `${i.name}を候補に選択`);
+            checkbox.addEventListener("click", event => chooseCandidate(i.id, checkbox.checked, event.shiftKey));
+            n.dataset.selected = String(candidateSelection.has(i.id));
+            const copy = el("div", "se-candidate-copy"), title = el("span", "", i.name), body = el("span", "se-muted", i.text.replace(/\s+/g, " "));
+            title.title = i.name; body.title = i.text; copy.append(title, body);
+            const tags = el("span", "se-muted se-candidate-tags", i.tags.join(", ")); tags.title = tags.textContent;
+            n.append(checkbox, copy, tags); n.addEventListener("click", event => { if (!event.target.closest("input")) chooseCandidate(i.id, !candidateSelection.has(i.id), event.shiftKey); });
+            return n;
+        });
         virtual = candidateVirtual;
-        const renderCandidates = () => { const query = candidateQuery.trim().toLocaleLowerCase(); candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidateTag || i.tags.includes(candidateTag)) && (!query || `${i.name} ${i.tags.join(" ")}`.toLocaleLowerCase().includes(query)))).map(i => ({ key: i.id, itemId: i.id, height: 40 })), true); };
-        const count = el("span", "se-muted", `${candidateSelection.size}件選択`); left.append(row(count, btn("表示中を選択", () => { for (const e of candidateVirtual.entries) candidateSelection.add(e.itemId); count.textContent = `${candidateSelection.size}件選択`; renderCandidates(); }), btn("解除", () => { candidateSelection.clear(); count.textContent = "0件選択"; renderCandidates(); })));
+        const renderCandidates = () => {
+            const query = candidateQuery.trim().toLocaleLowerCase();
+            candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidatesOnly || candidateSelection.has(i.id)) && (!candidateTag || i.tags.includes(candidateTag)) && (!query || `${i.name} ${i.text} ${i.tags.join(" ")}`.toLocaleLowerCase().includes(query)))).map(i => ({ key: i.id, itemId: i.id, height: 48 })));
+            for (const [id, n] of candidateVirtual.nodes) { n.querySelector("input").checked = candidateSelection.has(id); n.dataset.selected = String(candidateSelection.has(id)); }
+            count.textContent = `${candidateSelection.size}件選択`; matched.textContent = `${candidateVirtual.entries.length}件一致`;
+        };
+        const count = el("strong"), matched = el("span", "se-muted"); count.title = "Shift+クリックで範囲選択。検索・タグを変更しても選択は保持されます";
+        const selectionbar = row(count, label("選択済みだけ", check(candidatesOnly, yes => { candidatesOnly = yes; renderCandidates(); })), matched); selectionbar.classList.add("se-selectionbar"); left.insertBefore(selectionbar, scroll);
+        const selectAll = btn("一覧を全選択", () => { for (const e of candidateVirtual.entries) candidateSelection.add(e.itemId); renderCandidates(); }); selectAll.title = "検索・タグに一致する全件を選択（画面外の行も含む）";
+        left.append(row(selectAll, btn("一覧の選択を解除", () => { for (const e of candidateVirtual.entries) candidateSelection.delete(e.itemId); renderCandidates(); }), btn("すべて解除", () => { candidateSelection.clear(); renderCandidates(); })));
         let chosenMode = "all", chosenCount = 1; const edited = r.groups.find(g => g.id === candidateGroup); if (edited) { chosenMode = edited.mode; chosenCount = edited.count; }
-        const modeSelect = select([["all", "すべて使う"], ["random", "この中からランダム"]], chosenMode, value => { chosenMode = value; number.disabled = value !== "random"; }); const number = input(chosenCount, value => { chosenCount = Number(value); }, "number"); number.min = "0"; number.max = "10000"; number.step = "1"; number.style.width = "80px"; number.disabled = chosenMode !== "random";
-        left.append(row(modeSelect, number, el("span", "se-muted", "件")));
-        left.append(row(btn(candidateGroup ? "候補を更新" : "選んだアイテムを追加", () => {
+        const unit = el("span", "se-muted", "件");
+        const modeSelect = select([["all", "すべて使う"], ["random", "ランダム"]], chosenMode, value => { chosenMode = value; number.hidden = unit.hidden = value !== "random"; }); const number = input(chosenCount, value => { chosenCount = Number(value); }, "number"); number.min = "0"; number.max = "10000"; number.step = "1"; number.style.width = "60px"; number.hidden = unit.hidden = chosenMode !== "random";
+        left.append(row(modeSelect, number, unit, btn(candidateGroup ? "候補を更新" : "選んだアイテムを追加", () => {
             if (!candidateSelection.size) { localError = "候補アイテムを選択してください"; updateStatus(); return; }
             if (chosenMode === "random" && (!Number.isSafeInteger(chosenCount) || chosenCount < 0 || chosenCount > candidateSelection.size)) { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); return; }
-            const ids = doc().catalog.items.filter(i => candidateSelection.has(i.id)).map(i => i.id); const next = structuredClone(recipe());
+            const next = structuredClone(recipe());
+            const previous = next.groups.find(g => g.id === candidateGroup)?.item_ids ?? [];
+            const ids = previous.filter(id => candidateSelection.has(id));
+            const included = new Set(ids);
+            for (const item of doc().catalog.items) if (candidateSelection.has(item.id) && !included.has(item.id)) ids.push(item.id);
             if (candidateGroup) { const g = next.groups.find(g => g.id === candidateGroup); if (g) Object.assign(g, { item_ids: ids, mode: chosenMode, count: chosenCount }); }
             else next.groups.push({ id: newId(), name: "構成要素", on: true, mode: chosenMode, count: chosenCount, item_ids: ids });
-            if (putRecipe(next)) { candidateSelection.clear(); candidateGroup = null; render(); }
-        }, "se-primary"), ...(candidateGroup ? [btn("キャンセル", () => { candidateGroup = null; candidateSelection.clear(); render(); })] : [])));
-        right.append(el("strong", "", "出力する構成要素（上から順に使用）")); const groups = el("div", "se-scroll"); right.append(groups);
+            if (putRecipe(next)) { candidateSelection.clear(); candidateGroup = null; candidatesOnly = false; candidateAnchor = null; render(); }
+        }, "se-primary"), ...(candidateGroup ? [btn("キャンセル", () => { candidateGroup = null; candidateSelection.clear(); candidatesOnly = false; render(); })] : [])));
+        right.append(el("strong", "", `構成要素 ${r.groups.length}件（上から出力）`)); const groups = el("div", "se-scroll se-group-scroll"); right.append(groups);
         let dragged = null;
         for (const [index, g] of r.groups.entries()) {
             const card = el("div", "se-card"); card.dataset.off = !g.on; card.draggable = true; card.addEventListener("dragstart", e => { if (e.target.closest("input,select,button")) { e.preventDefault(); return; } dragged = g.id; }); card.addEventListener("dragover", e => e.preventDefault()); card.addEventListener("drop", e => { e.preventDefault(); if (!dragged || dragged === g.id) return; const next = structuredClone(recipe()); const from = next.groups.findIndex(v => v.id === dragged), to = next.groups.findIndex(v => v.id === g.id); const [moved] = next.groups.splice(from, 1); next.groups.splice(to, 0, moved); putRecipe(next); render(); });
             const groupName = input(g.name, value => editGroup(g.id, next => { next.name = value; })); groupName.className = "se-grow"; groupName.maxLength = 256;
-            card.append(row(el("span", "se-muted", "≡"), check(g.on, yes => { editGroup(g.id, next => { next.on = yes; }); card.dataset.off = !yes; }), groupName, btn("↑", () => moveGroup(g.id, -1)), btn("↓", () => moveGroup(g.id, 1)), btn("削除", () => { const next = structuredClone(recipe()); next.groups = next.groups.filter(v => v.id !== g.id); putRecipe(next); render(); })));
+            card.dataset.editing = String(candidateGroup === g.id);
+            groupName.setAttribute("aria-label", `構成要素 ${index + 1}の名前`);
+            const icon = (text, title, fn) => { const control = btn(text, fn, "se-group-icon"); control.title = title; control.setAttribute("aria-label", title); return control; };
+            const enabled = check(g.on, yes => { editGroup(g.id, next => { next.on = yes; }); card.dataset.off = !yes; }); enabled.setAttribute("aria-label", `構成要素 ${index + 1}を使用`);
+            card.append(row(el("span", "se-muted", "≡"), enabled, groupName, icon("↑", "構成要素を上へ", () => moveGroup(g.id, -1)), icon("↓", "構成要素を下へ", () => moveGroup(g.id, 1)), icon("×", "構成要素を削除", () => { const next = structuredClone(recipe()); next.groups = next.groups.filter(v => v.id !== g.id); putRecipe(next); render(); })));
             const groupMode = select([["all", "すべて使う"], ["random", "ランダム"]], g.mode, value => { editGroup(g.id, next => { next.mode = value; }); render(); });
-            const amount = input(g.count, value => { const count = Number(value); if (Number.isSafeInteger(count) && count >= 0 && count <= g.item_ids.length) editGroup(g.id, next => { next.count = count; }); else { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); } }, "number"); amount.style.width = "80px"; amount.min = "0"; amount.max = String(g.item_ids.length); amount.step = "1"; amount.disabled = g.mode !== "random";
-            card.append(row(groupMode, amount, el("span", "se-muted", `件 / 候補 ${g.item_ids.length}件`), btn("候補を変更", () => { candidateGroup = g.id; candidateSelection = new Set(g.item_ids); render(); })));
-            card.append(el("div", "se-muted", g.item_ids.slice(0, 12).map(id => itemMap.get(id)?.name ?? "削除済み").join("、") + (g.item_ids.length > 12 ? ` …ほか${g.item_ids.length - 12}件` : ""))); card.setAttribute("aria-label", `構成要素 ${index + 1}`); groups.append(card);
+            const amount = input(g.count, value => { const count = Number(value); if (Number.isSafeInteger(count) && count >= 0 && count <= g.item_ids.length) editGroup(g.id, next => { next.count = count; }); else { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); } }, "number"); amount.style.width = "52px"; amount.min = "0"; amount.max = String(g.item_ids.length); amount.step = "1"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
+            const preview = el("span", "se-muted se-group-preview", g.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name ?? "削除済み").join("、"));
+            preview.title = "候補を変更で全候補を一覧表示";
+            const orderButton = btn("出力順", () => { orderGroup = orderGroup === g.id ? null : g.id; orderScroll = 0; render(); }); orderButton.setAttribute("aria-expanded", String(orderGroup === g.id)); orderButton.title = "候補アイテムの出力順を並び替え";
+            card.append(row(groupMode, amount, el("span", "se-muted", `${g.item_ids.length}候補`), preview, orderButton, btn("候補を変更", () => { candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTag = ""; render(); })));
+            if (orderGroup === g.id) renderOrder(card, g);
+            card.setAttribute("aria-label", `構成要素 ${index + 1}`); groups.append(card);
         }
         if (!r.groups.length) groups.append(el("div", "se-empty", "左側でアイテムを選び、「選んだアイテムを追加」で構成要素を作ります。")); renderCandidates();
+        scroll.scrollTop = setScroll.candidates; candidateVirtual.paint(); groups.scrollTop = setScroll.groups;
+    }
+    function moveCandidate(groupId, itemId, target) {
+        const keyboard = document.activeElement?.classList.contains("se-order-handle");
+        const next = structuredClone(recipe()), group = next.groups.find(g => g.id === groupId);
+        if (!group || !Number.isSafeInteger(target)) return;
+        const from = group.item_ids.indexOf(itemId), to = Math.max(0, Math.min(group.item_ids.length - 1, target));
+        if (from < 0 || from === to) return;
+        const [id] = group.item_ids.splice(from, 1); group.item_ids.splice(to, 0, id);
+        if (putRecipe(next)) {
+            render();
+            if (keyboard) {
+                const scroll = content.querySelector(".se-order-scroll"), list = orderLists[0];
+                if (scroll && list) {
+                    if (to * 42 < scroll.scrollTop || (to + 1) * 42 > scroll.scrollTop + scroll.clientHeight) scroll.scrollTop = to * 42;
+                    list.paint(); list.nodes.get(itemId)?.querySelector(".se-order-handle")?.focus({ preventScroll: true });
+                }
+            }
+        }
+    }
+    function renderOrder(card, group) {
+        const scroll = el("div", "se-scroll se-order-scroll"); scroll.style.height = `${Math.min(240, group.item_ids.length * 42)}px`; card.append(scroll);
+        let dragged = null;
+        const list = new VirtualRows(scroll, entry => {
+            const item = itemMap.get(entry.itemId), n = el("div", "se-order-item"); n.dataset.itemId = entry.itemId;
+            const control = (text, title, callback) => { const b = btn(text, callback, "se-group-icon"); b.title = title; b.setAttribute("aria-label", title); return b; };
+            const handle = control("≡", "アイテムをドラッグで並び替え", () => {}); handle.classList.add("se-order-handle"); handle.draggable = true;
+            handle.addEventListener("dragstart", event => { event.stopPropagation(); dragged = entry.itemId; list.pinned = entry.itemId; event.dataTransfer?.setData("text/plain", entry.itemId); });
+            handle.addEventListener("dragend", () => { dragged = null; list.pinned = null; for (const row of list.nodes.values()) delete row.dataset.drop; });
+            handle.addEventListener("keydown", event => { if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); moveCandidate(group.id, entry.itemId, entry.index + (event.key === "ArrowUp" ? -1 : 1)); } });
+            n.addEventListener("dragover", event => { if (!dragged) return; event.preventDefault(); n.dataset.drop = "true"; });
+            n.addEventListener("dragleave", () => { delete n.dataset.drop; });
+            n.addEventListener("drop", event => { if (!dragged) return; event.preventDefault(); event.stopPropagation(); const id = dragged; dragged = null; moveCandidate(group.id, id, entry.index); });
+            const position = el("input"); position.type = "number"; position.min = "1"; position.max = String(group.item_ids.length); position.value = entry.index + 1; position.setAttribute("aria-label", `${item?.name || "削除済みアイテム"}の出力位置`);
+            const commit = () => { const target = Number(position.value); if (position.value && Number.isSafeInteger(target) && target >= 1 && target <= group.item_ids.length) moveCandidate(group.id, entry.itemId, target - 1); else position.value = entry.index + 1; };
+            position.addEventListener("change", commit); position.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); commit(); } });
+            const copy = el("div", "se-candidate-copy"), name = el("span", "", item?.name || "削除済みアイテム"), text = el("span", "se-muted", item?.text.replace(/\s+/g, " ") || ""); name.title = item?.name || entry.itemId; text.title = item?.text || ""; copy.append(name, text);
+            const up = control("↑", "アイテムを上へ", () => moveCandidate(group.id, entry.itemId, entry.index - 1)), down = control("↓", "アイテムを下へ", () => moveCandidate(group.id, entry.itemId, entry.index + 1));
+            up.disabled = entry.index === 0; down.disabled = entry.index === group.item_ids.length - 1;
+            n.append(handle, position, copy, up, down); return n;
+        });
+        orderLists.push(list); list.set(group.item_ids.map((id, index) => ({ key: id, itemId: id, index, height: 42 })));
+        scroll.addEventListener("dragover", event => { if (!dragged) return; event.preventDefault(); const bounds = scroll.getBoundingClientRect(); if (event.clientY < bounds.top + 28) scroll.scrollTop -= 20; else if (event.clientY > bounds.bottom - 28) scroll.scrollTop += 20; list.paint(); });
+        scroll.scrollTop = orderScroll; list.paint();
     }
     function moveGroup(id, offset) { const next = structuredClone(recipe()); const from = next.groups.findIndex(g => g.id === id), to = from + offset; if (to < 0 || to >= next.groups.length) return; [next.groups[from], next.groups[to]] = [next.groups[to], next.groups[from]]; putRecipe(next); render(); }
     function render() {
+        const order = content.querySelector(".se-order-scroll"); if (order) orderScroll = order.scrollTop;
+        for (const list of orderLists.splice(0)) list.destroy();
+        if (mode === "sets") {
+            const candidates = content.querySelector(".se-candidate-scroll"), groups = content.querySelector(".se-group-scroll");
+            if (candidates) setScroll.candidates = candidates.scrollTop;
+            if (groups) setScroll.groups = groups.scrollTop;
+        }
         refreshing = true; releaseActive(); virtual?.destroy(); virtual = null; bulkBar = null; selectAllControl = null; content.replaceChildren(); itemMap = new Map(doc().catalog.items.map(i => [i.id, i]));
         content.classList.toggle("se-list-view", mode !== "sets");
+        content.classList.toggle("se-set-view", mode === "sets");
         if (mode === "sets") renderSets(); else renderList(); updateStatus(); refreshing = false;
     }
     const switchMode = next => { releaseActive(); pref.scroll = 0; pref.query = ""; pref.tag = ""; mode = next; render(); };
     close = showDialog({ title: `SAX Text Catalog V2 — ${doc().name}`, width: 1200, maxHeight: "97vh", className: "sax-shared-editor", onClose() {
+        for (const list of orderLists.splice(0)) list.destroy();
         releaseActive(); clearTimeout(saveTimer); unsubscribe?.(); virtual?.destroy(); for (const t of content?.querySelectorAll("textarea") ?? []) detachAutoComplete(t); openEditors.delete(session); void session.flush().catch(() => {});
     }, build(dlg, end) {
         dlg.children[0].style.display = "none";
