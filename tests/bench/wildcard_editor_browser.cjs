@@ -2,10 +2,10 @@
 const { chromium } = require(process.env.SAX_PLAYWRIGHT_PATH || 'playwright');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..');
-const roots = [{id:'comfy',label:'ComfyUI/wildcards'},{id:'addon',label:'custom_nodes/addon/wildcards'}];
+const roots = [{id:'comfy',label:'ComfyUI/wildcards'},{id:'addon',label:'custom_nodes/addon/wildcards'},{id:'empty',label:'empty/wildcards'}];
 const files = Array.from({length:10000},(_,i)=>({root_id:'comfy',name:`batch/dir${Math.floor(i/100)}/item${i}`}));
 files.push({root_id:'addon',name:'batch/dir99/item9999',shadowed:true});
-let text = 'alpha\r\nbeta\r\ngamma\r\ndelta', sha = '1', failSave = false, writes = 0;
+let text = 'alpha\r\nbeta\r\ngamma\r\ndelta', sha = '1', failSave = false, failDelete = false, writes = 0;
 const html = `<meta charset="utf-8"><style>body{background:#222;color:#ddd}</style><button id="launch">編集</button><script type="module">
 import {openWildcardEditor} from '/js/sax_wildcard_editor.js';document.querySelector('#launch').onclick=openWildcardEditor;
 </script>`;
@@ -18,6 +18,11 @@ const server = http.createServer(async(req,res)=>{
   if(url.pathname==='/sax/wildcards'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({roots,files}));return;}
   if(url.pathname==='/sax/wildcards/file'){
     res.setHeader('Content-Type','application/json');
+    if(req.method==='DELETE'){
+      if(failDelete){res.statusCode=409;res.end(JSON.stringify({error:'削除時の競合'}));return;}
+      const index=files.findIndex(f=>f.root_id===url.searchParams.get('root_id')&&f.name===url.searchParams.get('name'));
+      assert.ok(index>=0);files.splice(index,1);res.end(JSON.stringify({deleted:true}));return;
+    }
     if(req.method==='PUT'){
       let body='';for await(const chunk of req)body+=chunk;
       const value=JSON.parse(body);await new Promise(resolve=>setTimeout(resolve,100));
@@ -39,6 +44,8 @@ const server = http.createServer(async(req,res)=>{
     await page.goto(`http://127.0.0.1:${server.address().port}`);await page.locator('#launch').click();
     await page.getByText('ファイル一覧 · 10001件',{exact:true}).waitFor();
     const tree=page.getByRole('tree',{name:'ワイルドカードファイル'});
+    assert.equal(await tree.locator('[data-key="root:empty"]').count(),0);
+    assert.equal(await page.getByRole('combobox',{name:'保存先',exact:true}).locator('option').count(),3);
     await tree.locator('[data-key="folder:comfy:batch"]').click();
     assert.equal(await tree.locator('[data-key="folder:comfy:batch"]').getAttribute('aria-expanded'),'true');
     assert.ok(await tree.getByRole('treeitem').count()<50);
@@ -70,6 +77,19 @@ const server = http.createServer(async(req,res)=>{
     await search.fill('');await page.getByRole('button',{name:'一覧更新',exact:true}).click();
     await page.waitForFunction(()=>!document.querySelector('.sax-wc-files').textContent.includes('item9999') || document.querySelectorAll('.sax-wc-tree-item').length>8);
     await page.screenshot({path:path.join(root,'work/wildcard-editor-tree.png')});
+    await search.fill('item9999');await tree.locator('[data-key="file:addon:batch/dir99/item9999"]').click();
+    await page.waitForFunction(()=>!document.querySelector('.sax-wc-text').disabled);
+    await editor.fill('削除前の未保存内容');
+    await page.getByRole('button',{name:'ファイルを削除',exact:true}).click();
+    const confirm=page.locator('.__sax_confirm_dlg');await confirm.getByText(/custom_nodes\/addon\/wildcards\/batch\/dir99\/item9999.txt/).waitFor();
+    await confirm.getByRole('button',{name:'キャンセル',exact:true}).click();assert.equal(files.length,10001);assert.equal(await editor.inputValue(),'削除前の未保存内容');
+    failDelete=true;await page.getByRole('button',{name:'ファイルを削除',exact:true}).click();await confirm.getByRole('button',{name:'削除する',exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'削除時の競合'}).waitFor();assert.equal(files.length,10001);assert.equal(await editor.inputValue(),'削除前の未保存内容');
+    failDelete=false;await page.getByRole('button',{name:'ファイルを削除',exact:true}).click();await confirm.getByRole('button',{name:'削除する',exact:true}).click();
+    await page.getByText('ファイル一覧 · 10000件',{exact:true}).waitFor();assert.equal(await tree.locator('[data-key="root:addon"]').count(),0);
+    assert.equal(await editor.inputValue(),'');assert.equal(await page.getByRole('button',{name:'ファイルを削除',exact:true}).isEnabled(),false);
+    assert.equal(await tree.locator('[data-key="file:comfy:batch/dir99/item9999"]').count(),1);
+    await page.waitForFunction(()=>!document.querySelector('.sax-wc-text').disabled);
     await page.setViewportSize({width:600,height:800});assert.ok(await page.locator('.sax-wc-modal').evaluate(n=>n.scrollWidth<=n.clientWidth));
     await editor.press('Escape');await page.locator('.sax-wc-modal').waitFor({state:'detached'});
     assert.deepEqual(errors,[]);console.log('PASS: 10001ファイルの階層・開閉・検索・仮想表示・キー操作・複数行編集・保存・競合保持・狭幅');

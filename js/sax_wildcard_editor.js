@@ -76,7 +76,8 @@ export function openWildcardEditor() {
   const notice = node("div"); notice.className = "sax-wc-alert"; notice.setAttribute("role", "alert");
   const footer = node("div"); footer.className = "sax-wc-row";
   const state = node("span", "一覧取得中…"); state.className = "sax-wc-grow sax-wc-tip";
-  const save = button("保存", () => { void persist(); }); footer.append(state, save);
+  const save = button("保存", () => { void persist(); });
+  const remove = button("ファイルを削除", () => { void deleteSelected(); }); footer.append(state, remove, save);
   const pathLabel = node("div"); pathLabel.className = "sax-wc-path";
   right.append(selection, pathLabel, tools, content, notice, footer); grid.append(left, right); modal.append(header, grid); root.append(modal);
   let roots = [], files = [], source = null, baseline = "", newline = "\n", busy = false, listingBusy = false, closed = false, searchTimer;
@@ -94,6 +95,7 @@ export function openWildcardEditor() {
     save.disabled = busy || !modified() || !folder.value || !filename.value.trim();
     content.disabled = folder.disabled = filename.disabled = createButton.disabled = busy;
     refreshButton.disabled = busy || listingBusy;
+    remove.disabled = busy || !source;
     pathLabel.textContent = filename.value.trim() ? `__${normalizeName(filename.value)}__` : "ファイルを選択するか、新規作成してください";
   }
   async function leave() { return !modified() || await showConfirmDialog({title:"未保存の変更", message:"未保存の変更を破棄しますか？",danger:true,okLabel:"破棄する"}); }
@@ -185,6 +187,21 @@ export function openWildcardEditor() {
       newline = data.content.includes("\r\n") ? "\r\n" : "\n";
       notice.textContent = entry.shadowed ? "注意: このファイルは同名の別ファイルより優先順位が低く、展開に使われません。" : "";
       reveal(entry);
+    } catch (error) { notice.textContent = error.message; }
+    finally { busy = false; update(); }
+  }
+  async function deleteSelected() {
+    if (busy || !source) return;
+    const target = {...source};
+    const label = roots.find(r => r.id === target.root_id)?.label ?? target.root_id;
+    const confirmed = await showConfirmDialog({title:"ファイルを削除", message:`${label}/${target.name}.txt を削除します。元に戻せません。${modified() ? "\n未保存の変更も破棄されます。" : ""}`, danger:true, okLabel:"削除する", cancelLabel:"キャンセル"});
+    if (!confirmed || busy || closed || source?.sha !== target.sha || identity(source) !== identity(target)) return;
+    busy = true; update(); notice.textContent = "";
+    try {
+      await request(`${URL_BASE}/file?root_id=${encodeURIComponent(target.root_id)}&name=${encodeURIComponent(target.name)}&base_sha=${encodeURIComponent(target.sha)}`, {method:"DELETE"});
+      source = null; baseline = ""; newline = "\n"; content.value = ""; filename.value = "";
+      files = files.filter(entry => identity(entry) !== identity(target)); tree = buildWildcardTree(roots, files); render();
+      await refresh();
     } catch (error) { notice.textContent = error.message; }
     finally { busy = false; update(); }
   }

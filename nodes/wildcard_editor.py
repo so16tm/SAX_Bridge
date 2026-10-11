@@ -208,6 +208,21 @@ def write_file(root_id, name, content, base_sha):
             "sha": hashlib.sha256(data).hexdigest(), "shadowed": duplicate_before}
 
 
+def delete_file(root_id, name, base_sha):
+    root, path, filename = _target(root_id, name)
+    if not isinstance(base_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", base_sha):
+        raise ValueError("削除時の改訂情報が不正です")
+    with _lock(path):
+        before = _bytes(path)
+        if before is None:
+            raise WildcardConflict("ファイルは既に削除されています。一覧を更新してください")
+        if hashlib.sha256(before).hexdigest() != base_sha:
+            raise WildcardConflict("別の編集で変更されています。再読み込みしてから削除してください")
+        _contained(root, path)
+        path.unlink()
+    return {"root_id": root_id, "name": filename[:-4], "deleted": True}
+
+
 def register_routes():
     try:
         from aiohttp import web
@@ -257,3 +272,16 @@ def register_routes():
             return web.json_response({"error": str(exc)}, status=400)
         except OSError:
             return web.json_response({"error": "ファイルを保存できません"}, status=500)
+
+    @routes.delete(prefix + "/file")
+    async def wildcard_delete(request):
+        try:
+            return web.json_response(await asyncio.to_thread(
+                delete_file, request.query.get("root_id"), request.query.get("name"),
+                request.query.get("base_sha")))
+        except WildcardConflict as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        except OSError:
+            return web.json_response({"error": "ファイルを削除できません"}, status=500)

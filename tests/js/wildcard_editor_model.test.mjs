@@ -18,17 +18,16 @@ test("数字を含むフォルダー・ファイル名は自然順で表示す�
 
 test("root別の階層を作り、フォルダー優先・日本語順で並べて再帰件数を数える", () => {
   const tree = buildWildcardTree([{ id: "a", label: "Zulu" }, { id: "empty", label: "空" }, { id: "b", label: "Alpha" }], files);
-  assert.deepEqual(tree.map(n => n.key), ["root:a", "root:empty", "root:b"]);
+  assert.deepEqual(tree.map(n => n.key), ["root:a", "root:b"]);
   assert.equal(tree[0].count, 4);
-  assert.equal(tree[1].count, 0);
-  assert.equal(tree[2].count, 1);
+  assert.equal(tree[1].count, 1);
   assert.deepEqual(tree[0].children.map(n => n.kind), ["folder", "file"]);
   assert.equal(tree[0].children[0].path, "clothing");
   assert.equal(tree[0].children[0].count, 3);
   assert.equal(tree[0].children[0].children[0].path, "clothing/dresses");
   assert.equal(tree[0].children[0].children[0].children[0].label, "long.txt");
   assert.equal(tree[0].children[0].children[0].children[0].entry, files[0]);
-  assert.notEqual(tree[0].children[0].children[0].children[0].key, tree[2].children[0].key);
+  assert.notEqual(tree[0].children[0].children[0].children[0].key, tree[1].children[0].key);
 
   const ordered = buildWildcardTree([{ id: "r", label: "R" }], ["人物", "背景", "アイテム"].map(name => ({ root_id: "r", name })));
   assert.deepEqual(ordered[0].children.map(n => n.label), ["アイテム.txt", "人物.txt", "背景.txt"].sort((a, b) => a.localeCompare(b, "ja")));
@@ -53,4 +52,10 @@ test("1万ファイルを階層化し、深いフォルダーの件数を保持�
   const filtered = visibleWildcardTree(tree, new Set(), "item-09999");
   assert.equal(filtered.at(-1).entry, entries[9999]);
   assert.equal(filtered.length, 18);
+});
+
+test("最後のファイル削除後は空の保存先を隠す", () => {
+  const roots = [{id:"a",label:"A"},{id:"b",label:"B"}];
+  assert.deepEqual(buildWildcardTree(roots, []).map(n=>n.key), []);
+  assert.deepEqual(buildWildcardTree(roots, [{root_id:"b",name:"folder/last"}]).map(n=>n.key), ["root:b"]);
 });

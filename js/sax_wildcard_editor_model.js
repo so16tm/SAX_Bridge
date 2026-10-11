@@ -49,7 +49,7 @@ export function buildWildcardTree(roots, files) {
     return node.count;
   }
   for (const root of tree) finish(root);
-  return tree;
+  return tree.filter(root => root.count > 0);
 }
 
 export function visibleWildcardTree(tree, expanded, query = "") {

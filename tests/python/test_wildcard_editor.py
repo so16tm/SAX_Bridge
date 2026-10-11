@@ -77,3 +77,50 @@ def test_atomic_failure_preserves_original(storage, monkeypatch):
     path = storage / "wildcards" / "colors.txt"
     assert path.read_bytes() == b"red\n"
     assert not list(path.parent.glob("*.tmp"))
+
+
+def test_delete_only_selected_file_and_promote_shadowed_copy(storage):
+    saved = wc.write_file("comfy", "nested/colors", "red", None)
+    wc.write_file("tags:ComfyUI-Autocomplete-Plus-Plus", "nested/colors", "blue", None)
+    wc.write_file("comfy", "keep", "green", None)
+    result = wc.delete_file("comfy", "nested/colors", saved["sha"])
+    assert result == {"root_id": "comfy", "name": "nested/colors", "deleted": True}
+    assert not (storage / "wildcards" / "nested" / "colors.txt").exists()
+    assert wc.read_file("comfy", "keep")["content"] == "green"
+    assert (storage / "wildcards" / "nested").is_dir()
+    assert all(not file["shadowed"] for file in wc.list_files()["files"])
+
+
+def test_delete_requires_latest_hash_and_existing_file(storage):
+    saved = wc.write_file("comfy", "colors", "red", None)
+    changed = wc.write_file("comfy", "colors", "blue", saved["sha"])
+    with pytest.raises(wc.WildcardConflict):
+        wc.delete_file("comfy", "colors", saved["sha"])
+    assert wc.read_file("comfy", "colors")["content"] == "blue"
+    wc.delete_file("comfy", "colors", changed["sha"])
+    with pytest.raises(wc.WildcardConflict):
+        wc.delete_file("comfy", "colors", changed["sha"])
+
+
+@pytest.mark.parametrize("base_sha", [None, "", "wrong", 123])
+def test_delete_rejects_invalid_hash(storage, base_sha):
+    wc.write_file("comfy", "colors", "red", None)
+    with pytest.raises(ValueError):
+        wc.delete_file("comfy", "colors", base_sha)
+    assert wc.read_file("comfy", "colors")["content"] == "red"
+
+
+@pytest.mark.parametrize("name", ["../danger", "/absolute", "C:/Windows", "bad:name"])
+def test_delete_rejects_paths_outside_roots(storage, name):
+    with pytest.raises(ValueError):
+        wc.delete_file("comfy", name, "0" * 64)
+
+
+def test_delete_failure_preserves_file(storage, monkeypatch):
+    saved = wc.write_file("comfy", "colors", "red", None)
+    def fail(*_args, **_kwargs):
+        raise OSError("permission denied")
+    monkeypatch.setattr(wc.Path, "unlink", fail)
+    with pytest.raises(OSError):
+        wc.delete_file("comfy", "colors", saved["sha"])
+    assert wc.read_file("comfy", "colors")["content"] == "red"
