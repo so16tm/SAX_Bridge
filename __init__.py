@@ -11,6 +11,8 @@ from .nodes import text_catalog_v2 as text_catalog_v2_node
 from .nodes import text_catalog_converter as text_catalog_converter_node
 from .nodes import text_catalog_v2_store
 from .nodes import tag_dictionary
+from .nodes import wildcard_editor
+from .nodes import wildcard_editor_node
 from .nodes import guidance as guidance_node
 from .nodes import sam3 as sam3_node
 from .nodes import mask_adjust as mask_adjust_node
@@ -89,6 +91,7 @@ for v3_node in [
     text_catalog_v2_node.SAX_Bridge_Text_Catalog_V2,
     text_catalog_converter_node.SAX_Bridge_Text_Catalog_Converter,
     tag_dictionary.SAX_Bridge_Tag_Dictionary,
+    wildcard_editor_node.SAX_Bridge_Wildcard_Editor,
     toggle_manager_node.SAX_Bridge_Toggle_Manager,
 ]:
     _schema = v3_node.GET_SCHEMA()
@@ -111,6 +114,7 @@ for node_cls in NODE_CLASS_MAPPINGS.values():
 debug_log_module.register_lifecycle_hook()
 text_catalog_v2_store.register_routes()
 tag_dictionary.register_routes()
+wildcard_editor.register_routes()
 
 from .nodes.autocomplete_bridge import register_prompt_handler  # noqa: E402
 register_prompt_handler()
