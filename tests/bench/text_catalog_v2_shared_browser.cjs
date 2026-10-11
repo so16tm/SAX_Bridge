@@ -42,8 +42,17 @@ const server=http.createServer(async(req,res)=>{
  await page.getByRole('button',{name:'＋ ワイルドカード',exact:true}).click();await page.getByPlaceholder('ファイル名・フォルダー名を検索…').fill('people/traveler');await page.waitForFunction(()=>[...document.querySelectorAll('.__sax_text_catalog_v2_wc_picker button')].filter(e=>e.textContent==='Select').length===1);await page.getByRole('button',{name:'Select',exact:true}).click();
  assert.equal(await wcArea.inputValue(),'alpha __people/traveler__ omega');assert.equal(await wcArea.evaluate(e=>document.activeElement===e),true);await page.evaluate(()=>app.queuePrompt());assert.equal(doc.catalog.items[0].text,'alpha __people/traveler__ omega');
  await page.getByRole('button',{name:'＋ ワイルドカード',exact:true}).click();await page.getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(await wcArea.inputValue(),'alpha __people/traveler__ omega');await wcArea.evaluate(e=>e.blur());
+
+ await page.getByRole('button',{name:'一覧を全選択',exact:true}).click();
+ assert.equal(await page.locator('.se-selection-tools .se-muted').textContent(),'10000件選択');
+ await page.getByPlaceholder('名前・本文・タグを検索').fill('アイテム9999');
+ await page.waitForFunction(()=>document.querySelectorAll('.se-record').length===1);
+ await page.getByRole('button',{name:'一覧の選択を解除',exact:true}).click();
+ assert.equal(await page.locator('.se-selection-tools .se-muted').textContent(),'9999件選択');
+ await page.getByPlaceholder('名前・本文・タグを検索').fill('');
+ await page.getByRole('button',{name:'すべて解除',exact:true}).click();
  // 全選択と選択解除に応じて一括操作を表示・収納する。
- await page.getByRole('checkbox',{name:'表示中のアイテムを全選択',exact:true}).check();assert.equal(await page.getByPlaceholder('一括操作するタグ').isVisible(),true);await page.getByRole('button',{name:'選択解除',exact:true}).click();assert.equal(await page.getByPlaceholder('一括操作するタグ').isVisible(),false);
+ await page.getByRole('checkbox',{name:'表示中のアイテムを全選択',exact:true}).check();assert.equal(await page.getByPlaceholder('一括操作するタグ').isVisible(),true);await page.getByRole('button',{name:'すべて解除',exact:true}).click();assert.equal(await page.getByPlaceholder('一括操作するタグ').isVisible(),false);
  // 拡大編集でも同じ検索ピッカーを使う。
  await page.locator('.se-record').first().getByRole('button',{name:'拡大',exact:true}).click();const large=page.getByRole('textbox',{name:'アイテム本文（拡大）',exact:true});await large.fill('');await page.getByRole('button',{name:'＋ ワイルドカード',exact:true}).click();await page.getByPlaceholder('ファイル名・フォルダー名を検索…').fill('style/watercolor');await page.waitForFunction(()=>[...document.querySelectorAll('.__sax_text_catalog_v2_wc_picker button')].filter(e=>e.textContent==='Select').length===1);await page.getByRole('button',{name:'Select',exact:true}).click();assert.equal(await large.inputValue(),'__style/watercolor__');await page.getByRole('button',{name:'閉じる',exact:true}).last().click();await page.getByRole('button',{name:'閉じる',exact:true}).click();
  console.log('inline/wildcard/compact header passed'); // 行のアイテム編集は候補全件で絞り込まれる。

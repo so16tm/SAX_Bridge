@@ -235,11 +235,11 @@ function openCatalog(node) {
             visible.sort((a, b) => compareItemTagKeys(keys.get(a.id), keys.get(b.id)) || a.name.localeCompare(b.name, "ja") || a.id.localeCompare(b.id));
         }
         else if (state.sort === "used") visible.sort((a, b) => (referenceCounts.get(b.id) || 0) - (referenceCounts.get(a.id) || 0));
-        const selecting = managing || state.mode === "composition";
+        const selecting = true;
         if (selecting) {
             const selected = selectedIds();
-            const selectionRow = row(button("表示中を選択", () => { for (const item of visible) state.selected.add(item.id); render(); }, { disabled: !visible.length }), button("選択解除", () => { state.selected.clear(); render(); }, { disabled: !selected.length }), hint(`${selected.length}件選択 / 検索結果${visible.length}件`));
-            if (managing && selected.length) {
+            const selectionRow = row(button("一覧を全選択", () => { for (const item of visible) state.selected.add(item.id); render(); }, { disabled: !visible.length }), button("一覧の選択を解除", () => { for (const item of visible) state.selected.delete(item.id); render(); }, { disabled: !selected.length }), button("すべて解除", () => { state.selected.clear(); render(); }, { disabled: !selected.length }), hint(`${selected.length}件選択 / 検索結果${visible.length}件`));
+            if ((managing || state.mode === "items") && selected.length) {
                 const bulkTag = field("", "一括操作するタグ（カンマ区切り）", "bulk-tags", () => {});
                 const updateTags = remove => {
                     const target = parseTags(bulkTag.value);

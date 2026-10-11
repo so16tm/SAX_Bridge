@@ -174,6 +174,14 @@ const server = http.createServer((req, res) => {
         await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('tags');
         assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.itemId)),['z','a']);
         assert.deepEqual(await page.evaluate(()=>shared().result.selection.rows[0].groups[0].items.map(i=>i.id)),['z','a']);
+        await page.evaluate(()=>{const g=shared().result.selection.rows[0].groups[0];g.items.push({...g.items[1]},{id:'deleted',name:'削除済み',text:'実行時の本文',tags:[]});});
+        await page.getByRole('combobox',{name:'アイテムの並び順'}).selectOption('name');
+        await page.getByRole('button',{name:'一覧を全選択',exact:true}).click();
+        assert.equal(await page.locator('.se-selection-tools .se-muted').textContent(),'2件選択');
+        assert.equal(await page.locator('.se-record[data-item-id="a"] input[type=checkbox]:checked').count(),2);
+        assert.equal(await page.locator('.se-record[data-item-id="deleted"] input[type=checkbox]').count(),0);
+        await page.getByRole('button',{name:'すべて解除',exact:true}).click();
+
         await page.getByRole('button', { name: '閉じる', exact: true }).click();
         await page.locator('.sax-shared-catalog select').selectOption('two');
         await page.waitForFunction(() => shared().session?.document.id === 'two');

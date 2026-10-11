@@ -285,8 +285,8 @@ export function openSharedEditor(session, options = {}) {
         }
         const current = itemMap.get(entry.itemId); const shown = current ?? entry.snapshot;
         const n = el("div", "se-record"); n.dataset.itemId = entry.itemId; n.style.setProperty("--se-lines", pref.lines);
-        const selection = mode === "items" ? check(selected.has(entry.itemId), yes => { if (yes) selected.add(entry.itemId); else selected.delete(entry.itemId); updateBulk(); }) : el("span", "se-muted", entry.candidate ? "候補" : ""); selection.setAttribute("aria-label", `${shown?.name || "アイテム"}を一括操作用に選択`); n.append(selection);
-        if (mode === "items") selection.addEventListener("click", e => { if (e.shiftKey && selectionAnchor) { const ids = virtual.entries.map(v => v.itemId), from = ids.indexOf(selectionAnchor), to = ids.indexOf(entry.itemId); if (from >= 0 && to >= 0) { for (const id of ids.slice(Math.min(from, to), Math.max(from, to) + 1)) { if (selection.checked) selected.add(id); else selected.delete(id); } for (const [key, node] of virtual.nodes) { const checkbox = node.querySelector("input[type=checkbox]"); if (checkbox) checkbox.checked = selected.has(key); } updateBulk(); } } selectionAnchor = entry.itemId; });
+        const selection = current ? check(selected.has(entry.itemId), yes => { if (yes) selected.add(entry.itemId); else selected.delete(entry.itemId); updateBulk(); }) : el("span", "se-muted", "削除済み"); selection.setAttribute("aria-label", `${shown?.name || "アイテム"}を一括操作用に選択`); n.append(selection);
+        if (current) selection.addEventListener("click", e => { if (e.shiftKey && selectionAnchor) { const ids = selectableIds(), from = ids.indexOf(selectionAnchor), to = ids.indexOf(entry.itemId); if (from >= 0 && to >= 0) { for (const id of ids.slice(Math.min(from, to), Math.max(from, to) + 1)) { if (selection.checked) selected.add(id); else selected.delete(id); } updateBulk(); } } selectionAnchor = entry.itemId; });
         function cell(field, value, cls = "") {
             const c = el("div", `se-cell ${cls}`, value); c.dataset.placeholder = field === "text" ? "本文をクリックして入力" : field === "name" ? "名前" : "タグを入力";
             if (current) { c.tabIndex = 0; c.setAttribute("role", "button"); c.setAttribute("aria-label", `${field === "text" ? "本文" : field === "name" ? "名前" : "タグ"}を編集`); c.addEventListener("click", () => begin()); c.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); begin(); } }); }
@@ -311,6 +311,7 @@ export function openSharedEditor(session, options = {}) {
         }
         n.append(cell("name", shown?.name ?? ""));
         const textWrap = el("div"); textWrap.append(cell("text", shown?.text ?? ""));
+        if (entry.candidate) textWrap.append(el("span", "se-badge", "未選択候補"));
         if (entry.snapshot) { textWrap.append(el("span", "se-badge", !current ? "削除済み・編集できません" : current.text !== entry.snapshot.text || current.name !== entry.snapshot.name ? "編集済み・次回実行に反映" : "実行時の内容")); const details = el("details"); details.append(el("summary", "se-muted", "実行時の本文"), el("div", "se-cell", entry.snapshot.text)); textWrap.append(details); }
         n.append(textWrap, cell("tags", shown?.tags?.join(", ") ?? "", "se-tags"));
         const tools = el("div", "se-tools"); if (current) {
@@ -321,10 +322,17 @@ export function openSharedEditor(session, options = {}) {
             const tags = btn("タグ", () => { const value = input(current.tags.join(", "), () => {}); value.setAttribute("aria-label", "アイテムタグ"); showDialog({ title: "タグを編集", build(dlg, end) { dlg.append(value, btn("反映", () => { try { putItem(entry.itemId, { tags: parseTags(value.value) }); end(); } catch (error) { localError = error.message; updateStatus(); } })); } }); }); tags.classList.add("se-mobile-tags"); tools.append(tags);
         } n.append(tools); return n;
     }
-    let bulkBar, selectAllControl;
+    let bulkBar, selectAllControl, selectionCount;
+    function selectableIds() { return [...new Set((virtual?.entries ?? []).filter(e => !e.section && itemMap.has(e.itemId)).map(e => e.itemId))]; }
+    function selectMatching(yes) {
+        releaseActive(); for (const id of selectableIds()) { if (yes) selected.add(id); else selected.delete(id); } updateBulk();
+    }
     function updateBulk() {
+        for (const id of selected) if (!itemMap.has(id)) selected.delete(id);
+        if (selectionCount) selectionCount.textContent = `${selected.size}件選択`;
+        for (const node of virtual?.nodes.values() ?? []) { const checkbox = node.querySelector("input[type=checkbox]"); if (checkbox) checkbox.checked = selected.has(node.dataset.itemId); }
         if (bulkBar) { bulkBar.firstChild.textContent = `${selected.size}件選択`; bulkBar.hidden = !selected.size; }
-        if (selectAllControl && virtual) { const ids = virtual.entries.map(e => e.itemId); const count = ids.filter(id => selected.has(id)).length; selectAllControl.checked = Boolean(ids.length) && count === ids.length; selectAllControl.indeterminate = count > 0 && count < ids.length; }
+        if (selectAllControl && virtual) { const ids = selectableIds(); const count = ids.filter(id => selected.has(id)).length; selectAllControl.checked = Boolean(ids.length) && count === ids.length; selectAllControl.indeterminate = count > 0 && count < ids.length; }
     }
     function matchesItem(item, query, tags) {
         return tags.every(tag => item?.tags?.includes(tag)) && (!query || `${item?.name ?? ""}\n${item?.text ?? ""}\n${item?.tags?.join(" ") ?? ""}`.toLocaleLowerCase().includes(query));
@@ -361,20 +369,21 @@ export function openSharedEditor(session, options = {}) {
         const filterBar = filters(); content.append(filterBar);
         if (mode === "items") {
             const newItem = btn("＋ アイテム", () => { const item = { id: newId(), name: "新しいアイテム", text: "", tags: [] }; if (mutate([{ type: "item.put", item }])) revealNewItem(item); });
-            const tagEdit = input("", () => {}); tagEdit.placeholder = "一括操作するタグ";
             filterBar.append(newItem);
-            bulkBar = row(el("span", "se-muted", `${selected.size}件選択`), btn("選択解除", () => { selected.clear(); virtual.set(entries(), true); updateBulk(); }), tagEdit,
-                btn("タグ追加", () => bulkTags(tagEdit.value, true)), btn("タグ削除", () => bulkTags(tagEdit.value, false)), btn("削除", async () => { if (!selected.size) return; if (await showConfirmDialog({ title: "アイテムを削除", message: `${selected.size}件を削除します。すべてのセットの候補からも除かれます。`, danger: true, okLabel: "削除" })) { mutate([...selected].map(id => ({ type: "item.delete", id }))); selected.clear(); refresh(); updateBulk(); } }));
-            bulkBar.hidden = !selected.size;
-            content.append(bulkBar);
         } else {
             const meta = el("div", "se-muted", result ? `カタログ改訂 ${result.revision ?? result.catalog_revision ?? "—"} · Seed ${result.seed ?? "—"} · 本文の修正は次回実行に反映` : "まだ実行結果がありません。ワークフローを実行してください。");
             content.append(row(meta, btn(outputTab ? "アイテム一覧" : "出力テキスト", () => { outputTab = !outputTab; render(); })));
             if (outputTab) { const text = el("textarea", "se-result-text"); text.readOnly = true; text.value = result?.text ?? ""; content.append(text, btn("コピー", async () => { try { await navigator.clipboard.writeText(text.value); } catch { text.focus(); text.select(); localError = "選択したテキストをCtrl+Cでコピーしてください"; updateStatus(); } })); return; }
         }
+        selectionCount = el("span", "se-muted");
+        const selectionTools = row(btn("一覧を全選択", () => selectMatching(true)), btn("一覧の選択を解除", () => selectMatching(false)), btn("すべて解除", () => { selected.clear(); updateBulk(); }), selectionCount); selectionTools.classList.add("se-filterbar", "se-selection-tools");
+        selectionTools.firstChild.title = "検索・タグ・セットに一致する全件を選択（画面外も含む）"; content.append(selectionTools);
+        const tagEdit = input("", () => {}); tagEdit.placeholder = "一括操作するタグ";
+        bulkBar = row(el("span", "se-muted", `${selected.size}件選択`), tagEdit, btn("タグ追加", () => bulkTags(tagEdit.value, true)), btn("タグ削除", () => bulkTags(tagEdit.value, false)), ...(mode === "items" ? [btn("削除", async () => { if (!selected.size) return; if (await showConfirmDialog({ title: "アイテムを削除", message: `${selected.size}件を削除します。すべてのセットの候補からも除かれます。`, danger: true, okLabel: "削除" })) { mutate([...selected].map(id => ({ type: "item.delete", id }))); selected.clear(); refresh(); updateBulk(); } })] : []));
+        bulkBar.classList.add("se-filterbar"); bulkBar.hidden = !selected.size; content.append(bulkBar);
         const columns = el("div", "se-columns"); for (const [name, cls] of [["", ""], ["名前", ""], ["本文（クリックして編集）", ""], ["タグ", "se-tags"], ["", ""]]) columns.append(el("span", cls, name)); content.append(columns);
         selectAllControl = null;
-        if (mode === "items") { selectAllControl = check(false, yes => { selected = yes ? new Set(entries().map(e => e.itemId)) : new Set(); virtual.set(entries(), true); updateBulk(); }); selectAllControl.setAttribute("aria-label", "表示中のアイテムを全選択"); columns.firstChild.replaceWith(selectAllControl); }
+        selectAllControl = check(false, selectMatching); selectAllControl.setAttribute("aria-label", "表示中のアイテムを全選択"); columns.firstChild.replaceWith(selectAllControl);
         const scroll = el("div", "se-scroll"); content.append(scroll); virtual = new VirtualRows(scroll, itemRow, dispose); virtual.set(entries()); scroll.scrollTop = pref.scroll; scroll.addEventListener("scroll", () => { pref.scroll = scroll.scrollTop; }); virtual.paint();
         if (!virtual.entries.length) virtual.canvas.append(el("div", "se-empty", mode === "items" ? "該当するアイテムがありません。検索・絞り込みを変更するか、アイテムを追加してください。" : "表示する実行結果がありません。"));
         updateBulk();
