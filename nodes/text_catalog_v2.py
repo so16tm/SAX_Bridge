@@ -24,6 +24,7 @@ DEFAULT_CONFIG = json.dumps({
     "recipes": [{"id": "default", "name": "組み合わせ 1", "groups": []}],
     "active_recipe_id": "default",
 }, ensure_ascii=False, separators=(",", ":"))
+SHARED_DEFAULT_CONFIG = '{"version":3,"catalog_id":"","rows":[]}'
 
 
 def _error(path, reason):
@@ -63,7 +64,7 @@ def _integer(value, path, maximum):
     return value
 
 
-def parse_config(config_json):
+def parse_config(config_json, *, max_recipes=MAX_RECIPES):
     """未知の形式や切れた参照を、データを捨てる正規化で隠さず検出する。"""
     if not isinstance(config_json, str) or len(config_json) > MAX_JSON_BYTES:
         _error("config_json", "32 MiB 以下の JSON 文字列が必要です")
@@ -91,7 +92,7 @@ def parse_config(config_json):
         if len(set(tags)) != len(tags):
             _error(path + ".tags", "タグが重複しています")
 
-    recipes = _array(config.get("recipes"), "recipes", MAX_RECIPES)
+    recipes = _array(config.get("recipes"), "recipes", max_recipes)
     if not recipes:
         _error("recipes", "組み合わせが 1 件以上必要です")
     recipe_ids = set()
@@ -124,7 +125,7 @@ def parse_config(config_json):
     return config
 
 
-def resolve_catalog(config_json=DEFAULT_CONFIG, seed=0):
+def _resolve_legacy(config_json=DEFAULT_CONFIG, seed=0):
     """グループごとに独立して抽選し、候補配列の順番でテキストを返す。"""
     _integer(seed, "seed", MAX_SEED)
     config = parse_config(config_json)
@@ -173,6 +174,89 @@ def resolve_catalog(config_json=DEFAULT_CONFIG, seed=0):
     return "\n".join(texts), selection_json
 
 
+def parse_workflow(config_json):
+    """共有参照は本文を含まず、行順と安定IDだけを保存する。"""
+    if not isinstance(config_json, str) or len(config_json.encode("utf-8")) > MAX_JSON_BYTES:
+        _error("config_json", "32 MiB 以下の JSON 文字列が必要です")
+    try:
+        config = json.loads(config_json)
+    except (ValueError, RecursionError):
+        _error("config_json", "JSON を読み込めません")
+    _object(config, "config_json")
+    if config.get("version") == 2:
+        return parse_config(config_json)
+    if type(config.get("version")) is not int or config["version"] != 3:
+        _error("version", "対応していない保存形式です")
+    _string(config.get("catalog_id"), "catalog_id", MAX_ID_LENGTH)
+    rows = _array(config.get("rows"), "rows", MAX_ITEMS)
+    seen = set()
+    for i, row in enumerate(rows):
+        path = f"rows[{i}]"
+        _object(row, path)
+        _identifier(row.get("id"), path + ".id", seen)
+        _identifier(row.get("recipe_id"), path + ".recipe_id")
+        if type(row.get("on")) is not bool:
+            _error(path + ".on", "boolean が必要です")
+    if rows and not config["catalog_id"]:
+        _error("catalog_id", "共有カタログを選択してください")
+    return config
+
+
+def resolve_catalog(config_json=DEFAULT_CONFIG, seed=0):
+    _integer(seed, "seed", MAX_SEED)
+    config = parse_workflow(config_json)
+    if config["version"] == 2:
+        return _resolve_legacy(config_json, seed)
+    report = {"version": 3, "catalog_id": config["catalog_id"], "revision": None,
+              "seed": seed, "rows": []}
+    if not config["catalog_id"]:
+        return "", json.dumps(report, separators=(",", ":"))
+    from .text_catalog_v2_store import snapshot
+    document = snapshot(config["catalog_id"])
+    report["revision"] = document["revision"]
+    recipes = {recipe["id"]: recipe for recipe in document["recipes"]}
+    items = {item["id"]: item for item in document["catalog"]["items"]}
+    texts = []
+    output_bytes = 0
+    for row in config["rows"]:
+        recipe = recipes.get(row["recipe_id"])
+        if recipe is None:
+            _error("rows.recipe_id", "参照するテキストセットが見つかりません")
+        row_report = {"id": row["id"], "recipe_id": recipe["id"], "name": recipe["name"],
+                      "on": row["on"], "groups": []}
+        report["rows"].append(row_report)
+        for group in recipe["groups"]:
+            candidates = group["item_ids"]
+            chosen = []
+            if row["on"] and group["on"]:
+                if group["mode"] == "random":
+                    if group["count"] > len(candidates):
+                        _error("count", "選択数が候補数を超えています")
+                    material = json.dumps([seed, recipe["id"], group["id"]], ensure_ascii=True, separators=(",", ":"))
+                    rng = random.Random(int.from_bytes(hashlib.sha256(material.encode("utf-8")).digest(), "big"))
+                    chosen = [candidates[index] for index in sorted(rng.sample(range(len(candidates)), group["count"]))]
+                else:
+                    chosen = candidates
+            group_report = {"group_id": group["id"], "name": group["name"], "mode": group["mode"],
+                            "on": group["on"], "count": group["count"], "candidate_ids": candidates,
+                            "item_ids": chosen, "items": []}
+            row_report["groups"].append(group_report)
+            for identifier in chosen:
+                item = dict(items[identifier])
+                text = item["text"].strip()
+                item["output_position"] = len(texts) + 1 if text else None
+                group_report["items"].append(item)
+                if text:
+                    output_bytes += len(text.encode("utf-8")) + bool(texts)
+                    if output_bytes > MAX_OUTPUT_BYTES:
+                        _error("text", "結合出力が32 MiBを超えています")
+                    texts.append(text)
+    selection_json = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
+    if len(selection_json.encode("utf-8")) > MAX_OUTPUT_BYTES:
+        _error("selection_json", "選択記録が32 MiBを超えています")
+    return "\n".join(texts), selection_json
+
+
 class SAX_Bridge_Text_Catalog_V2(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -180,9 +264,9 @@ class SAX_Bridge_Text_Catalog_V2(io.ComfyNode):
             node_id="SAX_Bridge_Text_Catalog_V2",
             display_name="SAX Text Catalog V2",
             category="SAX/Bridge/Utility",
-            description="素材と組み合わせを編集し、固定選択または seed による重複なし抽選でテキストを結合します。V1 とは独立しています。",
+            description="共有カタログのアイテムとテキストセットを編集し、複数セットを順に結合します。V1とは独立しています。",
             inputs=[
-                io.String.Input("config_json", default=DEFAULT_CONFIG, optional=True),
+                io.String.Input("config_json", default=SHARED_DEFAULT_CONFIG, optional=True),
                 io.Int.Input("seed", default=0, min=0, max=MAX_SEED, control_after_generate=True),
             ],
             outputs=[
@@ -194,7 +278,16 @@ class SAX_Bridge_Text_Catalog_V2(io.ComfyNode):
     @classmethod
     def execute(cls, config_json: str = DEFAULT_CONFIG, seed: int = 0) -> io.NodeOutput:
         text, selection_json = resolve_catalog(config_json, seed)
-        return io.NodeOutput(text, selection_json, ui={
-            "text": [text], "selection_json": [selection_json],
-            "config_json": [config_json], "seed": [seed],
-        })
+        ui = {"text": [text], "selection_json": [selection_json]}
+        # 移行前の旧V2だけ、既存の結果閲覧との互換性を維持する。
+        if parse_workflow(config_json)["version"] == 2:
+            ui.update({"config_json": [config_json], "seed": [seed]})
+        return io.NodeOutput(text, selection_json, ui=ui)
+
+    @classmethod
+    def fingerprint_inputs(cls, config_json: str = DEFAULT_CONFIG, seed: int = 0):
+        config = parse_workflow(config_json)
+        if config["version"] == 2 or not config["catalog_id"]:
+            return config_json
+        from .text_catalog_v2_store import fingerprint
+        return fingerprint(config["catalog_id"])

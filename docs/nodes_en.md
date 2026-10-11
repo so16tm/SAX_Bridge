@@ -1161,47 +1161,70 @@ With `merge_outputs` ON (`merged`), surviving texts are stripped, empty strings 
 
 ### SAX Text Catalog V2
 
-`SAX_Bridge_Text_Catalog_V2` — An independent node that combines explicitly selected text candidates through recipes, including fixed text and reproducible random selection. It can run alongside `SAX_Bridge_Text_Catalog` (V1); it does not replace or automatically migrate V1 data.
+`SAX_Bridge_Text_Catalog_V2` — An independent node that combines named items from an external shared catalog using fixed and random text-set components. V1 (`SAX_Bridge_Text_Catalog`) remains unchanged and can coexist with V2.
 
 **Inputs**
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `config_json` | String (hidden, optional) | Version 2 JSON for the catalog, recipes, and groups. Omitting the input uses an empty model; the node UI manages it automatically. Empty strings and invalid JSON are errors |
-| `seed` | Int (0 to 9007199254740991) | Random selection seed. ComfyUI's control after generate can update it for each run |
+| `config_json` | String (hidden, optional) | Version 3 catalog ID and ordered text-set rows, managed by the UI. Existing embedded version 2 data remains executable |
+| `seed` | Int (0 to 9007199254740991) | Selection seed. ComfyUI control after generate can update it for each run |
 
-**Outputs**: `text` STRING (trimmed non-empty texts joined by newlines) / `selection_json` STRING (record of the selections made for this run)
+**Outputs**: `text` STRING (trimmed non-empty texts joined by newlines) / `selection_json` STRING (execution selection record). Adding sets does not add output sockets.
 
-#### JSON Contract
+#### Storage and Sharing
+
+- An **item** contains a name, text, and tags. A **component** specifies candidate item IDs and all/random-N selection. A **text set** contains ordered components. Components reference items; they do not copy their text.
+- Items and set definitions are stored in the ComfyUI server's system user directory for `sax_text_catalog`. Nodes and workflows using the same server share these catalogs. Workflows store only catalog ID, ordered set references, enabled states, and Seed.
+- Item text and set-definition edits affect other workflows sharing the catalog. Selected rows, row order, and enabled states belong to each workflow. Cloning a node does not create an independent copy of shared text.
+- Changes are saved automatically as batched deltas. Save status is visible; Queue submission waits for saving and is blocked on save failure.
+- Concurrent edits cause a conflict instead of silent overwrite. Unsaved edits are preserved; explicitly reload to discard them or reapply them onto the latest revision. Reapplying may overwrite another edit to the same item.
+- Export/import moves catalogs between environments. Import creates a fresh catalog ID, so select the imported catalog in the workflow. Missing or corrupt references cause execution errors.
+
+#### JSON Contract and Execution
+
+Reference stored in the workflow:
 
 ```json
 {
-  "version": 2,
-  "catalog": { "items": [{ "id": "item-1", "name": "quality", "text": "high quality", "tags": ["quality"] }] },
-  "recipes": [{ "id": "default", "name": "Default", "groups": [{ "id": "fixed", "name": "Fixed", "mode": "all", "item_ids": ["item-1"], "count": 1, "on": true }] }],
-  "active_recipe_id": "default"
+  "version": 3,
+  "catalog_id": "sample-catalog-id",
+  "rows": [{ "id": "row-1", "recipe_id": "set-1", "on": true }]
 }
 ```
 
-- `all` selects every candidate in array order. `random` selects `count` distinct candidates and emits them in candidate array order. `count: 0` is valid; too few candidates cause an execution error.
-- Each group's draw is independently determined by `seed`, recipe ID, and group ID. Changing another group's enabled state or order does not change the draw. The same item may be selected by multiple groups.
-- The same seed and configuration reproduce the same selections. Set ComfyUI's control after generate to `randomize` or `increment` to vary selections between runs.
-- Candidates are selected explicitly. Multiple candidates can be added from tag-filtered materials.
-- Invalid JSON, unknown schema versions, orphan references, and values over the limits are errors. Limits: 10,000 items, 32 recipes, 32 groups per recipe, 10,000 candidates per group, `count` from 0 to 10,000, 8 tags per item, 128-character IDs, 256-character names, 65,536-character text, 32 MiB `config_json`, and 32 MiB combined output.
+External catalog (import creates a fresh ID and revision):
+
+```json
+{
+  "version": 3,
+  "id": "sample-catalog-id",
+  "name": "Shared prompts",
+  "revision": 1,
+  "catalog": { "items": [{ "id": "item-1", "name": "Quality", "text": "high quality", "tags": ["quality"] }] },
+  "recipes": [{ "id": "set-1", "name": "Base quality", "groups": [{ "id": "fixed", "name": "Quality", "mode": "all", "item_ids": ["item-1"], "count": 1, "on": true }] }]
+}
+```
+
+- Execution obtains the latest saved catalog and fixes that snapshot for the run. Unchanged catalogs reuse the validated server cache; external changes also invalidate ComfyUI's execution cache.
+- Enabled rows and components are emitted in order. `all` selects all candidates in candidate order; `random` chooses `count` distinct candidates and emits them in candidate order. Zero is valid; insufficient candidates cause an error. The same item may appear in multiple components.
+- Draws depend independently on Seed, set ID, and component ID. Reordering or toggling another component does not change a draw. Editing a shared catalog can change output even with the same Seed.
+- The selection record contains catalog ID/revision, Seed, rows, components, selection order, and executed item names/text. The full catalog is not returned with every execution.
+- Limits: 10,000 items, 1,024 shared sets, 32 components per set, 10,000 candidates per component, random count 0–10,000, 8 tags, 128-character IDs, 256-character names/tags, 65,536-character text, and 32 MiB each for catalog, combined text, and selection record. Legacy embedded catalogs retain the 32-set limit.
 
 #### UI and Editing
 
-- Switch saved recipes, toggle individual groups, and change random selection counts directly on the node. Groups are displayed eight at a time. Seed and post-run seed behavior are also controlled on the node.
-- Open the management/editor window for bulk item operations, text editing, and recipe construction. Routine recipe switching and group toggling do not require opening this window.
-- Separate views handle the library, item editing, and combinations.
-- The library uses the full window for names, tags, text excerpts, and usage counts. Search names/text/tags, sort, select ranges with Shift, select all search results, and apply bulk tag changes or deletion.
-- The list is virtualized: only visible rows are rendered even with 10,000 materials. Each activity uses the available space instead of squeezing a text editor below the list.
-- The item editor provides dedicated name, tag, and large text fields. Hide the navigation list to focus on the text.
-- The combinations view manages item references: switch or duplicate recipes, configure fixed or random groups, choose candidates and counts, toggle groups, and reorder them. Item text editing fields are absent from this view.
-- Combinations reference original items by ID, so item edits affect every use. To use independent text, duplicate an item in the item editor, then choose that copy as a candidate in the combinations view.
-- Edits apply to the node automatically, with Undo / Redo and post-run result display.
+- Select a catalog on the node; choose multiple set rows, toggle them, drag to reorder, and remove them. All rows are displayed without paging. Seed and post-run seed behavior remain on the node.
+- Each row's set-edit action opens that set directly. Edit candidates, counts, enabled components, and component order, or switch/create sets in the same editor. Item text fields are separate.
+- The item action opens a name/text/tag list. Click a field to edit inline; expand long text when needed. No save or return-to-list action is required between edits.
+- Search, tag, and set filters combine. Each row's item-edit action opens the same list filtered to all candidate items in that set, deduplicated. Tags organize/search items; they do not automatically add candidates.
+- Variable-height virtualization renders nearby rows. Search, scroll, and text display density persist. Undo/Redo, IME input, tag completion, Shift range selection, select all, and bulk tagging/deletion are supported.
+- Previous execution results use the same name/text list, divided into set/component sections in output order. Unselected candidates can be revealed. Inline text edits update the shared original and are marked as applying to the next run.
+- Executed text and previous output remain immutable. Repeated occurrences stay visible and synchronize shared edits. Deleted items retain their executed text for viewing but cannot be edited.
 
-> **Data scope**: Per node (`config_json` is saved in and travels with the workflow). V2 data is independent from V1 data.
+**Legacy V2 migration**: Embedded version 2 workflows remain executable. The explicit migration action creates an external catalog and switches to its reference only after successful saving. No automatic migration or V1 replacement takes place.
+
+Samples: `tests/workflows/22_text_catalog_v2.json` checks legacy migration. `23_text_catalog_v2_shared.json` and `catalogs/23_text_catalog_v2_catalog.json` demonstrate external sharing. Performance targets on a local SSD are an initial read below 100ms for a typical 1,000-item catalog and a few milliseconds when unchanged; these are goals rather than guarantees and depend on total text size and environment.
 
 [↑ Back to top](#top)
 

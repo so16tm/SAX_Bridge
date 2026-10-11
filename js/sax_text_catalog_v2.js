@@ -1,8 +1,10 @@
 import { app } from "../../scripts/app.js";
-import { showDialog, showConfirmDialog, hideWidget } from "./sax_ui_base.js";
+import { showDialog, showConfirmDialog, showPromptDialog, showAlertDialog, hideWidget } from "./sax_ui_base.js";
 import { LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow } from "./sax_text_catalog_v2_model.js";
 import { installQuickControls } from "./sax_text_catalog_v2_quick.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
+import { installSharedControls, sharedController, flushCatalogNodes, flushCatalogPrompt, readReference } from "./sax_text_catalog_v2_shared.js";
+import { importCatalog } from "./sax_text_catalog_v2_client.js";
 
 const NODE_TYPE = "SAX_Bridge_Text_Catalog_V2";
 const states = new WeakMap();
@@ -46,6 +48,7 @@ function stateFor(node) {
 }
 
 function openCatalog(node) {
+    if (node._saxCatalogMigrating) return;
     const state = stateFor(node);
     if (state.close) { state.close.show(); return; }
     let config;
@@ -432,6 +435,44 @@ function openCatalog(node) {
 function initialize(node) {
     const value = widget(node);
     if (value) hideWidget(value, { mode: "minimal" });
+    let version;
+    try { version = JSON.parse(value?.value ?? "{}").version; } catch { /* 旧エディターで元データを保護し、エラーを表示する。 */ }
+    if (version === 3) {
+        if (!sharedController(node)) node.widgets = node.widgets.filter(w => w.name === "config_json" || w.name === "seed" || w.name === "control_after_generate");
+        try { readReference(node); }
+        catch (error) {
+            const control = node.addWidget("button", "カタログ参照エラーを確認", null, () => showAlertDialog({ title: "カタログの参照が不正です", message: error.message }), { serialize: false });
+            control.serialize = false;
+            return;
+        }
+        node.size[0] = Math.max(node.size[0] ?? 0, 370);
+        installSharedControls(node);
+        return;
+    }
+    if (!node.widgets?.some(w => w.name === "共有カタログへ移行")) {
+        const migration = node.addWidget("button", "共有カタログへ移行", null, async () => {
+            if (node._saxCatalogMigrating) return;
+            node._saxCatalogMigrating = true;
+            try {
+                stateFor(node).flush?.();
+                stateFor(node).close?.();
+                const original = widget(node).value, graph = node.graph;
+                const config = parseConfig(original);
+                const name = await showPromptDialog({ title: "共有カタログ名", defaultValue: "移行したカタログ" });
+                if (name === null) return;
+                const document = await importCatalog({ ...config, name });
+                if (widget(node).value !== original || node.graph !== graph) throw new Error("移行中にノードの設定が変わったため、参照への切り替えを停止しました。保存したカタログはカタログ選択から使用できます。");
+                // 外部保存成功まで埋め込みデータを変更しない。
+                stateFor(node).close?.();
+                widget(node).value = JSON.stringify({ version: 3, catalog_id: document.id, rows: [{ id: newId(), recipe_id: config.active_recipe_id, on: true }] });
+                node.widgets = node.widgets.filter(w => w.name === "config_json" || w.name === "seed" || w.name === "control_after_generate");
+                states.delete(node); initialize(node); node.graph?.change?.();
+            } catch (error) { await showAlertDialog({ title: "移行できませんでした", message: error.message }); }
+            finally { node._saxCatalogMigrating = false; }
+        }, { serialize: false });
+        migration.serialize = false;
+        migration.options = { ...(migration.options ?? {}), serialize: false };
+    }
     if (!node.widgets?.some(w => w.name === "カタログを開く" || w.name === "管理・編集")) node.addWidget("button", "カタログを開く", null, () => openCatalog(node), { serialize: false });
     node.size[0] = Math.max(node.size[0] ?? 0, 310);
     const seedWidget = node.widgets?.find(w => w.name === "seed");
@@ -442,25 +483,58 @@ function initialize(node) {
     }
     installQuickControls(node, {
         read: () => stateFor(node).getConfig?.(),
-        commit: change => stateFor(node).quickCommit?.(change),
+        commit: change => node._saxCatalogMigrating ? false : stateFor(node).quickCommit?.(change),
         state: () => stateFor(node),
     });
 }
 
 app.registerExtension({
     name: "SAX.TextCatalogV2",
+    async setup() {
+        const queue = app.queuePrompt;
+        if (queue && !app._saxSharedCatalogQueue) {
+            app._saxSharedCatalogQueue = true;
+            app.queuePrompt = async function (...args) {
+                try {
+                    let graph, signature;
+                    do {
+                        graph = this.rootGraph ?? this.graph;
+                        signature = JSON.stringify(graph?._nodes?.filter(n => n.comfyClass === NODE_TYPE || n.type === NODE_TYPE).map(n => widget(n)?.value));
+                        await flushCatalogNodes(graph?._nodes);
+                    } while (graph !== (this.rootGraph ?? this.graph) || signature !== JSON.stringify((this.rootGraph ?? this.graph)?._nodes?.filter(n => n.comfyClass === NODE_TYPE || n.type === NODE_TYPE).map(n => widget(n)?.value)));
+                }
+                catch (error) { await showAlertDialog({ title: "カタログを保存できないためQueueを停止しました", message: error.message }); throw error; }
+                return queue.apply(this, args);
+            };
+        }
+        // バッチの各送信・サブグラフも、シリアライズ済みpromptの参照から保存を保証する。
+        const { api } = await import("../../scripts/api.js");
+        if (api.queuePrompt && !api._saxSharedCatalogQueue) {
+            api._saxSharedCatalogQueue = true;
+            const send = api.queuePrompt;
+            api.queuePrompt = async function (number, prompt, ...args) {
+                try { await flushCatalogPrompt(prompt?.output); }
+                catch (error) { await showAlertDialog({ title: "カタログを保存できないためQueueを停止しました", message: error.message }); throw error; }
+                return send.call(this, number, prompt, ...args);
+            };
+        }
+    },
     beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_TYPE) return;
         const created = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () { const result = created?.apply(this, arguments); initialize(this); return result; };
         const configure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
+            if (sharedController(this)) {
+                sharedController(this).dispose();
+                this.widgets = this.widgets.filter(w => w.name === "config_json" || w.name === "seed" || w.name === "control_after_generate");
+            }
             const state = states.get(this); if (state) state.discard = true;
             state?.close?.(); states.delete(this);
             const result = configure?.apply(this, arguments); initialize(this); return result;
         };
         const removed = nodeType.prototype.onRemoved;
-        nodeType.prototype.onRemoved = function () { states.get(this)?.close?.(); states.delete(this); return removed?.apply(this, arguments); };
+        nodeType.prototype.onRemoved = function () { sharedController(this)?.dispose(); states.get(this)?.close?.(); states.delete(this); return removed?.apply(this, arguments); };
         const serialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (data) {
             states.get(this)?.flush?.();
@@ -473,6 +547,12 @@ app.registerExtension({
         const executed = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (message) {
             const result = executed?.apply(this, arguments);
+            const shared = sharedController(this);
+            if (shared) {
+                try { shared.result = { text: message.text?.[0] ?? "", selection: JSON.parse(message.selection_json?.[0] ?? "{}") }; }
+                catch { shared.result = null; }
+                return result;
+            }
             const state = stateFor(this);
             state.result = { text: message.text?.[0] ?? "", selection: message.selection_json?.[0] ?? "", config: message.config_json?.[0], seed: message.seed?.[0] };
             state.refresh?.(); return result;

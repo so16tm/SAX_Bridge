@@ -8,6 +8,7 @@ from .nodes import image_collector as image_collector_node
 from .nodes import primitive_store as primitive_store_node
 from .nodes import text_catalog as text_catalog_node
 from .nodes import text_catalog_v2 as text_catalog_v2_node
+from .nodes import text_catalog_v2_store
 from .nodes import guidance as guidance_node
 from .nodes import sam3 as sam3_node
 from .nodes import mask_adjust as mask_adjust_node
@@ -104,6 +105,7 @@ for node_cls in NODE_CLASS_MAPPINGS.values():
 
 # ComfyUI の prompt lifecycle に flush フックを登録する（ワークフロー完了時に発火）
 debug_log_module.register_lifecycle_hook()
+text_catalog_v2_store.register_routes()
 
 WEB_DIRECTORY = "js"
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']
