@@ -15,6 +15,13 @@ let browser;
   const shared=await import('/extensions/SAX_Bridge/sax_text_catalog_v2_shared.js');window.testShared=()=>shared.sharedController(node);testApp.canvas.ds.scale=1;testApp.canvas.ds.offset=[0,0];testApp.canvas.setDirty(true,true);
  },doc);await page.waitForFunction(()=>document.querySelector('.sax-shared-sets select:not(:disabled)'),null,{timeout:10000}).catch(async error=>{console.log('diagnostics',await page.evaluate(()=>({controller:!!testShared(),widgets:testNode.widgets.map(w=>w.name)})),errors);await page.screenshot({path:path.join(output,'comfy-widget-error.png')});throw error});
  assert.equal(await page.locator('.sax-shared-sets').count(),1);
+ const rowLayout = await page.locator('.ssw-entry').first().evaluate(row => {
+  const select = row.querySelector('select'), buttons = [...row.querySelectorAll('.ssw-edit')];
+  return { height: row.offsetHeight, selectX: select.offsetLeft, selectRight: select.offsetLeft+select.offsetWidth, buttons: buttons.map(b=>({x:b.offsetLeft,y:b.offsetTop,title:b.title,text:b.textContent,icon:!!b.querySelector('svg')})), selectY:select.offsetTop };
+ });
+ assert.ok(rowLayout.height<=40,JSON.stringify(rowLayout));assert.equal(rowLayout.buttons.length,2);
+ assert.deepEqual(rowLayout.buttons.map(b=>b.title),['セット編集','アイテム編集']);
+ assert.ok(rowLayout.buttons.every(b=>b.x>=rowLayout.selectRight && b.y===rowLayout.selectY && b.text==='' && b.icon),JSON.stringify(rowLayout));
  const originalHeight=await page.evaluate(()=>testNode.size[1]);await page.evaluate(()=>{testApp.canvas.ds.scale=.65;testShared().setWidget.refresh();testApp.canvas.setDirty(true,true)});await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>testNode.size[1]),originalHeight);await page.evaluate(()=>{testApp.canvas.ds.scale=1;testApp.canvas.setDirty(true,true)});
  await page.evaluate(()=>Object.defineProperty(globalThis.crypto,'randomUUID',{value:undefined,configurable:true}));
  await page.getByRole('button',{name:'＋ テキストセットを追加',exact:true}).click();

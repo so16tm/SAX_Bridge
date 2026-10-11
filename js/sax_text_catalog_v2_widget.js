@@ -6,10 +6,20 @@ const CSS = `
 .sax-shared-sets *{box-sizing:border-box}.sax-shared-sets .ssw-heading{font-weight:600;font-size:12px;margin:0;line-height:22px}.sax-shared-sets .ssw-list{display:flex;flex-direction:column;gap:6px}.sax-shared-sets .ssw-entry{border:1px solid var(--border-color,#45454b);border-radius:7px;padding:7px;background:var(--comfy-input-bg,#242426);display:flex;flex-direction:column;gap:6px}.sax-shared-sets .ssw-entry[data-off=true]{opacity:.62}.sax-shared-sets .ssw-entry[data-drop=true]{outline:2px solid var(--primary-background,#5686d6)}.sax-shared-sets .ssw-entry[data-drag=true]{opacity:.4}
 .sax-shared-sets .ssw-row{display:flex;align-items:center;gap:6px;min-width:0}.sax-shared-sets select,.sax-shared-sets button{font:inherit;color:inherit;border:1px solid var(--border-color,#45454b);border-radius:5px;background:var(--comfy-menu-bg,#171718);padding:4px 6px;min-width:0;height:27px}.sax-shared-sets button{cursor:pointer;white-space:nowrap}.sax-shared-sets button:hover{border-color:var(--primary-background,#5686d6)}.sax-shared-sets button:disabled{opacity:.4;cursor:default}.sax-shared-sets :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:1px}.sax-shared-sets select{flex:1;width:0;text-overflow:ellipsis}.sax-shared-sets input[type=checkbox]{width:15px;height:15px;margin:0;flex:none;accent-color:var(--primary-background,#5686d6)}.sax-shared-sets .ssw-handle{cursor:grab;touch-action:none;width:23px;padding:0;flex:none;border-color:transparent;background:transparent;font-size:17px}.sax-shared-sets .ssw-remove{width:24px;padding:0;flex:none;font-size:16px}.sax-shared-sets .ssw-edit{flex:1}.sax-shared-sets .ssw-add{width:100%;height:29px}.sax-shared-sets .ssw-message{font-size:11px;opacity:.7;line-height:17px}.sax-shared-sets .ssw-error{color:var(--error-text,#ed9494);opacity:1;white-space:pre-wrap}.sax-shared-sets .ssw-live{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .sax-shared-sets{padding:6px ${PAD}px;gap:${GAP}px;color:var(--input-text,var(--ssw-text));background:var(--comfy-menu-bg,var(--ssw-menu))}.sax-shared-sets .ssw-row,.sax-shared-sets .ssw-list,.sax-shared-sets .ssw-entry{gap:${GAP}px}.sax-shared-sets select,.sax-shared-sets button{height:${ROW_H}px;border-radius:${BTN_RADIUS}px}.sax-shared-sets .ssw-add{height:${ADD_H}px}.sax-shared-sets .ssw-heading{line-height:${HEADER_H}px}
+.sax-shared-sets .ssw-entry{flex-direction:row;align-items:center;padding:4px 6px;min-width:0;flex-wrap:nowrap}.sax-shared-sets .ssw-edit{flex:none;width:${ROW_H}px;padding:0;display:inline-flex;align-items:center;justify-content:center}.sax-shared-sets .ssw-edit svg{width:16px;height:16px;pointer-events:none}
 `;
 
 function element(tag, cls = "", text = "") { const n = document.createElement(tag); n.className = cls; n.textContent = text; return n; }
 function button(label, cls) { const n = element("button", cls, label); n.type = "button"; return n; }
+function editIcon(title, path) {
+    const n = button("", "ssw-edit"); n.title = title;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("fill", "none"); svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.7"); svg.setAttribute("stroke-linecap", "round"); svg.setAttribute("stroke-linejoin", "round");
+    const shape = document.createElementNS("http://www.w3.org/2000/svg", "path"); shape.setAttribute("d", path); svg.append(shape); n.append(svg); return n;
+}
+const ROW_ESTIMATE = ROW_H + 10 + GAP;
 
 /** The workflow stores references only. Unselected draft rows stay in this widget. */
 export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, openSet, openItems, onResize, readCatalogId }) {
@@ -51,10 +61,11 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
     function highlight(id) { for (const [key, value] of elements) value.root.dataset.drop = String(key === id && key !== drag?.id && !drafts.has(key)); }
     function createRow(id) {
         const root = element("div", "ssw-entry"); root.dataset.rowId = id;
-        const first = element("div", "ssw-row"), second = element("div", "ssw-row");
         const on = element("input"); on.type = "checkbox";
         const handle = button("≡", "ssw-handle"); handle.draggable = true; handle.setAttribute("aria-label", "ドラッグまたは上下キーで並び替え"); handle.title = "ドラッグで並び替え · 上下キーでも移動できます";
-        const select = element("select"), del = button("×", "ssw-remove"), edit = button("セット編集", "ssw-edit"), items = button("アイテム編集", "ssw-edit");
+        const select = element("select"), del = button("×", "ssw-remove");
+        const edit = editIcon("セット編集", "M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4");
+        const items = editIcon("アイテム編集", "M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8M13 3v5h5M13 3l5 5M8 10h3M8 14h2M13 17l6-6 2 2-6 6-3 1 1-3");
         on.addEventListener("change", () => update(id, row => { row.on = on.checked; }));
         select.addEventListener("change", () => selectRecipe(id, select.value)); select.addEventListener("blur", () => refresh());
         del.addEventListener("click", () => remove(id));
@@ -68,13 +79,13 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
         handle.addEventListener("dragstart", event => { if (drafts.has(id)) { event.preventDefault(); return; } event.stopPropagation(); drag = { id, target: id, native: true }; root.dataset.drag = "true"; event.dataTransfer?.setData("text/plain", id); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; });
         root.addEventListener("dragover", event => { if (!drag || drafts.has(id)) return; event.preventDefault(); event.stopPropagation(); drag.target = id; highlight(id); if (event.dataTransfer) event.dataTransfer.dropEffect = "move"; });
         root.addEventListener("drop", event => { if (!drag || drafts.has(id)) return; event.preventDefault(); event.stopPropagation(); const source = drag.id; clearDrag(); move(source, id); }); handle.addEventListener("dragend", clearDrag);
-        first.append(on, handle, select, del); second.append(edit, items); root.append(first, second); return { root, on, handle, select, del, edit, items, optionSignature: null };
+        root.append(on, handle, select, edit, items, del); return { root, on, handle, select, del, edit, items, optionSignature: null };
     }
     function resize() {
         if (disposed) return; const count = displayRows().length;
         // Exact row count is used rather than a scroll cap. ResizeObserver refines wrapped messages.
         // Canvasのzoom変換後の画面座標ではなく、未拡縮のレイアウト寸法を使う。
-        const height = Math.ceil(heading.offsetHeight + list.offsetHeight + add.offsetHeight + (message.hidden ? 0 : message.offsetHeight) + 12 + GAP * (message.hidden ? 2 : 3)) || 75 + count * 72;
+        const height = Math.ceil(heading.offsetHeight + list.offsetHeight + add.offsetHeight + (message.hidden ? 0 : message.offsetHeight) + 12 + GAP * (message.hidden ? 2 : 3)) || 75 + count * ROW_ESTIMATE;
         panel.style.setProperty("--comfy-widget-min-height", `${height}px`); panel.style.setProperty("--comfy-widget-max-height", `${height}px`); panel.style.setProperty("--comfy-widget-height", `${height}px`);
         if (height !== lastHeight) { lastHeight = height; widget.computedHeight = height; onResize?.(); node.setDirtyCanvas?.(true, true); }
     }
@@ -122,12 +133,12 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
     const stop = event => event.stopPropagation(); for (const event of ["pointerdown", "mousedown", "dblclick", "wheel", "keydown", "keyup"]) panel.addEventListener(event, stop);
     const widget = node.addDOMWidget("__sax_shared_sets", "sax-shared-sets", panel, {
         serialize: false, hideOnZoom: false, selectOn: [], margin: 4,
-        getMinHeight: () => lastHeight || 75 + displayRows().length * 72,
-        getMaxHeight: () => lastHeight || 75 + displayRows().length * 72,
-        getHeight: () => lastHeight || 75 + displayRows().length * 72,
+        getMinHeight: () => lastHeight || 75 + displayRows().length * ROW_ESTIMATE,
+        getMaxHeight: () => lastHeight || 75 + displayRows().length * ROW_ESTIMATE,
+        getHeight: () => lastHeight || 75 + displayRows().length * ROW_ESTIMATE,
         getValue: () => "",
     });
-    widget.serialize = false; widget.options = { ...widget.options, serialize: false }; widget.computeSize = width => [width, lastHeight || 75 + displayRows().length * 72];
+    widget.serialize = false; widget.options = { ...widget.options, serialize: false }; widget.computeSize = width => [width, lastHeight || 75 + displayRows().length * ROW_ESTIMATE];
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(scheduleResize) : null; observer?.observe(panel);
     function dispose() { if (disposed) return; disposed = true; observer?.disconnect(); if (frame !== null) cancelAnimationFrame(frame); clearDrag(); drafts.clear(); elements.clear(); panel.remove(); }
     refresh(); return { widget, refresh, dispose, addDraft };
