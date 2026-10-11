@@ -265,3 +265,83 @@ def test_node_schema_and_execution_keep_v1_separate():
     assert result.ui["text"] == [result[0]]
     assert result.ui["selection_json"] == [result[1]]
     assert result.ui["config_json"] == [raw]
+
+
+def nested(identifier, children, mode="all", count=0, on=True):
+    return {"id": identifier, "name": identifier, "kind": "nested", "groups": children,
+            "mode": mode, "count": count, "on": on}
+
+
+def test_nested_all_and_random_resolve_whole_children_in_order():
+    data = config(items=4, count=2)
+    leaf = copy.deepcopy(group(data))
+    leaf.update(id="a", mode="all", item_ids=["i1", "i0"])
+    other = copy.deepcopy(leaf)
+    other.update(id="b", item_ids=["i2", "i3"])
+    data["recipes"][0]["groups"] = [nested("outer", [leaf, nested("inner", [other])])]
+    assert resolve(data)[0] == "text 1\ntext 0\ntext 2\ntext 3"
+    outer = data["recipes"][0]["groups"][0]
+    outer.update(mode="random", count=1)
+    text, report = resolve(data)
+    selected = report["groups"][0]["selected_group_ids"]
+    assert len(selected) == 1
+    assert text == ("text 1\ntext 0" if selected == ["a"] else "text 2\ntext 3")
+    disabled = next(g for g in report["groups"][0]["groups"] if g["group_id"] not in selected)
+    assert disabled["on"] is False
+
+
+def test_nested_disabled_children_remain_random_candidates():
+    data = config(items=1, count=1)
+    leaf = group(data)
+    leaf["on"] = False
+    data["recipes"][0]["groups"] = [nested("outer", [leaf], "random", 1)]
+    text, report = resolve(data)
+    assert text == ""
+    outer = report["groups"][0]
+    assert outer["candidate_group_ids"] == outer["selected_group_ids"] == ["g"]
+    assert outer["groups"][0]["item_ids"] == []
+
+
+def test_leaf_random_draw_is_stable_after_hierarchy_move():
+    data = config(items=20, count=5)
+    initial = resolve(data)[1]["groups"][0]["item_ids"]
+    data["recipes"][0]["groups"] = [nested("outer", [group(data)])]
+    assert resolve(data)[1]["groups"][0]["groups"][0]["item_ids"] == initial
+
+
+def test_nested_validation_depth_total_and_ids():
+    data = config()
+    chain = group(data)
+    for level in range(7):
+        chain = nested(f"n{level}", [chain])
+    data["recipes"][0]["groups"] = [chain]
+    resolve(data)
+    data["recipes"][0]["groups"] = [nested("n8", [chain])]
+    with pytest.raises(ValueError, match="深さ"):
+        resolve(data)
+    duplicate = config()
+    duplicate["recipes"][0]["groups"] = [nested("outer", [group(duplicate)]), copy.deepcopy(group(duplicate))]
+    with pytest.raises(ValueError, match="重複"):
+        resolve(duplicate)
+    big = config()
+    leaf = group(big)
+    big["recipes"][0]["groups"] = [nested(f"n{i}", [{**leaf, "id": f"g{i}_{j}"} for j in range(32)]) for i in range(8)]
+    with pytest.raises(ValueError, match="合計"):
+        resolve(big)
+
+
+@pytest.mark.parametrize("mutation", [lambda g: g.update(item_ids=[]), lambda g: g.update(groups="bad")])
+def test_nested_rejects_ambiguous_or_invalid_shape(mutation):
+    data = config()
+    outer = nested("outer", [group(data)])
+    mutation(outer)
+    data["recipes"][0]["groups"] = [outer]
+    with pytest.raises(ValueError):
+        resolve(data)
+
+
+def test_leaf_rejects_explicit_null_kind_like_browser_validator():
+    data = config()
+    group(data)["kind"] = None
+    with pytest.raises(ValueError, match="アイテム型"):
+        resolve(data)

@@ -59,6 +59,12 @@ function openCatalog(node) {
         } });
         return;
     }
+    if (config.recipes.some(r => r.groups.some(g => g.kind === "nested"))) {
+        state.close = showDialog({ title: "ネスト構成要素の編集", className: "sax-catalog-v2", width: 700, onClose: () => { state.close = null; }, build(dlg, close) {
+            dlg.append(el("p", "", "この埋め込みカタログはそのまま実行できます。階層の編集には共有カタログへ移行してください。"), button("共有カタログへ移行", () => { close(); node.widgets.find(w => w.name === "共有カタログへ移行")?.callback(); }), button("閉じる", close));
+        } });
+        return;
+    }
     if (!state.history || state.history.current !== widget(node).value) state.history = new EditHistory(widget(node).value);
     const recipe = () => config.recipes.find(r => r.id === config.active_recipe_id);
     let content, status, preview, undoButton, redoButton, paneButton;

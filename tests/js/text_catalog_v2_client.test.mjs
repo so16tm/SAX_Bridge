@@ -18,6 +18,30 @@ function server(initial = fixture()) {
 }
 const edit = (text, extra = {}) => ({ type: "item.put", item: { id: "a", name: "森", text, tags: [], ...extra } });
 
+test("ネスト構成要素の差分保存・削除・Undo/Redoは子の参照と構造を維持する", async () => {
+    const initial = fixture();
+    initial.recipes[0].groups = [{ id: "parent", name: "場面", kind: "nested", mode: "random", count: 1, on: true, groups: initial.recipes[0].groups }];
+    const backend = server(initial), session = new CatalogSession(initial, { request: backend.request, debounceMs: 10000 });
+    const recipe = structuredClone(initial.recipes[0]); recipe.groups[0].groups[0].name = "子の編集";
+    session.mutate([{ type: "recipe.put", recipe }]); await session.flush();
+    assert.equal(backend.document().recipes[0].groups[0].groups[0].name, "子の編集");
+    session.mutate([{ type: "item.delete", id: "a" }]);
+    assert.deepEqual(session.document.recipes[0].groups[0].groups[0].item_ids, []);
+    session.undo(); assert.deepEqual(session.document.recipes[0].groups[0].groups[0].item_ids, ["a"]);
+    session.redo(); await session.flush();
+    assert.deepEqual(backend.document().recipes[0].groups[0].groups[0].item_ids, []);
+    assert.equal(Object.hasOwn(session.document.recipes[0].groups[0], "item_ids"), false);
+});
+
+test("ネスト構成の不正な差分は既存データと履歴を変更しない", () => {
+    const initial = fixture(), session = new CatalogSession(initial);
+    const recipe = structuredClone(initial.recipes[0]);
+    recipe.groups = [{ id: "parent", name: "場面", kind: "nested", mode: "all", count: 0, on: true, groups: [{ ...recipe.groups[0], item_ids: ["missing"] }] }];
+    assert.throws(() => session.mutate([{ type: "recipe.put", recipe }]), /参照先/);
+    assert.deepEqual(session.document, initial); assert.equal(session.undoStack.length, 0);
+    recipe.groups[0].groups = [null]; assert.throws(() => session.mutate([{ type: "recipe.put", recipe }]), /オブジェクト/);
+});
+
 test("差分保存の改訂情報だけの応答でも、保存中の追加本文を保持する", async () => {
     const backend = server(); let release; let first = true;
     const request = async (path, options) => {

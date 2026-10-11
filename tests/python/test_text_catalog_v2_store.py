@@ -247,3 +247,20 @@ def test_catalog_loading_measurements(capsys):
         warm = (time.perf_counter() - start) * 10
         with capsys.disabled():
             print(f"\nshared catalog count={count} text_chars={length}: cold={cold:.2f}ms warm={warm:.3f}ms")
+
+
+def test_nested_shared_snapshot_order_edit_and_recursive_delete():
+    data = source(3)
+    leaf = data["recipes"][0]["groups"][0]
+    leaf.update(mode="all", item_ids=["i2", "i0"])
+    data["recipes"][0]["groups"] = [{"id": "outer", "name": "親", "kind": "nested", "mode": "all", "count": 0, "on": True, "groups": [leaf]}]
+    document = store.create(data)
+    text, raw = node.resolve_catalog(workflow(document))
+    assert text == "text2\ntext0"
+    report = json.loads(raw)["rows"][0]["groups"][0]
+    assert report["selected_group_ids"] == ["g"]
+    assert [item["output_position"] for item in report["groups"][0]["items"]] == [1, 2]
+    store.update(document["id"], 1, [{"type": "item.delete", "id": "i0"}])
+    assert store.get(document["id"])["recipes"][0]["groups"][0]["groups"][0]["item_ids"] == ["i2"]
+    assert node.resolve_catalog(workflow(document))[0] == "text2"
+    assert node.resolve_catalog(workflow(document, [{"id": "row", "recipe_id": "r", "on": False}]))[0] == ""

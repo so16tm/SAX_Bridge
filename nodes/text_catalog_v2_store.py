@@ -214,9 +214,11 @@ def update(catalog_id, base_revision, operations):
             elif index is not None:
                 target.pop(index)
                 if is_item:
+                    from .text_catalog_v2 import iter_groups
                     for recipe in document["recipes"]:
-                        for group in recipe["groups"]:
-                            group["item_ids"] = [value for value in group["item_ids"] if value != identifier]
+                        for group in iter_groups(recipe["groups"]):
+                            if group.get("kind") != "nested":
+                                group["item_ids"] = [value for value in group["item_ids"] if value != identifier]
         if not operations:
             return copy.deepcopy(current)
         document["revision"] += 1

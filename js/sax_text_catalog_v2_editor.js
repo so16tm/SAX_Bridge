@@ -1,10 +1,22 @@
 import { showDialog, showConfirmDialog } from "./sax_ui_base.js";
-import { newId, parseTags, itemTagSortKeys, compareItemTagKeys } from "./sax_text_catalog_v2_model.js";
+import { newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "./sax_text_catalog_v2_model.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { openWildcardPicker } from "./sax_text_catalog_v2_wildcards.js";
 
 const preferences = new WeakMap();
 const openEditors = new WeakMap();
+
+function locateGroup(groups, id, parentId = "") {
+    for (const [index, group] of groups.entries()) {
+        if (group.id === id) return { group, siblings: groups, index, parentId };
+        if (group.kind === "nested") { const found = locateGroup(group.groups, id, group.id); if (found) return found; }
+    }
+    return null;
+}
+
+function visibleGroups(groups, collapsed = new Set(), depth = 0) {
+    return groups.flatMap(group => [{ group, depth }, ...(group.kind === "nested" && !collapsed.has(group.id) ? visibleGroups(group.groups, collapsed, depth + 1) : [])]);
+}
 const STYLE = `
 .sax-shared-editor *{box-sizing:border-box}.sax-shared-editor [hidden]{display:none!important}.sax-shared-editor .se-mobile-tags{display:none}.sax-shared-editor>div{width:97vw!important;height:94vh;max-height:97vh!important;padding:16px!important;border-radius:12px!important;font-family:system-ui,sans-serif}
 .sax-shared-editor button,.sax-shared-editor input,.sax-shared-editor select,.sax-shared-editor textarea{font:inherit;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#242426);border:1px solid var(--border-color,#45454b);border-radius:6px;padding:7px 9px;min-width:0}.sax-shared-editor button{cursor:pointer}.sax-shared-editor button:disabled{opacity:.45;cursor:default}.sax-shared-editor :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:2px}.sax-shared-editor textarea{width:100%;resize:vertical;line-height:1.7;min-height:160px}.sax-shared-editor input[type=checkbox]{width:16px;height:16px;accent-color:var(--primary-background,#5686d6)}
@@ -25,6 +37,9 @@ const STYLE = `
 .sax-shared-editor .se-card input.se-grow{min-width:60px;width:0}
 .sax-shared-editor .se-card[data-single=true] input.se-grow{min-width:40px}
 .sax-shared-editor .se-single-mode{font-size:11px;white-space:nowrap}
+.sax-shared-editor .se-card[data-drop=inside]{outline:2px solid var(--primary-background,#5686d6)}
+.sax-shared-editor .se-card[data-drop=before]{border-top:3px solid var(--primary-background,#5686d6)}
+.sax-shared-editor .se-card[data-drop=after]{border-bottom:3px solid var(--primary-background,#5686d6)}
 .sax-shared-editor .se-group-icon{width:26px;padding:0!important;flex:none}
 .sax-shared-editor .se-group-preview{flex:1;min-width:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:11px}
 .sax-shared-editor .se-candidate{height:48px;gap:8px;padding:4px 6px;cursor:pointer}
@@ -96,7 +111,8 @@ export function openSharedEditor(session, options = {}) {
     if (options.recipeId) { if (mode === "items") { pref.recipeFilter = options.recipeId; pref.query = ""; pref.tag = ""; pref.scroll = 0; } else pref.recipeId = options.recipeId; }
     let content, status, conflict, errorMessage, close, virtual = null, active = null, unsubscribe, localError = "", saveTimer, refreshing = false;
     let itemMap = new Map(), selected = new Set(), candidateSelection = new Set(), candidateGroup = null, candidateQuery = "", candidateTag = "", resultRecipe = "", outputTab = false, selectionAnchor = null;
-    let candidatesOnly = false, candidateAnchor = null;
+    let candidatesOnly = false, candidateAnchor = null, targetParent = "";
+    const collapsedGroups = new Set();
     const setScroll = { candidates: 0, groups: 0 };
     let orderGroup = null, orderScroll = 0;
     const orderLists = [];
@@ -106,7 +122,7 @@ export function openSharedEditor(session, options = {}) {
         const tagKeys = pref.sort === "tags" ? itemTagSortKeys(values.map(resolve)) : null;
         const ranks = pref.sort === "catalog" ? new Map(doc().catalog.items.map((item, index) => [item.id, index])) : null;
         const counts = new Map();
-        if (pref.sort === "usage") for (const r of doc().recipes) for (const g of r.groups) for (const id of g.item_ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+        if (pref.sort === "usage") for (const r of doc().recipes) for (const id of groupItemIds(r.groups)) counts.set(id, (counts.get(id) ?? 0) + 1);
         return values.sort((a, b) => {
             const left = resolve(a), right = resolve(b);
             if (tagKeys) { const difference = compareItemTagKeys(tagKeys.get(left.id), tagKeys.get(right.id)); if (difference) return difference; }
@@ -129,6 +145,31 @@ export function openSharedEditor(session, options = {}) {
         mutate([{ type: "item.put", item: { ...current, ...patch } }], historyKey);
     };
     const putRecipe = next => mutate([{ type: "recipe.put", recipe: next }]);
+    const groupChildren = (r, parentId) => parentId ? locateGroup(r.groups, parentId)?.group.groups : r.groups;
+    function relocate(r, id, parentId, beforeId = null) {
+        const source = locateGroup(r.groups, id);
+        if (!source || parentId === id || (source.group.kind === "nested" && locateGroup(source.group.groups, parentId))) { localError = "自分自身や配下の構成要素へは移動できません"; updateStatus(); return false; }
+        const target = groupChildren(r, parentId);
+        if (!target) return false;
+        if (source.parentId === parentId && beforeId === id) return true;
+        source.siblings.splice(source.index, 1);
+        const index = beforeId ? target.findIndex(g => g.id === beforeId) : target.length;
+        target.splice(index < 0 ? target.length : index, 0, source.group);
+        return true;
+    }
+    function parentOptions(excludeId = null) {
+        const excluded = excludeId ? locateGroup(recipe().groups, excludeId)?.group : null;
+        const ids = new Set(excluded ? [excluded.id, ...[...walkGroups(excluded.groups ?? [])].map(g => g.id)] : []);
+        return [["", "セット直下"], ...visibleGroups(recipe().groups).filter(({group}) => group.kind === "nested" && !ids.has(group.id)).map(({group, depth}) => [group.id, `${"　".repeat(depth)}${group.name || "ネスト"}`])];
+    }
+    function editNested(id) {
+        const found = locateGroup(recipe().groups, id); if (!found) return;
+        let parentId = found.parentId;
+        showDialog({ title: `${found.group.name || "ネスト"} — 構成要素`, className: "sax-shared-expanded", width: 520, build(dlg, end) {
+            const parent = select(parentOptions(id), parentId, value => { parentId = value; }); parent.setAttribute("aria-label", "ネストの配置先");
+            dlg.append(el("p", "", "直下の構成要素をまとめて選択します。選択方式と件数は一覧の2行目で変更できます。"), row(el("span", "", "配置先"), parent), row(btn("配置先を変更", () => { const next = structuredClone(recipe()); if (locateGroup(next.groups,id)?.parentId === parentId || (relocate(next, id, parentId) && putRecipe(next))) { end(); render(); } }), btn("ここにアイテムを追加", () => { targetParent = id; candidateGroup = null; candidateSelection.clear(); candidatesOnly = false; collapsedGroups.delete(id); end(); render(); }), btn("閉じる", end)));
+        } });
+    }
     function updateStatus() { if (!status) return; const messages = { saved: "保存済み", pending: "保存中…", saving: "保存中…", error: "保存に失敗", conflict: "編集が競合" }; const message = localError || session.error?.message || ""; status.firstChild.textContent = message ? "エラー" : messages[session.status] || session.status || "保存済み"; status.title = message || "共有カタログへ自動保存"; status.classList.toggle("se-error", Boolean(message) || session.conflict); conflict.hidden = !session.conflict; status.lastChild.hidden = !session.error || session.conflict; errorMessage.textContent = message; errorMessage.hidden = !message || session.conflict; }
     async function safeAsync(fn) { try { await fn(); localError = ""; } catch (error) { localError = error.message; } updateStatus(); }
     function dispose(n) { for (const t of n.querySelectorAll("textarea")) detachAutoComplete(t); }
@@ -161,7 +202,7 @@ export function openSharedEditor(session, options = {}) {
     }
     function entries() {
         if (mode === "items") {
-            let ids = null; const r = doc().recipes.find(r => r.id === pref.recipeFilter); if (r) ids = new Set(r.groups.flatMap(g => g.item_ids));
+            let ids = null; const r = doc().recipes.find(r => r.id === pref.recipeFilter); if (r) ids = new Set(groupItemIds(r.groups));
             const q = pref.query.trim().toLocaleLowerCase();
             const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && (!pref.tag || i.tags.includes(pref.tag)) && (!q || `${i.name}\n${i.text}\n${i.tags.join(" ")}`.toLocaleLowerCase().includes(q)));
             return sortItems(values).map(i => ({ key: i.id, itemId: i.id, height: Math.max(76, 28 + pref.lines * 23) }));
@@ -170,13 +211,25 @@ export function openSharedEditor(session, options = {}) {
         for (const [ri, r] of (result?.rows ?? []).entries()) {
             if (resultRecipe && r.recipe_id !== resultRecipe) continue;
             list.push({ key: `r:${ri}`, section: true, title: r.name, subtitle: r.on ? "テキストセット" : "無効・出力なし", height: 52 });
-            for (const [gi, g] of (r.groups ?? []).entries()) {
-                const key = `g:${ri}:${gi}`; const snapshots = g.items ?? []; const chosen = new Set(g.item_ids ?? snapshots.map(i => i.id));
-                list.push({ key, section: true, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "無効・出力なし" : g.mode === "random" ? `ランダム・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 52 });
-                const values = snapshots.map((snapshot, i) => ({ key: `${key}:${i}`, itemId: snapshot.id, snapshot, height: Math.max(90, 28 + pref.lines * 23) }));
-                if (showCandidates.has(key)) for (const id of g.candidate_ids ?? []) if (!chosen.has(id)) { const item = itemMap.get(id); if (item) values.push({ key: `${key}:candidate:${id}`, itemId: id, candidate: true, height: 90 }); }
-                list.push(...sortItems(values.filter(e => { const i = itemMap.get(e.itemId) ?? e.snapshot; return (!pref.tag || i?.tags?.includes(pref.tag)) && (!q || `${i?.name ?? ""}\n${i?.text ?? ""}`.toLocaleLowerCase().includes(q)); }), e => itemMap.get(e.itemId) ?? e.snapshot));
+            function appendGroups(groups, prefix, depth = 0, reveal = false) {
+                for (const [gi, g] of groups.entries()) {
+                    const key = `${prefix}:${g.group_id ?? gi}`;
+                    if (g.kind === "nested") {
+                        const selected = new Set(g.selected_group_ids ?? []);
+                        list.push({ key, section: true, depth, title: g.name || "ネスト", subtitle: !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・子${g.candidate_group_ids?.length ?? 0}件から${selected.size}件選択` : `子をすべて使用・${selected.size}件`, candidates: g, height: 52 });
+                        const expanded = reveal || showCandidates.has(key);
+                        appendGroups((g.groups ?? []).filter(child => expanded || selected.has(child.group_id)), key, depth + 1, expanded);
+                        continue;
+                    }
+                    const snapshots = g.items ?? []; const chosen = new Set(g.item_ids ?? snapshots.map(i => i.id));
+                    list.push({ key, section: true, depth, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 52 });
+                    const values = snapshots.map((snapshot, i) => ({ key: `${key}:${i}`, depth, itemId: snapshot.id, snapshot, height: Math.max(90, 28 + pref.lines * 23) }));
+                    if (reveal || showCandidates.has(key)) for (const id of g.candidate_ids ?? []) if (!chosen.has(id)) { const item = itemMap.get(id); if (item) values.push({ key: `${key}:candidate:${id}`, depth, itemId: id, candidate: true, height: 90 }); }
+                    list.push(...sortItems(values.filter(e => { const i = itemMap.get(e.itemId) ?? e.snapshot; return (!pref.tag || i?.tags?.includes(pref.tag)) && (!q || `${i?.name ?? ""}\n${i?.text ?? ""}`.toLocaleLowerCase().includes(q)); }), e => itemMap.get(e.itemId) ?? e.snapshot));
+                }
             }
+            appendGroups(r.groups ?? [], `g:${ri}`);
+
         }
         return list;
     }
@@ -191,7 +244,7 @@ export function openSharedEditor(session, options = {}) {
     }
     function itemRow(entry) {
         if (entry.section) {
-            const n = el("div", "se-section"); n.append(el("strong", "", entry.title), el("span", "se-muted", entry.subtitle));
+            const n = el("div", "se-section"); n.style.paddingLeft = `${8 + (entry.depth ?? 0) * 14}px`; n.append(el("strong", "", entry.title), el("span", "se-muted", entry.subtitle));
             if (entry.candidates) n.append(btn(showCandidates.has(entry.key) ? "候補を隠す" : "候補を表示", () => { releaseActive(); if (showCandidates.has(entry.key)) showCandidates.delete(entry.key); else showCandidates.add(entry.key); virtual.set(entries(), true); }));
             return n;
         }
@@ -263,17 +316,20 @@ export function openSharedEditor(session, options = {}) {
         updateBulk();
     }
     function bulkTags(value, add) { try { const tags = parseTags(value); mutate([...selected].map(id => itemMap.get(id)).filter(Boolean).map(item => ({ type: "item.put", item: { ...item, tags: add ? [...new Set([...item.tags, ...tags])] : item.tags.filter(t => !tags.includes(t)) } }))); } catch (error) { localError = error.message; updateStatus(); } }
-    function editGroup(groupId, change) { const r = recipe(); if (!r) return; const next = structuredClone(r); const g = next.groups.find(g => g.id === groupId); if (!g) return; change(g, next); putRecipe(next); }
+    function editGroup(groupId, change) { const r = recipe(); if (!r) return; const next = structuredClone(r); const g = [...walkGroups(next.groups)].find(g => g.id === groupId); if (!g) return; change(g, next); putRecipe(next); }
     function renderSets() {
         const r = recipe(); if (r) pref.recipeId = r.id;
-        const setSelect = select(doc().recipes.map(s => [s.id, s.name]), r?.id ?? "", value => { pref.recipeId = value; candidateGroup = null; candidateSelection.clear(); candidatesOnly = false; candidateAnchor = null; render(); });
+        const setSelect = select(doc().recipes.map(s => [s.id, s.name]), r?.id ?? "", value => { pref.recipeId = value; candidateGroup = null; targetParent = ""; candidateSelection.clear(); candidatesOnly = false; candidateAnchor = null; render(); });
         const create = () => { const next = { id: newId(), name: "新しいテキストセット", groups: [] }; if (putRecipe(next)) { pref.recipeId = next.id; render(); } };
-        content.append(row(el("strong", "", "テキストセット"), setSelect, btn("＋ 作成", create), btn("コピー", () => { if (!r) return; const next = structuredClone(r); next.id = newId(); next.name += " コピー"; for (const g of next.groups) g.id = newId(); if (putRecipe(next)) { pref.recipeId = next.id; render(); } }), btn("削除", async () => { if (r && await showConfirmDialog({ title: "テキストセットを削除", message: `${r.name}を共有カタログから削除します。参照しているワークフローではセットの選び直しが必要です。`, danger: true, okLabel: "削除" })) { mutate([{ type: "recipe.delete", id: r.id }]); pref.recipeId = null; render(); } })));
+        content.append(row(el("strong", "", "テキストセット"), setSelect, btn("＋ 作成", create), btn("コピー", () => { if (!r) return; const next = structuredClone(r); next.id = newId(); next.name += " コピー"; for (const g of walkGroups(next.groups)) g.id = newId(); if (putRecipe(next)) { pref.recipeId = next.id; render(); } }), btn("削除", async () => { if (r && await showConfirmDialog({ title: "テキストセットを削除", message: `${r.name}を共有カタログから削除します。参照しているワークフローではセットの選び直しが必要です。`, danger: true, okLabel: "削除" })) { mutate([{ type: "recipe.delete", id: r.id }]); pref.recipeId = null; render(); } })));
         if (!r) { content.append(el("div", "se-empty", "「＋ 作成」でテキストセットを作成してください。")); return; }
         const name = input(r.name, value => { const next = structuredClone(recipe()); next.name = value; putRecipe(next); }); name.maxLength = 256; name.className = "se-grow"; name.setAttribute("aria-label", "セット名");
         const meta = content.lastChild; meta.classList.add("se-set-meta"); meta.insertBefore(name, meta.children[2]);
         const layout = el("div", "se-layout"), left = el("div", "se-pane"), right = el("div", "se-pane"); layout.append(left, right); content.append(layout);
-        left.append(el("strong", "", candidateGroup ? `「${r.groups.find(g => g.id === candidateGroup)?.name || "構成要素"}」の候補を変更` : "追加するアイテムを選択"));
+        if (targetParent && !locateGroup(r.groups,targetParent)) targetParent = "";
+        left.append(el("strong", "", candidateGroup ? `「${[...walkGroups(r.groups)].find(g => g.id === candidateGroup)?.name || "構成要素"}」の候補を変更` : "追加するアイテムを選択"));
+        const parent = select(parentOptions(candidateGroup), targetParent, value => { targetParent = value; }); parent.setAttribute("aria-label", "構成要素の配置先");
+        left.append(row(el("span", "se-muted", "配置先"), parent));
         const q = input(candidateQuery, value => { candidateQuery = value; renderCandidates(); }); q.placeholder = "名前・本文・タグを検索"; q.className = "se-grow";
         const tag = select([["", "タグ：すべて"], ...[...new Set(doc().catalog.items.flatMap(i => i.tags))].sort().map(t => [t, t])], candidateTag, value => { candidateTag = value; renderCandidates(); });
         const filter = row(q, tag, sortControl(() => renderCandidates())); filter.classList.add("se-filterbar"); left.append(filter);
@@ -307,49 +363,60 @@ export function openSharedEditor(session, options = {}) {
         const selectionbar = row(count, label("選択済みだけ", check(candidatesOnly, yes => { candidatesOnly = yes; renderCandidates(); })), matched); selectionbar.classList.add("se-selectionbar"); left.insertBefore(selectionbar, scroll);
         const selectAll = btn("一覧を全選択", () => { for (const e of candidateVirtual.entries) candidateSelection.add(e.itemId); renderCandidates(); }); selectAll.title = "検索・タグに一致する全件を選択（画面外の行も含む）";
         left.append(row(selectAll, btn("一覧の選択を解除", () => { for (const e of candidateVirtual.entries) candidateSelection.delete(e.itemId); renderCandidates(); }), btn("すべて解除", () => { candidateSelection.clear(); renderCandidates(); })));
-        let chosenMode = "all", chosenCount = 1; const edited = r.groups.find(g => g.id === candidateGroup); if (edited) { chosenMode = edited.mode; chosenCount = edited.count; }
+        let chosenMode = "all", chosenCount = 1; const edited = [...walkGroups(r.groups)].find(g => g.id === candidateGroup); if (edited) { chosenMode = edited.mode; chosenCount = edited.count; }
         const unit = el("span", "se-muted", "件");
         const modeSelect = select([["all", "すべて使う"], ["random", "ランダム"]], chosenMode, value => { chosenMode = value; number.hidden = unit.hidden = value !== "random"; }); const number = input(chosenCount, value => { chosenCount = Number(value); }, "number"); number.min = "0"; number.max = "10000"; number.step = "1"; number.style.width = "60px"; number.hidden = unit.hidden = chosenMode !== "random";
         left.append(row(modeSelect, number, unit, btn(candidateGroup ? "候補を更新" : "選んだアイテムを追加", () => {
             if (!candidateSelection.size) { localError = "候補アイテムを選択してください"; updateStatus(); return; }
             if (chosenMode === "random" && (!Number.isSafeInteger(chosenCount) || chosenCount < 0 || chosenCount > candidateSelection.size)) { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); return; }
             const next = structuredClone(recipe());
-            const previous = next.groups.find(g => g.id === candidateGroup)?.item_ids ?? [];
+            const previous = [...walkGroups(next.groups)].find(g => g.id === candidateGroup)?.item_ids ?? [];
             const ids = previous.filter(id => candidateSelection.has(id));
             const included = new Set(ids);
             for (const item of doc().catalog.items) if (candidateSelection.has(item.id) && !included.has(item.id)) ids.push(item.id);
-            if (candidateGroup) { const g = next.groups.find(g => g.id === candidateGroup); if (g) Object.assign(g, { item_ids: ids, mode: chosenMode, count: chosenCount }); }
-            else next.groups.push({ id: newId(), name: "構成要素", on: true, mode: chosenMode, count: chosenCount, item_ids: ids });
+            if (candidateGroup) { const g = [...walkGroups(next.groups)].find(g => g.id === candidateGroup); if (g) { Object.assign(g, { item_ids: ids, mode: chosenMode, count: chosenCount }); if (locateGroup(next.groups,g.id).parentId !== targetParent && !relocate(next, g.id, targetParent)) return; } }
+            else groupChildren(next, targetParent).push({ id: newId(), name: "構成要素", on: true, mode: chosenMode, count: chosenCount, item_ids: ids });
             if (putRecipe(next)) { candidateSelection.clear(); candidateGroup = null; candidatesOnly = false; candidateAnchor = null; render(); }
         }, "se-primary"), ...(candidateGroup ? [btn("キャンセル", () => { candidateGroup = null; candidateSelection.clear(); candidatesOnly = false; render(); })] : [])));
-        right.append(el("strong", "", `構成要素 ${r.groups.length}件（上から出力）`)); const groups = el("div", "se-scroll se-group-scroll"); right.append(groups);
+        right.append(row(el("strong", "se-grow", `構成要素 ${[...walkGroups(r.groups)].length}件（上から出力）`), btn("＋ ネスト", () => { const next = structuredClone(recipe()); const g = {id:newId(),name:"ネスト",kind:"nested",mode:"all",count:1,on:true,groups:[]}; groupChildren(next,targetParent).push(g); if (putRecipe(next)) render(); }))); const groups = el("div", "se-scroll se-group-scroll"); right.append(groups);
         let dragged = null;
-        for (const [index, g] of r.groups.entries()) {
-            const card = el("div", "se-card"); card.dataset.off = !g.on; card.draggable = true; card.addEventListener("dragstart", e => { if (e.target.closest("input,select,button")) { e.preventDefault(); return; } dragged = g.id; }); card.addEventListener("dragover", e => e.preventDefault()); card.addEventListener("drop", e => { e.preventDefault(); if (!dragged || dragged === g.id) return; const next = structuredClone(recipe()); const from = next.groups.findIndex(v => v.id === dragged), to = next.groups.findIndex(v => v.id === g.id); const [moved] = next.groups.splice(from, 1); next.groups.splice(to, 0, moved); putRecipe(next); render(); });
+        for (const [index, {group:g, depth}] of visibleGroups(r.groups, collapsedGroups).entries()) {
+            const nested = g.kind === "nested";
+            const card = el("div", "se-card"); card.dataset.off = !g.on; card.dataset.groupId = g.id; card.dataset.depth = depth;
+            card.style.marginLeft = `${depth * 14}px`; card.draggable = true;
+            card.addEventListener("dragstart", e => { if (e.target.closest("input,select,button")) { e.preventDefault(); return; } dragged = g.id; e.dataTransfer?.setData("text/plain", g.id); });
+            card.addEventListener("dragend", () => { dragged = null; for (const target of groups.querySelectorAll("[data-drop]")) delete target.dataset.drop; });
+            card.addEventListener("dragover", e => { if (!dragged) return; e.preventDefault(); const bounds=card.getBoundingClientRect(); card.dataset.drop = nested && e.clientY > bounds.top + bounds.height*.25 && e.clientY < bounds.bottom - bounds.height*.25 ? "inside" : e.clientY >= bounds.top + bounds.height*.5 ? "after" : "before"; });
+            card.addEventListener("dragleave", () => { delete card.dataset.drop; });
+            card.addEventListener("drop", e => { e.preventDefault(); if (!dragged || dragged === g.id) return; const next=structuredClone(recipe()); const destination=locateGroup(next.groups,g.id), inside=card.dataset.drop === "inside", after=card.dataset.drop === "after"; delete card.dataset.drop; const beforeId=inside ? null : after ? destination.siblings[destination.index+1]?.id ?? null : g.id; if (relocate(next,dragged,inside ? g.id : destination.parentId,beforeId) && putRecipe(next)) { dragged=null; render(); } });
+
             const groupName = input(g.name, value => editGroup(g.id, next => { next.name = value; })); groupName.className = "se-grow"; groupName.maxLength = 256;
             card.dataset.editing = String(candidateGroup === g.id);
             groupName.setAttribute("aria-label", `構成要素 ${index + 1}の名前`);
             const icon = (text, title, fn) => { const control = btn(text, fn, "se-group-icon"); control.title = title; control.setAttribute("aria-label", title); return control; };
             const enabled = check(g.on, yes => { editGroup(g.id, next => { next.on = yes; }); card.dataset.off = !yes; }); enabled.setAttribute("aria-label", `構成要素 ${index + 1}を使用`);
-            const changeCandidates = () => { candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTag = ""; render(); };
-            const single = g.item_ids.length === 1;
+            const changeCandidates = () => { if (nested) { editNested(g.id); return; } targetParent = locateGroup(recipe().groups,g.id).parentId; candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTag = ""; render(); };
+            const single = !nested && g.item_ids.length === 1;
             card.dataset.single = String(single);
-            const header = row(el("span", "se-muted", "≡"), enabled, groupName);
+            const header = row(el("span", "se-muted", "≡"), enabled);
+            if (nested) { const toggle = icon(collapsedGroups.has(g.id) ? "▸" : "▾", "子の構成要素を開閉", () => { if (collapsedGroups.has(g.id)) collapsedGroups.delete(g.id); else collapsedGroups.add(g.id); render(); }); toggle.setAttribute("aria-expanded", String(!collapsedGroups.has(g.id))); header.append(toggle); }
+            header.append(groupName);
             if (single) {
                 const itemName = el("span", "se-muted se-group-preview", itemMap.get(g.item_ids[0])?.name ?? "削除済み"); itemName.title = itemName.textContent;
                 header.append(itemName);
                 if (g.mode === "random") header.append(el("span", "se-muted se-single-mode", `ランダム${g.count}件`));
             }
-            header.append(icon("✎", "候補を変更", changeCandidates), icon("↑", "構成要素を上へ", () => moveGroup(g.id, -1)), icon("↓", "構成要素を下へ", () => moveGroup(g.id, 1)), icon("×", "構成要素を削除", () => { const next = structuredClone(recipe()); next.groups = next.groups.filter(v => v.id !== g.id); putRecipe(next); render(); }));
+            header.append(icon("✎", "候補を変更", changeCandidates), icon("↑", "構成要素を上へ", () => moveGroup(g.id, -1)), icon("↓", "構成要素を下へ", () => moveGroup(g.id, 1)), icon("×", "構成要素を削除", () => { const next = structuredClone(recipe()); const found=locateGroup(next.groups,g.id); found.siblings.splice(found.index,1); putRecipe(next); render(); }));
             card.append(header);
             if (!single) {
+                const candidates = nested ? g.groups : g.item_ids;
                 const groupMode = select([["all", "すべて使う"], ["random", "ランダム"]], g.mode, value => { editGroup(g.id, next => { next.mode = value; }); render(); });
-                const amount = input(g.count, value => { const count = Number(value); if (Number.isSafeInteger(count) && count >= 0 && count <= g.item_ids.length) editGroup(g.id, next => { next.count = count; }); else { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); } }, "number"); amount.style.width = "52px"; amount.min = "0"; amount.max = String(g.item_ids.length); amount.step = "1"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
-                const preview = el("span", "se-muted se-group-preview", g.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name ?? "削除済み").join("、"));
+                const amount = input(g.count, value => { const count = Number(value); if (Number.isSafeInteger(count) && count >= 0 && count <= candidates.length) editGroup(g.id, next => { next.count = count; }); else { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); } }, "number"); amount.style.width = "52px"; amount.min = "0"; amount.max = String(candidates.length); amount.step = "1"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
+                const preview = el("span", "se-muted se-group-preview", nested ? g.groups.slice(0,4).map(child => child.name).join("、") : g.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name ?? "削除済み").join("、"));
                 preview.title = "編集アイコンで全候補を一覧表示";
                 const orderButton = btn("出力順", () => { orderGroup = orderGroup === g.id ? null : g.id; orderScroll = 0; render(); }); orderButton.setAttribute("aria-expanded", String(orderGroup === g.id)); orderButton.title = "候補アイテムの出力順を並び替え";
-                card.append(row(groupMode, amount, el("span", "se-muted", `${g.item_ids.length}候補`), preview, orderButton));
-                if (orderGroup === g.id) renderOrder(card, g);
+                card.append(row(groupMode, amount, el("span", "se-muted", `${candidates.length}${nested ? "構成要素" : "候補"}`), preview, ...(nested ? [] : [orderButton])));
+                if (!nested && orderGroup === g.id) renderOrder(card, g);
             }
             card.setAttribute("aria-label", `構成要素 ${index + 1}`); groups.append(card);
         }
@@ -358,7 +425,7 @@ export function openSharedEditor(session, options = {}) {
     }
     function moveCandidate(groupId, itemId, target) {
         const keyboard = document.activeElement?.classList.contains("se-order-handle");
-        const next = structuredClone(recipe()), group = next.groups.find(g => g.id === groupId);
+        const next = structuredClone(recipe()), group = [...walkGroups(next.groups)].find(g => g.id === groupId);
         if (!group || !Number.isSafeInteger(target)) return;
         const from = group.item_ids.indexOf(itemId), to = Math.max(0, Math.min(group.item_ids.length - 1, target));
         if (from < 0 || from === to) return;
@@ -399,7 +466,8 @@ export function openSharedEditor(session, options = {}) {
         scroll.addEventListener("dragover", event => { if (!dragged) return; event.preventDefault(); const bounds = scroll.getBoundingClientRect(); if (event.clientY < bounds.top + 28) scroll.scrollTop -= 20; else if (event.clientY > bounds.bottom - 28) scroll.scrollTop += 20; list.paint(); });
         scroll.scrollTop = orderScroll; list.paint();
     }
-    function moveGroup(id, offset) { const next = structuredClone(recipe()); const from = next.groups.findIndex(g => g.id === id), to = from + offset; if (to < 0 || to >= next.groups.length) return; [next.groups[from], next.groups[to]] = [next.groups[to], next.groups[from]]; putRecipe(next); render(); }
+    function moveGroup(id, offset) { const next = structuredClone(recipe()), found=locateGroup(next.groups,id); if (!found) return; const to=found.index+offset; if (to<0 || to>=found.siblings.length) return; [found.siblings[found.index],found.siblings[to]]=[found.siblings[to],found.siblings[found.index]]; if (putRecipe(next)) render(); }
+
     function render() {
         const order = content.querySelector(".se-order-scroll"); if (order) orderScroll = order.scrollTop;
         for (const list of orderLists.splice(0)) list.destroy();

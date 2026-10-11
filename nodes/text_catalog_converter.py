@@ -150,7 +150,7 @@ def register_v1(payload: dict) -> dict:
     for recipe in current["recipes"]:
         used_ids.add(recipe["id"])
         used_names.add(recipe["name"])
-        used_ids.update(group["id"] for group in recipe["groups"])
+        used_ids.update(group["id"] for group in text_catalog_v2.iter_groups(recipe["groups"]))
 
     item_ids = {item["id"]: _fresh_id(used_ids) for item in converted["catalog"]["items"]}
     items = []
@@ -165,12 +165,15 @@ def register_v1(payload: dict) -> dict:
         imported = dict(recipe)
         imported["id"] = _fresh_id(used_ids)
         imported["name"] = _unique_recipe_name(recipe["name"], used_names)
-        imported["groups"] = []
-        for group in recipe["groups"]:
+        def remap_group(group):
             copied_group = dict(group)
             copied_group["id"] = _fresh_id(used_ids)
-            copied_group["item_ids"] = [item_ids[identifier] for identifier in group["item_ids"]]
-            imported["groups"].append(copied_group)
+            if group.get("kind") == "nested":
+                copied_group["groups"] = [remap_group(child) for child in group["groups"]]
+            else:
+                copied_group["item_ids"] = [item_ids[identifier] for identifier in group["item_ids"]]
+            return copied_group
+        imported["groups"] = [remap_group(group) for group in recipe["groups"]]
         recipe_ids.append(imported["id"])
         recipes.append(imported)
 

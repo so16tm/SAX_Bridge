@@ -116,7 +116,7 @@ export function installQuickControls(node, callbacks) {
             draw(ctx, group, x, y, width, rowHeight, on) {
                 const theme = getComfyTheme();
                 const name = group.name || "無題のグループ";
-                txt(ctx, `${name} · 候補${group.item_ids.length}`, x + 4, y + rowHeight / 2, on ? theme.inputText : theme.border);
+                txt(ctx, `${name} · ${group.kind === "nested" ? `子${group.groups.length}` : `候補${group.item_ids.length}`}`, x + 4, y + rowHeight / 2, on ? theme.inputText : theme.border);
             },
         },
     });

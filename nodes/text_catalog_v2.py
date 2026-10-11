@@ -11,6 +11,8 @@ SCHEMA_VERSION = 2
 MAX_ITEMS = 10_000
 MAX_RECIPES = 32
 MAX_GROUPS = 32
+MAX_GROUP_DEPTH = 8
+MAX_TOTAL_GROUPS = 256
 MAX_TAGS = 8
 MAX_ID_LENGTH = 128
 MAX_NAME_LENGTH = 256
@@ -64,6 +66,47 @@ def _integer(value, path, maximum):
     return value
 
 
+def iter_groups(groups):
+    """保存順で全階層の構成要素を辿る。"""
+    for group in groups:
+        yield group
+        if group.get("kind") == "nested":
+            yield from iter_groups(group["groups"])
+
+
+def _validate_groups(groups, path, item_ids, seen, depth=1):
+    _array(groups, path, MAX_GROUPS)
+    if depth > MAX_GROUP_DEPTH:
+        _error(path, f"構成要素の深さは {MAX_GROUP_DEPTH} 階層までです")
+    for index, raw in enumerate(groups):
+        gp = f"{path}[{index}]"
+        group = _object(raw, gp)
+        _identifier(group.get("id"), gp + ".id", seen)
+        if len(seen) > MAX_TOTAL_GROUPS:
+            _error(path, f"セット内の構成要素は合計 {MAX_TOTAL_GROUPS} 件までです")
+        _string(group.get("name"), gp + ".name", MAX_NAME_LENGTH)
+        if group.get("mode") not in ("all", "random"):
+            _error(gp + ".mode", "all または random を指定してください")
+        if type(group.get("on")) is not bool:
+            _error(gp + ".on", "boolean が必要です")
+        _integer(group.get("count"), gp + ".count", MAX_ITEMS)
+        if group.get("kind") == "nested":
+            if "item_ids" in group:
+                _error(gp, "ネスト型には item_ids を指定できません")
+            children = _array(group.get("groups"), gp + ".groups", MAX_GROUPS)
+            if children:
+                _validate_groups(children, gp + ".groups", item_ids, seen, depth + 1)
+        else:
+            if ("kind" in group and group["kind"] != "items") or "groups" in group:
+                _error(gp, "アイテム型または nested を指定してください")
+            candidates = _array(group.get("item_ids"), gp + ".item_ids", MAX_ITEMS)
+            candidate_ids = set()
+            for candidate in candidates:
+                _identifier(candidate, gp + ".item_ids", candidate_ids)
+                if candidate not in item_ids:
+                    _error(gp + ".item_ids", "存在しない素材への参照があります")
+
+
 def parse_config(config_json, *, max_recipes=MAX_RECIPES):
     """未知の形式や切れた参照を、データを捨てる正規化で隠さず検出する。"""
     if not isinstance(config_json, str) or len(config_json) > MAX_JSON_BYTES:
@@ -101,28 +144,43 @@ def parse_config(config_json, *, max_recipes=MAX_RECIPES):
         recipe = _object(raw, path)
         _identifier(recipe.get("id"), path + ".id", recipe_ids)
         _string(recipe.get("name"), path + ".name", MAX_NAME_LENGTH)
-        groups = _array(recipe.get("groups"), path + ".groups", MAX_GROUPS)
-        group_ids = set()
-        for j, raw_group in enumerate(groups):
-            gp = f"{path}.groups[{j}]"
-            group = _object(raw_group, gp)
-            _identifier(group.get("id"), gp + ".id", group_ids)
-            _string(group.get("name"), gp + ".name", MAX_NAME_LENGTH)
-            if group.get("mode") not in ("all", "random"):
-                _error(gp + ".mode", "all または random を指定してください")
-            if type(group.get("on")) is not bool:
-                _error(gp + ".on", "boolean が必要です")
-            _integer(group.get("count"), gp + ".count", MAX_ITEMS)
-            candidates = _array(group.get("item_ids"), gp + ".item_ids", MAX_ITEMS)
-            candidate_ids = set()
-            for candidate in candidates:
-                _identifier(candidate, gp + ".item_ids", candidate_ids)
-                if candidate not in ids:
-                    _error(gp + ".item_ids", "存在しない素材への参照があります")
+        _validate_groups(recipe.get("groups"), path + ".groups", ids, set())
     active = _identifier(config.get("active_recipe_id"), "active_recipe_id")
     if active not in recipe_ids:
         _error("active_recipe_id", "存在しない組み合わせを指定しています")
     return config
+
+
+def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item):
+    reports = []
+    for group in groups:
+        nested = group.get("kind") == "nested"
+        candidates = [child["id"] for child in group["groups"]] if nested else group["item_ids"]
+        effective_on = parent_on and group["on"]
+        chosen = []
+        if effective_on:
+            if group["mode"] == "random":
+                if group["count"] > len(candidates):
+                    _error("count", "選択数が候補数を超えています。候補を増やすか選択数を減らしてください")
+                # 親IDや位置を含めず、階層移動しても同じ構成要素の抽選を保つ。
+                material = json.dumps([seed, recipe_id, group["id"]], ensure_ascii=True, separators=(",", ":"))
+                rng = random.Random(int.from_bytes(hashlib.sha256(material.encode("utf-8")).digest(), "big"))
+                chosen = [candidates[index] for index in sorted(rng.sample(range(len(candidates)), group["count"]))]
+            else:
+                chosen = candidates
+        report = {"group_id": group["id"], "name": group["name"], "mode": group["mode"],
+                  "on": effective_on, "count": group["count"]}
+        if nested:
+            report.update({"kind": "nested", "candidate_group_ids": candidates, "selected_group_ids": chosen, "groups": []})
+            chosen_ids = set(chosen)
+            for child in group["groups"]:
+                report["groups"].extend(_resolve_groups([child], recipe_id, seed, effective_on and child["id"] in chosen_ids, items, append_item))
+        else:
+            report.update({"candidate_ids": candidates, "item_ids": chosen, "items": []})
+            for identifier in chosen:
+                append_item(dict(items[identifier]), report)
+        reports.append(report)
+    return reports
 
 
 def _resolve_legacy(config_json=DEFAULT_CONFIG, seed=0):
@@ -135,39 +193,23 @@ def _resolve_legacy(config_json=DEFAULT_CONFIG, seed=0):
     total_bytes = 0
     normalized_text = {}
     report = {"version": SCHEMA_VERSION, "seed": seed, "recipe_id": recipe["id"], "groups": []}
-    for group in recipe["groups"]:
-        candidates = group["item_ids"]
-        chosen = []
-        if group["on"]:
-            if group["mode"] == "random":
-                if group["count"] > len(candidates):
-                    _error("count", "選択数が候補数を超えています。候補を増やすか選択数を減らしてください")
-                # Python の hash() や共有 RNG を使わない。グループの並び替えや ON/OFF
-                # が、他グループの抽選結果に影響しないよう安定 ID で分離する。
-                material = json.dumps([seed, recipe["id"], group["id"]], ensure_ascii=True, separators=(",", ":"))
-                rng = random.Random(int.from_bytes(hashlib.sha256(material.encode("utf-8")).digest(), "big"))
-                indexes = sorted(rng.sample(range(len(candidates)), group["count"]))
-                chosen = [candidates[index] for index in indexes]
-            else:
-                chosen = candidates
-        report["groups"].append({
-            "group_id": group["id"], "mode": group["mode"], "on": group["on"],
-            "item_ids": chosen,
-        })
-        for item_id in chosen:
-            if item_id not in normalized_text:
-                text = items[item_id]["text"].strip()
-                try:
-                    size = len(text.encode("utf-8"))
-                except UnicodeError:
-                    _error("text", "不正な Unicode 文字列です")
-                normalized_text[item_id] = (text, size)
-            text, size = normalized_text[item_id]
-            if text:
-                total_bytes += size + bool(texts)
-                if total_bytes > MAX_OUTPUT_BYTES:
-                    _error("text", "結合出力が 32 MiB を超えています")
-                texts.append(text)
+    def append_item(item, group_report):
+        nonlocal total_bytes
+        item_id = item["id"]
+        if item_id not in normalized_text:
+            text = item["text"].strip()
+            try:
+                size = len(text.encode("utf-8"))
+            except UnicodeError:
+                _error("text", "不正な Unicode 文字列です")
+            normalized_text[item_id] = (text, size)
+        text, size = normalized_text[item_id]
+        if text:
+            total_bytes += size + bool(texts)
+            if total_bytes > MAX_OUTPUT_BYTES:
+                _error("text", "結合出力が 32 MiB を超えています")
+            texts.append(text)
+    report["groups"] = _resolve_groups(recipe["groups"], recipe["id"], seed, True, items, append_item)
     selection_json = json.dumps(report, ensure_ascii=True, separators=(",", ":"))
     if len(selection_json) > MAX_OUTPUT_BYTES:
         _error("selection_json", "選択記録が 32 MiB を超えています")
@@ -233,32 +275,17 @@ def resolve_catalog(config_json=DEFAULT_CONFIG, seed=0):
         row_report = {"id": row["id"], "recipe_id": recipe["id"], "name": recipe["name"],
                       "on": row["on"], "groups": []}
         report["rows"].append(row_report)
-        for group in recipe["groups"]:
-            candidates = group["item_ids"]
-            chosen = []
-            if row["on"] and group["on"]:
-                if group["mode"] == "random":
-                    if group["count"] > len(candidates):
-                        _error("count", "選択数が候補数を超えています")
-                    material = json.dumps([seed, recipe["id"], group["id"]], ensure_ascii=True, separators=(",", ":"))
-                    rng = random.Random(int.from_bytes(hashlib.sha256(material.encode("utf-8")).digest(), "big"))
-                    chosen = [candidates[index] for index in sorted(rng.sample(range(len(candidates)), group["count"]))]
-                else:
-                    chosen = candidates
-            group_report = {"group_id": group["id"], "name": group["name"], "mode": group["mode"],
-                            "on": group["on"], "count": group["count"], "candidate_ids": candidates,
-                            "item_ids": chosen, "items": []}
-            row_report["groups"].append(group_report)
-            for identifier in chosen:
-                item = dict(items[identifier])
-                text = item["text"].strip()
-                item["output_position"] = len(texts) + 1 if text else None
-                group_report["items"].append(item)
-                if text:
-                    output_bytes += len(text.encode("utf-8")) + bool(texts)
-                    if output_bytes > MAX_OUTPUT_BYTES:
-                        _error("text", "結合出力が32 MiBを超えています")
-                    texts.append(text)
+        def append_item(item, group_report):
+            nonlocal output_bytes
+            text = item["text"].strip()
+            item["output_position"] = len(texts) + 1 if text else None
+            group_report["items"].append(item)
+            if text:
+                output_bytes += len(text.encode("utf-8")) + bool(texts)
+                if output_bytes > MAX_OUTPUT_BYTES:
+                    _error("text", "結合出力が32 MiBを超えています")
+                texts.append(text)
+        row_report["groups"] = _resolve_groups(recipe["groups"], recipe["id"], seed, row["on"], items, append_item)
     selection_json = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
     if len(selection_json.encode("utf-8")) > MAX_OUTPUT_BYTES:
         _error("selection_json", "選択記録が32 MiBを超えています")

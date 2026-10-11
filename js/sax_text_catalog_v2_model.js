@@ -1,5 +1,5 @@
 // V2 の編集境界。壊れたデータを補正して保存しないため、検証と編集を分離する。
-export const LIMITS = Object.freeze({ items: 10000, recipes: 32, groups: 32, tags: 8, id: 128, name: 256, text: 65536, bytes: 32 * 1024 * 1024 });
+export const LIMITS = Object.freeze({ items: 10000, recipes: 32, groups: 32, groupDepth: 8, totalGroups: 256, tags: 8, id: 128, name: 256, text: 65536, bytes: 32 * 1024 * 1024 });
 
 export function emptyConfig() {
     return { version: 2, catalog: { items: [] }, recipes: [{ id: "default", name: "組み合わせ 1", groups: [] }], active_recipe_id: "default" };
@@ -43,6 +43,49 @@ function uniqueIds(values, path) {
     return ids;
 }
 
+export function* walkGroups(groups) {
+    for (const group of groups) {
+        yield group;
+        if (group.kind === "nested") yield* walkGroups(group.groups);
+    }
+}
+
+export function groupItemIds(groups) {
+    return [...walkGroups(groups)].flatMap(group => group.kind === "nested" ? [] : group.item_ids);
+}
+
+export function validateGroups(groups, itemIds) {
+    const ids = new Set();
+    let total = 0;
+    function visit(values, depth) {
+        array(values, LIMITS.groups, "groups");
+        if (values.length && depth > LIMITS.groupDepth) fail("構成要素の階層は8段以内にしてください");
+        for (const group of values) {
+            object(group, "group");
+            string(group.id, LIMITS.id, "group.id", true);
+            if (ids.has(group.id)) fail("構成要素IDが重複しています");
+            ids.add(group.id);
+            if (++total > LIMITS.totalGroups) fail("セット内の構成要素は256件以内にしてください");
+            string(group.name, LIMITS.name, "group.name");
+            if (!["all", "random"].includes(group.mode)) fail("選択方式が不正です");
+            if (typeof group.on !== "boolean") fail("有効状態が不正です");
+            if (!Number.isSafeInteger(group.count) || group.count < 0 || group.count > LIMITS.items) fail("抽選数は0〜10000の整数で指定してください");
+            if (group.kind === "nested") {
+                if (Object.hasOwn(group, "item_ids")) fail("ネスト構成要素にはアイテム候補を指定できません");
+                visit(group.groups, depth + 1);
+            } else {
+                if (group.kind !== undefined && group.kind !== "items") fail("構成要素の種類が不正です");
+                if (Object.hasOwn(group, "groups")) fail("アイテム構成要素には子の構成要素を指定できません");
+                array(group.item_ids, LIMITS.items, "item_ids");
+                if (new Set(group.item_ids).size !== group.item_ids.length) fail("同じグループに同じ候補を重複登録できません");
+                for (const id of group.item_ids) if (!itemIds.has(id)) fail("参照先の素材が見つかりません");
+            }
+        }
+    }
+    visit(groups, 1);
+    return groups;
+}
+
 export function validateConfig(config) {
     object(config, "config");
     if (config.version !== 2) fail("対応していないカタログ形式です（version: 2 が必要）");
@@ -63,17 +106,7 @@ export function validateConfig(config) {
     if (!recipeIds.has(config.active_recipe_id)) fail("選択中の組み合わせが見つかりません");
     for (const recipe of config.recipes) {
         string(recipe.name, LIMITS.name, "recipe.name");
-        array(recipe.groups, LIMITS.groups, "groups");
-        uniqueIds(recipe.groups, "groups");
-        for (const group of recipe.groups) {
-            string(group.name, LIMITS.name, "group.name");
-            if (!["all", "random"].includes(group.mode)) fail("選択方式が不正です");
-            if (typeof group.on !== "boolean") fail("有効状態が不正です");
-            if (!Number.isSafeInteger(group.count) || group.count < 0 || group.count > LIMITS.items) fail("抽選数は0〜10000の整数で指定してください");
-            array(group.item_ids, LIMITS.items, "item_ids");
-            if (new Set(group.item_ids).size !== group.item_ids.length) fail("同じグループに同じ候補を重複登録できません");
-            for (const id of group.item_ids) if (!itemIds.has(id)) fail("参照先の素材が見つかりません");
-        }
+        validateGroups(recipe.groups, itemIds);
     }
     if (new TextEncoder().encode(JSON.stringify(config)).length > LIMITS.bytes) fail("カタログは32 MiB以内にしてください");
     return config;
@@ -98,19 +131,28 @@ export function filteredItems(config, query = "", tag = "") {
 }
 
 export function references(config, itemId) {
-    return config.recipes.reduce((count, recipe) => count + recipe.groups.filter(group => group.item_ids.includes(itemId)).length, 0);
+    return config.recipes.reduce((count, recipe) => count + [...walkGroups(recipe.groups)].filter(group => group.kind !== "nested" && group.item_ids.includes(itemId)).length, 0);
 }
 
 export function recipeWarnings(config) {
     const recipe = config.recipes.find(value => value.id === config.active_recipe_id);
-    return recipe.groups.filter(group => group.on && group.mode === "random" && group.count > group.item_ids.length)
-        .map(group => `${group.name || "無題のグループ"}: 候補${group.item_ids.length}件に対して${group.count}件の抽選は実行できません`);
+    const warnings = [];
+    function visit(groups) {
+        for (const group of groups) {
+            if (!group.on) continue;
+            const candidates = group.kind === "nested" ? group.groups.length : group.item_ids.length;
+            if (group.mode === "random" && group.count > candidates) warnings.push(`${group.name || "無題のグループ"}: 候補${candidates}件に対して${group.count}件の抽選は実行できません`);
+            if (group.kind === "nested" && (group.mode === "all" || group.count > 0)) visit(group.groups);
+        }
+    }
+    visit(recipe.groups);
+    return warnings;
 }
 
 export function removeItems(config, ids) {
     const removed = new Set(ids);
     config.catalog.items = config.catalog.items.filter(item => !removed.has(item.id));
-    for (const recipe of config.recipes) for (const group of recipe.groups) group.item_ids = group.item_ids.filter(id => !removed.has(id));
+    for (const recipe of config.recipes) for (const group of walkGroups(recipe.groups)) if (group.kind !== "nested") group.item_ids = group.item_ids.filter(id => !removed.has(id));
 }
 
 // 入力フィールドへの連続入力は1操作としてまとめ、別フィールド/構造変更は独立して戻す。

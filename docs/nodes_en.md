@@ -1194,7 +1194,7 @@ With `merge_outputs` ON (`merged`), surviving texts are stripped, empty strings 
 
 #### Storage and Sharing
 
-- An **item** contains a name, text, and tags. A **component** specifies candidate item IDs and all/random-N selection. A **text set** contains ordered components. Components reference items; they do not copy their text.
+- An **item** contains a name, text, and tags. A **component** specifies all/random-N selection over candidate item IDs (item component) or child components (nested component). A **text set** contains ordered components. Components reference items; they do not copy their text.
 - Items and set definitions are stored in the ComfyUI server's system user directory for `sax_text_catalog`. Nodes and workflows using the same server share these catalogs. Workflows store only catalog ID, ordered set references, enabled states, and Seed.
 - Item text and set-definition edits affect other workflows sharing the catalog. Selected rows, row order, and enabled states belong to each workflow. Cloning a node does not create an independent copy of shared text.
 - Changes are saved automatically as batched deltas. Save status is visible; Queue submission waits for saving and is blocked on save failure.
@@ -1226,11 +1226,23 @@ External catalog (import creates a fresh ID and revision):
 }
 ```
 
+Nested component example (select one immediate child, then use all its items):
+
+```json
+{
+  "id": "scene", "name": "Scene", "kind": "nested", "mode": "random", "count": 1, "on": true,
+  "groups": [
+    { "id": "beach", "name": "Beach", "mode": "all", "count": 1, "on": true, "item_ids": ["item-1"] }
+  ]
+}
+```
+
 - Browser queue submission takes a snapshot of the saved catalog and expands its candidate text through Autocomplete++ before sending. Later edits do not change an already submitted job; stored templates remain unchanged. Direct API submissions without a queued snapshot read the latest saved catalog at execution and must provide expanded text when needed. Unchanged catalogs reuse the validated server cache; external changes also invalidate ComfyUI's execution cache.
 - Enabled rows and components are emitted in order. `all` selects all candidates in candidate order; `random` chooses `count` distinct candidates and emits them in candidate order. Zero is valid; insufficient candidates cause an error. The same item may appear in multiple components.
-- Draws depend independently on Seed, set ID, and component ID. Reordering or toggling another component does not change a draw. Editing a shared catalog can change output even with the same Seed.
+- Nested components use `kind: "nested"` and `groups`, without `item_ids`. Item components use `item_ids` and omit `kind` or set it to `"items"`. All/random selection in a nested component chooses whole immediate child components, then recursively resolves each selected child using its own settings. Disabled children remain candidates but emit nothing when selected. A disabled or unselected parent emits none of its descendants. Output follows saved order at every level.
+- Draws depend independently on Seed, set ID, and component ID. Reordering, moving between parents, or toggling another component does not change that component's draw. Editing a shared catalog can change output even with the same Seed.
 - The selection record contains catalog ID/revision, Seed, rows, components, selection order, and executed item names/text. The full catalog is not returned with every execution.
-- Limits: 10,000 items, 1,024 shared sets, 32 components per set, 10,000 candidates per component, random count 0–10,000, 8 tags, 128-character IDs, 256-character names/tags, 65,536-character text, and 32 MiB each for catalog, combined text, and selection record. Legacy embedded catalogs retain the 32-set limit.
+- Limits: 10,000 items, 1,024 shared sets, 32 sibling components, 256 total components per set, 8 levels of depth, 10,000 candidates per item component, random count 0–10,000, 8 tags, 128-character IDs, 256-character names/tags, 65,536-character text, and 32 MiB each for catalog, combined text, and selection record. Legacy embedded catalogs retain the 32-set limit.
 
 #### UI and Editing
 
@@ -1238,20 +1250,21 @@ External catalog (import creates a fresh ID and revision):
 - Select a catalog on the node, then choose sets directly in each row's dropdown. Toggle the checkbox, drag the handle or use arrow keys to reorder, and remove a row with ×. Set-edit and item-edit icons appear to the right of each dropdown, keeping each set on one line. Tooltips explain both icons. All rows are displayed without paging. An added draft row is excluded from the workflow until a set is selected. Seed and post-run seed behavior remain on the node.
 - Each row's set-edit action opens that set directly. Edit candidates, counts, enabled components, and component order, or switch/create sets in the same editor. Item text fields are separate.
 - Components use compact two-line controls with candidate counts and short previews. Candidate rows show text previews and support row clicks, Shift ranges, selecting or clearing all filtered matches, and a selected-only view. Selection survives search/tag changes, and the selected items can be added as one component. Changing candidates opens their selected-only list directly.
-- All components use the edit icon in their first row to open candidate and selection settings. Components with one candidate use a single row; random counts remain visible. Multiple candidates restore the normal two-line layout.
-- Each component's output-order list supports dragging, up/down buttons or arrow keys, and direct position numbers. Order is automatically saved to the shared set. All-items output follows this order; random selections are emitted in this order too. Updating candidates preserves the order of retained items and appends new candidates. Candidate-search sorting is independent.
+- Item components use the edit icon in their first row to open candidate and selection settings. Components with one candidate use a single row; random counts remain visible. Multiple candidates restore the normal two-line layout.
+- Add a nested component to group children. Nested rows show immediate-child counts and all/random-N settings; collapse their descendants with the disclosure control. Selection settings stay in the second row. The edit icon opens a destination-parent selector and an action to add items inside that component. Drop at the top of a row to insert before it, at the bottom to insert after it, or in the center of a nested row to move inside it. Up/down buttons reorder siblings. Moving a component into itself or its descendants is disallowed. Adding an item component also offers a destination parent.
+- Each item component's output-order list supports dragging, up/down buttons or arrow keys, and direct position numbers. Order is automatically saved to the shared set. All-items output follows this order; random selections are emitted in this order too. Updating candidates preserves the order of retained items and appends new candidates. Candidate-search sorting is independent.
 - The item action opens a name/text/tag list. Click a field to edit inline; expand long text when needed. No save or return-to-list action is required between edits.
 - The title, navigation, and save status share one compact header row. Bulk actions appear only while items are selected; the column-header checkbox selects all matching items.
 - Inline and expanded text editors offer a wildcard file picker using the existing Autocomplete++ inventory. Search filenames or folder names and insert a literal `__folder/name__` at the caret or replace a selection. Catalog does not expand the token. If the inventory cannot be loaded, the text stays unchanged and the editor reports the missing setup or files.
 - Search, tag, and set filters combine. Each row's item-edit action opens the same list filtered to all candidate items in that set, deduplicated. Tags organize/search items; they do not automatically add candidates.
 - Variable-height virtualization renders nearby rows. Search, scroll, and text display density persist. Undo/Redo, IME input, tag completion, Shift range selection, select all, and bulk tagging/deletion are supported.
 - Item lists, set candidate lists, and items within each result section share the same sort setting. The default is name order; registration, tag, and usage order choices carry across these views. Tag order compares alphabetically sorted tag lists, breaks ties by item name, and places untagged items last. Display sorting does not change set definitions or execution output order.
-- Previous execution results use the same name/text list, divided into set/component sections. Unselected candidates can be revealed. Inline text edits update the shared original and are marked as applying to the next run.
+- Previous execution results use the same name/text list, divided into sections following the set/component hierarchy. Unselected child components and item candidates can be revealed. Inline text edits update the shared original and are marked as applying to the next run.
 - Executed text and previous output remain immutable. Repeated occurrences stay visible and synchronize shared edits. Deleted items retain their executed text for viewing but cannot be edited.
 
 **Legacy V2 migration**: Embedded version 2 workflows remain executable. The explicit migration action creates an external catalog and switches to its reference only after successful saving. No automatic migration or V1 replacement takes place.
 
-Samples: `tests/workflows/22_text_catalog_v2.json` checks legacy migration. `23_text_catalog_v2_shared.json` and `catalogs/23_text_catalog_v2_catalog.json` demonstrate external sharing. Performance targets on a local SSD are an initial read below 100ms for a typical 1,000-item catalog and a few milliseconds when unchanged; these are goals rather than guarantees and depend on total text size and environment.
+Samples: `tests/workflows/22_text_catalog_v2.json` checks legacy migration. `23_text_catalog_v2_shared.json` and `catalogs/23_text_catalog_v2_catalog.json` demonstrate external sharing. `25_text_catalog_v2_nested.json` combines parent random selection with child selection settings and runs without an external catalog. Explicitly migrate it to a shared catalog before editing its hierarchy. Performance targets on a local SSD are an initial read below 100ms for a typical 1,000-item catalog and a few milliseconds when unchanged; these are goals rather than guarantees and depend on total text size and environment.
 
 [↑ Back to top](#top)
 

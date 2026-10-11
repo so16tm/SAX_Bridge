@@ -1,4 +1,4 @@
-import { LIMITS, validateConfig } from "./sax_text_catalog_v2_model.js";
+import { LIMITS, validateConfig, validateGroups, groupItemIds, walkGroups } from "./sax_text_catalog_v2_model.js";
 
 const BASE = "/sax/text-catalog/v2/catalogs";
 const sessions = new Map();
@@ -54,7 +54,8 @@ function validateOperation(document, operation) {
         if (!document.recipes.some(value => value.id === recipe.id) && document.recipes.length >= 1024) throw new Error("テキストセットの上限を超えています");
         // セット編集だけを検証し、全本文の再シリアライズを避ける。
         const ids = new Set(document.catalog.items.map(item => item.id));
-        const referenced = new Set(recipe.groups?.flatMap(group => group.item_ids) ?? []);
+        validateGroups(recipe.groups, ids);
+        const referenced = new Set(groupItemIds(recipe.groups));
         if ([...referenced].some(id => !ids.has(id))) throw new Error("参照先のアイテムがありません");
         validateConfig({ version: 2, catalog: { items: [...referenced].map(id => ({ id, name: "", text: "", tags: [] })) }, recipes: [recipe], active_recipe_id: recipe.id });
     } else if (type === "item.delete" || type === "recipe.delete") string(operation.id, LIMITS.id, true);
@@ -85,7 +86,7 @@ export function applyOperations(document, operations) {
         else if (operation.type === "recipe.delete") document.recipes = document.recipes.filter(recipe => recipe.id !== operation.id);
         else {
             document.catalog.items = document.catalog.items.filter(item => item.id !== operation.id);
-            for (const recipe of document.recipes) for (const group of recipe.groups) group.item_ids = group.item_ids.filter(id => id !== operation.id);
+            for (const recipe of document.recipes) for (const group of walkGroups(recipe.groups)) if (group.kind !== "nested") group.item_ids = group.item_ids.filter(id => id !== operation.id);
         }
     }
     return document;
@@ -105,7 +106,7 @@ function inverseOperations(document, operations) {
             if (old) inverse.unshift({ type: "recipe.put", recipe: copy(old) });
         } else {
             const old = document.catalog.items.find(item => item.id === operation.id);
-            const affected = document.recipes.filter(recipe => recipe.groups.some(group => group.item_ids.includes(operation.id)));
+            const affected = document.recipes.filter(recipe => groupItemIds(recipe.groups).includes(operation.id));
             inverse.unshift(...(old ? [{ type: "item.put", item: copy(old) }] : []), ...affected.map(recipe => ({ type: "recipe.put", recipe: copy(recipe) })));
         }
         applyOperations(document, [operation]);

@@ -37,10 +37,10 @@ export async function flushCatalogPrompt(output) {
 }
 export function installSharedControls(node) {
     if (controls.has(node)) { controls.get(node).reload(); return; }
-    const controller = { session: null, catalogs: [], unsubscribe: null, result: null, token: 0 };
+    const controller = { session: null, catalogs: [], unsubscribe: null, result: null, token: 0, disposed: false };
     controls.set(node, controller);
     const report = error => showAlertDialog({ title: "Text Catalog V2", message: error.message });
-    const act = fn => (...args) => Promise.resolve().then(() => fn(...args)).catch(report);
+    const act = fn => (...args) => Promise.resolve().then(() => { if (!controller.disposed) return fn(...args); }).catch(error => { if (!controller.disposed) return report(error); });
     const configWidget = node.widgets.find(w => w.name === "config_json");
     const write = ref => { configWidget.value = JSON.stringify(ref); node.graph?.change?.(); redraw(); };
     const redraw = () => { controller.setWidget?.refresh(); node.setDirtyCanvas?.(true, true); if (node.graph && node.computeSize && node.setSize) autoResize(node); };
@@ -155,6 +155,7 @@ export function installSharedControls(node) {
         controller.unsubscribe?.(); controller.session = session; controller.unsubscribe = session?.subscribe(redraw); redraw();
     });
     controller.dispose = () => {
+        controller.disposed = true;
         ++controller.token; controller.stopDrag?.();
         // ComfyUIのDOMウィジェット登録も解除し、configure後の重複表示を防ぐ。
         controller.setWidget?.widget.onRemove?.(); controller.setWidget?.dispose();

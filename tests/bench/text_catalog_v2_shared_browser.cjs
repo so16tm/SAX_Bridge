@@ -78,6 +78,36 @@ const server=http.createServer(async(req,res)=>{
  await page.locator('.se-card').last().getByRole('button',{name:'候補を変更',exact:true}).click();assert.equal(await page.getByRole('checkbox',{name:'選択済みだけ',exact:true}).isChecked(),true);assert.equal(await page.locator('.se-selectionbar strong').textContent(),'111件選択');
  const removedId=await page.locator('.se-candidate').first().getAttribute('data-item-id');await page.locator('.se-candidate input').first().click();await page.getByRole('button',{name:'候補を更新',exact:true}).click();assert.deepEqual(await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids),orderedIds.filter(id=>id!==removedId));
  await page.screenshot({path:path.join(root,'work/shared-v2-compact-sets.png')});
+ // ネスト作成、既存leafの階層移動、折りたたみ、直下の子をランダム選択。
+ await page.getByRole('button',{name:'＋ ネスト',exact:true}).click();
+ const nestedId=await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).id);
+ await page.locator('[data-group-id="g1"]').getByRole('button',{name:'候補を変更',exact:true}).click();
+ await page.getByRole('combobox',{name:'構成要素の配置先',exact:true}).selectOption(nestedId);
+ await page.getByRole('button',{name:'候補を更新',exact:true}).click();
+ assert.equal(await page.locator('[data-group-id="g1"]').getAttribute('data-depth'),'1');
+ const nestedCard=page.locator(`[data-group-id="${nestedId}"]`);
+ await nestedCard.getByRole('button',{name:'子の構成要素を開閉',exact:true}).click();
+ assert.equal(await page.locator('[data-group-id="g1"]').count(),0);
+ await nestedCard.getByRole('button',{name:'子の構成要素を開閉',exact:true}).click();
+ await page.locator('[data-group-id="g2"]>.se-row').first().locator('span').first().dragTo(nestedCard,{targetPosition:{x:30,y:35}});
+ assert.deepEqual(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups.map(g=>g.id),nestedId),['g1','g2']);
+ await page.locator('[data-group-id="g2"]>.se-row').first().locator('span').first().dragTo(page.locator('[data-group-id="g1"]'),{targetPosition:{x:30,y:68}});
+ assert.deepEqual(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups.map(g=>g.id),nestedId),['g1','g2']);
+ await nestedCard.locator('select').selectOption('random');
+ await nestedCard.getByRole('spinbutton').fill('1'); await nestedCard.getByRole('spinbutton').dispatchEvent('change');
+ assert.equal(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).mode,nestedId),'random');
+ await nestedCard.getByRole('button',{name:'候補を変更',exact:true}).click();
+ assert.equal(await page.getByRole('combobox',{name:'ネストの配置先',exact:true}).locator(`option[value="${nestedId}"]`).count(),0);
+ await page.getByRole('button',{name:'ここにアイテムを追加',exact:true}).click();
+ await page.getByRole('button',{name:'＋ ネスト',exact:true}).click();
+ const childId=await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups.at(-1).id,nestedId);
+ assert.equal(await page.locator(`[data-group-id="${childId}"]`).getAttribute('data-depth'),'1');
+ await nestedCard.getByRole('button',{name:'候補を変更',exact:true}).click();
+ assert.equal(await page.getByRole('combobox',{name:'ネストの配置先',exact:true}).locator(`option[value="${childId}"]`).count(),0);
+ await page.getByRole('button',{name:'閉じる',exact:true}).last().click();
+ await page.screenshot({path:path.join(root,'work/shared-v2-nested-sets.png')});
+ console.log('nested create/move/drag/collapse/random/cycle protection passed');
+
  await page.evaluate(recipe=>shared().session.mutate([{type:'recipe.put',recipe}]),originalRecipe);await page.getByRole('button',{name:'閉じる',exact:true}).click();
  console.log('sets passed'); // 全行表示と並び替え、有効切替。
  const rows=await page.evaluate(()=>{const w=node.widgets.find(w=>w.name==='__sax_shared_sets');w.mouse({type:'pointerdown',clientY:100},[45,25]);window.dispatchEvent(new PointerEvent('pointerup',{clientY:152}));w.mouse({type:'pointerdown'},[20,25]);return JSON.parse(node.widgets[0].value).rows});assert.equal(rows[0].recipe_id,'s2');assert.equal(rows[0].on,false);

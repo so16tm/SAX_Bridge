@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys } from "../../js/sax_text_catalog_v2_model.js";
+import { emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "../../js/sax_text_catalog_v2_model.js";
 
 test("タグ順は複数タグの入力順に依存せず、同タグは名前順、タグなしは末尾", () => {
     const items = [
@@ -24,6 +24,50 @@ const fixture = count => {
     config.catalog.items = Array.from({ length: count }, (_, i) => ({ id: `item-${i}`, name: `素材 ${i}`, text: `本文 ${i}`, tags: [i % 2 ? "style" : "camera"] }));
     return config;
 };
+
+const leaf = (id, item_ids = ["item-0"]) => ({ id, name: id, mode: "all", count: 0, on: true, item_ids });
+const nested = (id, groups) => ({ id, name: id, kind: "nested", mode: "all", count: 0, on: true, groups });
+
+test("ネスト参照を出力定義順で走査し、削除は全階層の候補だけを除去する", () => {
+    const config = fixture(2);
+    config.recipes[0].groups = [nested("root", [leaf("a"), nested("inner", [leaf("b", ["item-1", "item-0"])])])];
+    validateConfig(config);
+    assert.deepEqual([...walkGroups(config.recipes[0].groups)].map(group => group.id), ["root", "a", "inner", "b"]);
+    assert.deepEqual(groupItemIds(config.recipes[0].groups), ["item-0", "item-1", "item-0"]);
+    assert.equal(references(config, "item-0"), 2);
+    removeItems(config, ["item-0"]); validateConfig(config);
+    assert.deepEqual(groupItemIds(config.recipes[0].groups), ["item-1"]);
+    assert.equal(Object.hasOwn(config.recipes[0].groups[0], "item_ids"), false);
+});
+
+test("全階層IDの重複、混在形式、深さ・総数・兄弟数の超過を拒否する", () => {
+    const config = fixture(1), check = groups => { config.recipes[0].groups = groups; return () => validateConfig(config); };
+    assert.throws(check([nested("same", [leaf("same")])]), /ID.*重複/);
+    assert.throws(check([{ ...nested("root", []), item_ids: [] }]), /ネスト/);
+    assert.throws(check([{ ...leaf("a"), groups: [] }]), /アイテム構成/);
+    assert.throws(check([{ ...leaf("a"), kind: "unknown" }]), /種類/);
+    assert.throws(check([nested("root", [leaf("a", ["missing"])])]), /参照先/);
+    let deep = leaf("d8");
+    for (let i = 7; i >= 1; i--) deep = nested(`d${i}`, [deep]);
+    assert.doesNotThrow(check([deep]));
+    assert.throws(check([nested("too-deep", [deep])]), /階層/);
+    assert.throws(check([nested("root", Array.from({ length: 33 }, (_, i) => leaf(`s${i}`)))]), /最大32/);
+    const many = Array.from({ length: 8 }, (_, i) => nested(`p${i}`, Array.from({ length: 31 }, (_, j) => leaf(`c${i}_${j}`))));
+    assert.doesNotThrow(check(many)); // 8 + 248 = 256
+    many[0].groups.push(leaf("extra")); assert.throws(check(many), /256/);
+});
+
+test("ネスト抽選の候補数はOFFを含む直下の子で判定し、無効な親の配下は警告しない", () => {
+    const config = fixture(1), child = { ...leaf("child"), mode: "random", count: 2 };
+    const root = { ...nested("root", [child, { ...leaf("off"), on: false }]), mode: "random", count: 2 };
+    config.recipes[0].groups = [root]; validateConfig(config);
+    assert.equal(recipeWarnings(config).length, 1);
+    root.count = 3;
+    assert.equal(recipeWarnings(config).length, 2);
+    assert.match(recipeWarnings(config)[0], /候補2件/);
+    root.on = false; assert.deepEqual(recipeWarnings(config), []);
+    root.on = true; root.count = 0; assert.deepEqual(recipeWarnings(config), []);
+});
 
 test("10000件を保持し、検索/タグ絞り込みと未知形式の保全を検証", () => {
     const config = fixture(10000);

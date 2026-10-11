@@ -230,3 +230,18 @@ def test_register_v1_rejects_invalid_explicit_destination(payload):
     payload.update(v1_json=json.dumps(source()), catalog_name="Import")
     with pytest.raises(ValueError):
         text_catalog_converter.register_v1(payload)
+
+
+def test_converter_append_preserves_existing_nested_sets():
+    nested = {"id": "parent", "name": "親", "kind": "nested", "mode": "all", "count": 0, "on": True,
+              "groups": [{"id": "child", "name": "子", "mode": "all", "count": 0, "on": True, "item_ids": ["a"]}]}
+    target = text_catalog_v2_store.create({"name": "既存", "catalog": {"items": [
+        {"id": "a", "name": "A", "text": "original", "tags": []}]},
+        "recipes": [{"id": "r", "name": "Nested", "groups": [nested]}]})
+    result = text_catalog_converter.register_v1({"destination": "existing", "target_catalog_id": target["id"],
+        "base_revision": 1, "catalog_name": "Import", "v1_json": json.dumps(source(
+            [{"id": "a", "name": "A", "text": "added", "tags": []}], [{"item_id": "a"}]))})
+    assert result["recipes"][0] == target["recipes"][0]
+    imported = result["recipes"][1]
+    assert imported["groups"][0]["id"] not in {"parent", "child"}
+    assert imported["groups"][0]["item_ids"] != ["a"]
