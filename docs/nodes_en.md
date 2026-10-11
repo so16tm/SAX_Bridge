@@ -26,7 +26,7 @@
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
 | [Debug](#debug) | Debugging & testing | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
-| [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Text Catalog V2](#sax-text-catalog-v2) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
+| [Utility](#utility) | Pipe-internal helpers and tag dictionary updates | [SAX Tag Dictionary](#sax-tag-dictionary) / [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Text Catalog V2](#sax-text-catalog-v2) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
@@ -1026,6 +1026,26 @@ applied_loras: {'lora_a'} (1 entries)
 ---
 
 ## Utility
+
+### SAX Tag Dictionary
+
+`SAX_Bridge_Tag_Dictionary` — A standalone utility that downloads the latest published compatible Danbooru tag CSV on request. Category: `SAX/Bridge/Utility`. No inputs or outputs; no connection to the generation workflow is needed.
+
+**Outputs**: None
+
+1. Add the node and press **最新CSVを取得** (Get latest CSV). The button sends a POST request; neither startup nor queue submission downloads files.
+2. When Autocomplete++ is installed, reload the browser after the update.
+3. Select `sax_danbooru.csv` in Autocomplete++'s `Main Tag File`. If a controller overrides this setting, change that selection as well.
+
+The fixed source is [DraconicDragon/dbr-e621-lists-archive](https://github.com/DraconicDragon/dbr-e621-lists-archive), distributed under the Unlicense. SAX selects the newest date from published `danbooru_YYYY-MM-DD_pt20-ia-dd.csv` files. These lists contain tags used in at least 20 posts and include active/deleted aliases. The archive is normally updated in January, April, July, and October; “latest” means its latest published CSV, not a live export of every Danbooru tag on the download date.
+
+The CSV is saved to `sax_tag_dictionary/sax_danbooru.csv` under ComfyUI's system user directory. With Autocomplete++ installed, a dedicated copy is placed at its `tags/sax_danbooru.csv`. Downloading is also available without Autocomplete++; its original `danbooru.csv` and translation dictionaries are never changed. This utility does not change autocomplete or prompt expansion behavior.
+
+Downloads are checked against the published hash and validated as compatible CSV before atomic replacement. A failed download or validation leaves existing files intact. If the dedicated file has been manually modified, SAX refuses to overwrite it; preserve those edits before attempting another update.
+
+[↑ Back to Top](#top)
+
+---
 
 ### SAX Primitive Store
 

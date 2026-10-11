@@ -26,7 +26,7 @@
 | [Output](#output) | 出力・プレビュー | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | ノード・画像・Pipe の集約 | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
 | [Debug](#debug) | デバッグ・テスト用 | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
-| [Utility](#utility) | Pipe 内部ヘルパー | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Text Catalog V2](#sax-text-catalog-v2) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
+| [Utility](#utility) | Pipe 内部ヘルパー・タグ辞書更新 | [SAX Tag Dictionary](#sax-tag-dictionary) / [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Text Catalog V2](#sax-text-catalog-v2) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
@@ -1026,6 +1026,26 @@ applied_loras: {'lora_a'} (1 entries)
 ---
 
 ## Utility
+
+### SAX Tag Dictionary
+
+`SAX_Bridge_Tag_Dictionary` — 公開済みの互換 Danbooru タグ CSV の最新版を、手動で取得する単体機能です。カテゴリは `SAX/Bridge/Utility`。入力・出力はなく、生成ワークフローへの接続も不要です。
+
+**出力**: なし
+
+1. ノードを追加し、**最新CSVを取得** を押します。ボタンから POST リクエストを送信して取得します。起動・キュー送信ではダウンロードしません。
+2. Autocomplete++ 導入済みの場合は、更新後にブラウザを再読み込みします。
+3. Autocomplete++ の `Main Tag File` で `sax_danbooru.csv` を選択します。コントローラでこの設定を上書きしている場合は、そちらの選択も変更します。
+
+取得元は固定の [DraconicDragon/dbr-e621-lists-archive](https://github.com/DraconicDragon/dbr-e621-lists-archive)（Unlicense）です。公開一覧から日付が最新の `danbooru_YYYY-MM-DD_pt20-ia-dd.csv` を選択します。使用投稿数が 20 以上のタグを収録し、active/deleted alias を含みます。配布元の更新は原則 1・4・7・10 月であり、「最新」は公開済み CSV の最新版を意味します。取得当日の Danbooru 全タグを収集する機能ではありません。
+
+ComfyUI の system user directory 配下の `sax_tag_dictionary/sax_danbooru.csv` に保存します。Autocomplete++ 導入済みなら、その `tags/sax_danbooru.csv` にも専用ファイルを配置します。未導入でも CSV の取得は可能です。元の `danbooru.csv`・翻訳辞書は変更せず、タグ補完・プロンプト展開の処理自体も変更しません。
+
+公開ハッシュとの照合と互換 CSV の検証に成功してから、ファイルをアトミックに置換します。取得・検証に失敗した場合は既存ファイルを維持します。専用ファイルをユーザーが手動変更している場合は上書きを拒否するため、再更新の前に編集内容を保全してください。
+
+[↑ トップへ](#top)
+
+---
 
 ### SAX Primitive Store
 

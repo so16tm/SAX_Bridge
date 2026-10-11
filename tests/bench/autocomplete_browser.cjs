@@ -28,7 +28,7 @@ const server = http.createServer((req,res)=>{
  if(url.pathname==='/scripts/widgets.js')return send('export const ComfyWidgets={};','text/javascript');
  if(url.pathname==='/scripts/api.js'||url.pathname==='/extensions/scripts/api.js')return send('export const api={fetchApi:(p,o)=>fetch(p,o),addEventListener(){}};','text/javascript');
  if(url.pathname==='/autocomplete-plus-plus/tags/list')return send({tags:['danbooru.csv']});
- if(url.pathname.startsWith('/autocomplete-plus-plus/tags/file/'))return send('blue_eyes,0,1000,\nblue_hair,0,900,\nred_hair,0,800,\n','text/plain');
+ if(url.pathname.startsWith('/autocomplete-plus-plus/tags/file/'))return send(process.env.SAX_TAG_CSV ? fs.readFileSync(process.env.SAX_TAG_CSV) : 'blue_eyes,0,1000,\nblue_hair,0,900,\nred_hair,0,800,\n','text/plain');
  if(url.pathname==='/autocomplete-plus-plus/user-data')return send({});
  if(url.pathname.startsWith('/autocomplete-plus-plus/'))return send([]);
  const base=url.pathname.startsWith('/extensions/official/')?path.join(official,'web'):url.pathname.startsWith('/extensions/sax/')?root:null;
@@ -68,6 +68,6 @@ const server = http.createServer((req,res)=>{
   assert.equal(await page.locator('.sax-shared-editor').count(),0);
   assert.match(await page.evaluate(()=>window.session.document.catalog.items[0].text),/^blue_/);
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({official:path.basename(official),completion:true,enter:true,layering,escapePreservesEditor:true,closeCleansPopup:true,saved:await page.evaluate(()=>window.saved)}));
+  console.log(JSON.stringify({official:path.basename(official),tagsLoaded:await page.evaluate(()=>window.tagCompleteEngine.mainTags.length),completion:true,enter:true,layering,escapePreservesEditor:true,closeCleansPopup:true,saved:await page.evaluate(()=>window.saved)}));
  } finally{await browser?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

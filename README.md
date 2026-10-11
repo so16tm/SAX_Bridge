@@ -216,6 +216,8 @@ Catalog V1 / V2 text is expanded only in a queue submission snapshot, leaving sa
 
 Autocomplete++ cannot read a Primitive Store seed drawn at execution or a seed inside a Pipe. Use its `Random` expansion mode for these workflows; synchronization with the image seed is not guaranteed. Catalog random item selection retains its backend seed behavior.
 
+To update the tag dictionary manually, add [SAX Tag Dictionary](docs/nodes_en.md#sax-tag-dictionary) from `SAX/Bridge/Utility` and press **最新CSVを取得** (Get latest CSV). It downloads the latest published compatible Danbooru CSV; startup and queue submission do not trigger downloads. With Autocomplete++ installed, reload the browser and select `sax_danbooru.csv` in its `Main Tag File` setting (including any controller override). Its original CSVs and translation dictionaries remain unchanged. This optional utility also works without Autocomplete++.
+
 > sam3 is not required if you do not use SAX SAM3 nodes.
 
 Install sam3:

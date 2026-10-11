@@ -216,6 +216,8 @@ Text Catalog V1 / V2 の本文はキュー送信時のスナップショット�
 
 Autocomplete++ は Primitive Store の実行時 random seed や Pipe 内の seed を取得できません。この構成では展開モード `Random` を推奨し、画像 seed との同期は保証しません。カタログのランダム項目選択は従来どおりバックエンドの seed を使用します。
 
+タグ辞書を手動で更新するには、`SAX/Bridge/Utility` の [SAX Tag Dictionary](docs/nodes_ja.md#sax-tag-dictionary) を追加し、**最新CSVを取得** を押してください。公開済みの互換 Danbooru CSV の最新版を取得します。起動・キュー送信ではダウンロードしません。Autocomplete++ 導入済みなら、更新後にブラウザを再読み込みし、`Main Tag File` で `sax_danbooru.csv` を選択してください（コントローラで上書きしている場合はそちらも変更）。元の CSV・翻訳辞書は変更しません。Autocomplete++ 未導入でも、この単体機能で CSV を取得できます。
+
 > SAX SAM3 系ノードを使用しない場合、sam3 のインストールは不要です。
 
 sam3 のインストール：
