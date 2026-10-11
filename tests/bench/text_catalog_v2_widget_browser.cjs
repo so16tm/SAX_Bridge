@@ -3,8 +3,8 @@ const { chromium } = require(process.env.SAX_PLAYWRIGHT_PATH || 'playwright');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..');
 const docs = ['one', 'two'].map(id => ({ version: 3, id, name: `カタログ${id}`, revision: 1,
-    catalog: { items: [{ id: 'i', name: 'アイテム', text: '本文', tags: [] }] },
-    recipes: [{ id: 's', name: 'テキストセット', groups: [] }] }));
+    catalog: { items: [{ id: 'z', name: 'Z アイテム', text: '乙の本文', tags: [] }, { id: 'a', name: 'A アイテム', text: '甲の本文', tags: [] }] },
+    recipes: [{ id: 's', name: 'テキストセット', groups: [{id:'g',name:'構成要素',mode:'all',on:true,count:2,item_ids:['z','a']}] }] }));
 const html = `<meta charset="utf-8"><style>body{background:#181818;color:#ddd;font:12px sans-serif}#host{width:350px;background:#353535;padding:8px}#host>button,#host>.native{display:block;box-sizing:border-box;width:100%;height:24px;margin:4px 0}h3{font-size:12px;margin:4px}</style><div id="host"></div><script type="module">
 import {installSharedControls,sharedController} from '/js/sax_text_catalog_v2_shared.js';
 const host=document.querySelector('#host');
@@ -49,7 +49,24 @@ const server = http.createServer((req, res) => {
         await page.getByRole('button', { name: '新しいカタログ', exact: true }).waitFor();
         await page.mouse.click(2, 2);
         await page.locator('.sax-shared-catalog').getByRole('button', { name: 'アイテム', exact: true }).click();
-        await page.locator('.se-record').waitFor();
+        await page.locator('.se-record').first().waitFor();
+        assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'name');
+        const itemOrder = () => page.locator('.se-record').evaluateAll(rows => rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.key));
+        // 登録順と名前順が異なるデータで、全画面が同じ比較規則を使うことを確認する。
+        const nameOrder = docs[0].catalog.items.slice().sort((a,b)=>a.name.localeCompare(b.name,'ja')).map(i=>i.id);
+        assert.deepEqual(await itemOrder(), nameOrder);
+        await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('catalog');
+        assert.deepEqual(await itemOrder(), ['z','a']);
+        await page.getByRole('button', { name: 'テキストセット', exact: true }).click();
+        assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'catalog');
+        await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('name');
+        assert.deepEqual(await page.locator('.se-candidate').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.key)),nameOrder);
+        await page.getByRole('button', { name: '閉じる', exact: true }).click();
+        await page.evaluate(() => { const d=shared().session.document;shared().result={text:'保存済み出力',selection:{rows:[{name:'セット',on:true,groups:[{name:'構成要素',on:true,mode:'all',item_ids:['z','a'],candidate_ids:['z','a'],items:[...d.catalog.items]}]}]}}; });
+        await page.getByRole('button', { name: '前回の実行結果', exact: true }).click();
+        assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'name');
+        assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.itemId)),nameOrder);
+        assert.deepEqual(await page.evaluate(()=>shared().result.selection.rows[0].groups[0].items.map(i=>i.id)),['z','a']);
         await page.getByRole('button', { name: '閉じる', exact: true }).click();
         await page.locator('.sax-shared-catalog select').selectOption('two');
         await page.waitForFunction(() => shared().session?.document.id === 'two');

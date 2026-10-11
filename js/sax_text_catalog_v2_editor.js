@@ -65,13 +65,28 @@ class VirtualRows {
 
 export function openSharedEditor(session, options = {}) {
     const existing = openEditors.get(session); if (existing) { existing.open(options); return existing.close; }
-    let pref = preferences.get(session); if (!pref) { pref = { query: "", tag: "", recipeFilter: "", lines: 3, scroll: 0, recipeId: null, sort: "catalog" }; preferences.set(session, pref); }
+    let pref = preferences.get(session); if (!pref) { pref = { query: "", tag: "", recipeFilter: "", lines: 3, scroll: 0, recipeId: null, sort: "name" }; preferences.set(session, pref); }
     let mode = options.mode ?? "items", result = options.result ?? null;
     if (options.recipeId) { if (mode === "items") { pref.recipeFilter = options.recipeId; pref.query = ""; pref.tag = ""; pref.scroll = 0; } else pref.recipeId = options.recipeId; }
     let content, status, conflict, errorMessage, close, virtual = null, active = null, unsubscribe, localError = "", saveTimer, refreshing = false;
     let itemMap = new Map(), selected = new Set(), candidateSelection = new Set(), candidateGroup = null, candidateQuery = "", candidateTag = "", resultRecipe = "", outputTab = false, selectionAnchor = null;
     const showCandidates = new Set();
     const doc = () => session.document;
+    function sortItems(values, resolve = value => value) {
+        const ranks = pref.sort === "catalog" ? new Map(doc().catalog.items.map((item, index) => [item.id, index])) : null;
+        const counts = new Map();
+        if (pref.sort === "usage") for (const r of doc().recipes) for (const g of r.groups) for (const id of g.item_ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+        return values.sort((a, b) => {
+            const left = resolve(a), right = resolve(b);
+            if (ranks) { const difference = (ranks.get(left.id) ?? Infinity) - (ranks.get(right.id) ?? Infinity); if (difference) return difference; }
+            if (pref.sort === "usage") { const difference = (counts.get(right.id) ?? 0) - (counts.get(left.id) ?? 0); if (difference) return difference; }
+            return left.name.localeCompare(right.name, "ja") || left.id.localeCompare(right.id);
+        });
+    }
+    const sortControl = onChange => {
+        const control = select([["catalog", "登録順"], ["name", "名前順"], ["usage", "利用数順"]], pref.sort, value => { releaseActive(); pref.sort = value; onChange(); });
+        control.setAttribute("aria-label", "アイテムの並び順"); return control;
+    };
     const recipe = () => doc().recipes.find(r => r.id === pref.recipeId) ?? doc().recipes[0];
     const mutate = (operations, historyKey) => { try { session.mutate(operations, historyKey ? { historyKey } : undefined); localError = ""; updateStatus(); return true; } catch (error) { localError = error.message; updateStatus(); return false; } };
     const putItem = (id, patch, historyKey) => {
@@ -117,9 +132,7 @@ export function openSharedEditor(session, options = {}) {
             let ids = null; const r = doc().recipes.find(r => r.id === pref.recipeFilter); if (r) ids = new Set(r.groups.flatMap(g => g.item_ids));
             const q = pref.query.trim().toLocaleLowerCase();
             const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && (!pref.tag || i.tags.includes(pref.tag)) && (!q || `${i.name}\n${i.text}\n${i.tags.join(" ")}`.toLocaleLowerCase().includes(q)));
-            if (pref.sort === "name") values.sort((a, b) => a.name.localeCompare(b.name, "ja"));
-            if (pref.sort === "usage") { const counts = new Map(); for (const r of doc().recipes) for (const g of r.groups) for (const id of g.item_ids) counts.set(id, (counts.get(id) ?? 0) + 1); values.sort((a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0)); }
-            return values.map(i => ({ key: i.id, itemId: i.id, height: Math.max(76, 28 + pref.lines * 23) }));
+            return sortItems(values).map(i => ({ key: i.id, itemId: i.id, height: Math.max(76, 28 + pref.lines * 23) }));
         }
         const list = []; const q = pref.query.trim().toLocaleLowerCase();
         for (const [ri, r] of (result?.rows ?? []).entries()) {
@@ -130,7 +143,7 @@ export function openSharedEditor(session, options = {}) {
                 list.push({ key, section: true, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "無効・出力なし" : g.mode === "random" ? `ランダム・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 52 });
                 const values = snapshots.map((snapshot, i) => ({ key: `${key}:${i}`, itemId: snapshot.id, snapshot, height: Math.max(90, 28 + pref.lines * 23) }));
                 if (showCandidates.has(key)) for (const id of g.candidate_ids ?? []) if (!chosen.has(id)) { const item = itemMap.get(id); if (item) values.push({ key: `${key}:candidate:${id}`, itemId: id, candidate: true, height: 90 }); }
-                list.push(...values.filter(e => { const i = itemMap.get(e.itemId) ?? e.snapshot; return (!pref.tag || i?.tags?.includes(pref.tag)) && (!q || `${i?.name ?? ""}\n${i?.text ?? ""}`.toLocaleLowerCase().includes(q)); }));
+                list.push(...sortItems(values.filter(e => { const i = itemMap.get(e.itemId) ?? e.snapshot; return (!pref.tag || i?.tags?.includes(pref.tag)) && (!q || `${i?.name ?? ""}\n${i?.text ?? ""}`.toLocaleLowerCase().includes(q)); }), e => itemMap.get(e.itemId) ?? e.snapshot));
             }
         }
         return list;
@@ -193,8 +206,7 @@ export function openSharedEditor(session, options = {}) {
         const sets = [["", "セット：すべて"], ...doc().recipes.map(r => [r.id, r.name])];
         const set = select(sets, mode === "results" ? resultRecipe : pref.recipeFilter, value => { releaseActive(); if (mode === "results") resultRecipe = value; else pref.recipeFilter = value; refresh(); });
         const lines = select([["1", "本文1行"], ["3", "本文3行"], ["6", "本文6行"]], String(pref.lines), value => { releaseActive(); pref.lines = Number(value); virtual.heights.clear(); refresh(); });
-        const sort = select([["catalog", "登録順"], ["name", "名前順"], ["usage", "利用数順"]], pref.sort, value => { releaseActive(); pref.sort = value; refresh(); });
-        const bar = row(q, tag, set, lines, ...(mode === "items" ? [sort] : [])); bar.classList.add("se-filterbar"); return bar;
+        const bar = row(q, tag, set, lines, sortControl(refresh)); bar.classList.add("se-filterbar"); return bar;
     }
     function renderList() {
         const filterBar = filters(); content.append(filterBar);
@@ -231,10 +243,10 @@ export function openSharedEditor(session, options = {}) {
         left.append(el("strong", "", candidateGroup ? "候補アイテムを変更" : "追加するアイテムを選択"));
         const q = input(candidateQuery, value => { candidateQuery = value; renderCandidates(); }); q.placeholder = "名前・タグを検索"; q.className = "se-grow";
         const tag = select([["", "タグ：すべて"], ...[...new Set(doc().catalog.items.flatMap(i => i.tags))].sort().map(t => [t, t])], candidateTag, value => { candidateTag = value; renderCandidates(); });
-        left.append(row(q, tag)); const scroll = el("div", "se-scroll"); left.append(scroll);
+        left.append(row(q, tag, sortControl(() => renderCandidates()))); const scroll = el("div", "se-scroll"); left.append(scroll);
         let candidateVirtual = new VirtualRows(scroll, entry => { const i = itemMap.get(entry.itemId); const n = el("div", "se-candidate"); n.append(check(candidateSelection.has(i.id), yes => { if (yes) candidateSelection.add(i.id); else candidateSelection.delete(i.id); count.textContent = `${candidateSelection.size}件選択`; }), el("span", "se-grow", i.name), el("span", "se-muted", i.tags.join(", "))); return n; });
         virtual = candidateVirtual;
-        const renderCandidates = () => { const query = candidateQuery.trim().toLocaleLowerCase(); candidateVirtual.set(doc().catalog.items.filter(i => (!candidateTag || i.tags.includes(candidateTag)) && (!query || `${i.name} ${i.tags.join(" ")}`.toLocaleLowerCase().includes(query))).map(i => ({ key: i.id, itemId: i.id, height: 40 })), true); };
+        const renderCandidates = () => { const query = candidateQuery.trim().toLocaleLowerCase(); candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidateTag || i.tags.includes(candidateTag)) && (!query || `${i.name} ${i.tags.join(" ")}`.toLocaleLowerCase().includes(query)))).map(i => ({ key: i.id, itemId: i.id, height: 40 })), true); };
         const count = el("span", "se-muted", `${candidateSelection.size}件選択`); left.append(row(count, btn("表示中を選択", () => { for (const e of candidateVirtual.entries) candidateSelection.add(e.itemId); count.textContent = `${candidateSelection.size}件選択`; renderCandidates(); }), btn("解除", () => { candidateSelection.clear(); count.textContent = "0件選択"; renderCandidates(); })));
         let chosenMode = "all", chosenCount = 1; const edited = r.groups.find(g => g.id === candidateGroup); if (edited) { chosenMode = edited.mode; chosenCount = edited.count; }
         const modeSelect = select([["all", "すべて使う"], ["random", "この中からランダム"]], chosenMode, value => { chosenMode = value; number.disabled = value !== "random"; }); const number = input(chosenCount, value => { chosenCount = Number(value); }, "number"); number.min = "0"; number.max = "10000"; number.step = "1"; number.style.width = "80px"; number.disabled = chosenMode !== "random";

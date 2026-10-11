@@ -15,6 +15,14 @@ let browser;
   const shared=await import('/extensions/SAX_Bridge/sax_text_catalog_v2_shared.js');window.testShared=()=>shared.sharedController(node);testApp.canvas.ds.scale=1;testApp.canvas.ds.offset=[0,0];testApp.canvas.setDirty(true,true);
  },doc);await page.waitForFunction(()=>document.querySelector('.sax-shared-sets select:not(:disabled)'),null,{timeout:10000}).catch(async error=>{console.log('diagnostics',await page.evaluate(()=>({controller:!!testShared(),widgets:testNode.widgets.map(w=>w.name)})),errors);await page.screenshot({path:path.join(output,'comfy-widget-error.png')});throw error});
  assert.equal(await page.locator('.sax-shared-sets').count(),1);
+ await page.waitForTimeout(100);
+ const alignment=await page.evaluate(()=>{
+  const catalog=document.querySelector('.sax-shared-catalog select'),sets=document.querySelector('.sax-shared-sets'),add=sets.querySelector('.ssw-add');
+  const buttons=[...document.querySelectorAll('.sax-shared-catalog select,.sax-shared-catalog button,.ssw-entry select,.ssw-entry button,.ssw-add')];
+  return {left:catalog.getBoundingClientRect().left,setLeft:add.getBoundingClientRect().left,right:document.querySelector('.sax-shared-catalog button:last-child').getBoundingClientRect().right,setRight:add.getBoundingClientRect().right,heights:buttons.map(b=>b.getBoundingClientRect().height),font:getComputedStyle(catalog).fontSize};
+ });
+ assert.ok(Math.abs(alignment.left-alignment.setLeft)<1&&Math.abs(alignment.right-alignment.setRight)<1,JSON.stringify(alignment));
+ assert.ok(alignment.heights.every(h=>Math.abs(h-24)<1),JSON.stringify(alignment));assert.equal(alignment.font,'11px');
  const rowLayout = await page.locator('.ssw-entry').first().evaluate(row => {
   const select = row.querySelector('select'), buttons = [...row.querySelectorAll('.ssw-edit')];
   return { height: row.offsetHeight, selectX: select.offsetLeft, selectRight: select.offsetLeft+select.offsetWidth, buttons: buttons.map(b=>({x:b.offsetLeft,y:b.offsetTop,title:b.title,text:b.textContent,icon:!!b.querySelector('svg')})), selectY:select.offsetTop };

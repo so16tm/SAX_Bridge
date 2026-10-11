@@ -72,6 +72,7 @@ export function installSharedControls(node) {
         readRecipes: () => controller.session?.document.recipes ?? (readReference(node).catalog_id ? null : []),
         writeRows: rows => { const ref = readReference(node); ref.rows = rows; write(ref); },
         openSet: id => open("sets", id), openItems: id => open("items", id),
+        showHeading: false,
         onResize: () => { if (node.graph && node.computeSize && node.setSize) autoResize(node); node.setDirtyCanvas?.(true, true); },
     });
     const rowsWidget = hidden({ name: "__sax_shared_sets", type: "custom", draw(ctx, currentNode, width, y) {
@@ -168,16 +169,20 @@ export function installSharedControls(node) {
         },
         openItems: () => open("items"), openManagement: managementWidget.callback,
     });
-    const heading = (name, label) => hidden(node.addCustomWidget({ name, type: "custom", computeSize: width => [width, 24],
-        draw(ctx, currentNode, width, y) { txt(ctx, label, 12, y + 15, getComfyTheme().inputText); },
+    const heading = (name, label) => hidden(node.addCustomWidget({ name, type: "custom", computeSize: width => [width, 28],
+        draw(ctx, currentNode, width, y) {
+            ctx.save(); ctx.font = "600 12px sans-serif"; ctx.fillStyle = getComfyTheme().inputText;
+            ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(label, 15, y + 16); ctx.restore();
+        },
     }));
     const executionHeading = heading("__sax_execution_heading", "実行設定");
     const catalogHeading = heading("__sax_catalog_heading", "カタログ管理");
+    const setHeading = controller.setWidget ? heading("__sax_set_heading", "セット構成") : null;
     const catalogControls = controller.catalogToolbar ? [controller.catalogToolbar.widget] : [catalogWidget, itemsWidget, managementWidget];
     const moved = new Set([...seedControls, resultWidget, catalogWidget, itemsWidget, managementWidget,
-        controller.catalogToolbar?.widget, executionHeading, catalogHeading]);
+        controller.catalogToolbar?.widget, executionHeading, catalogHeading, setHeading]);
     const setControls = node.widgets.filter(w => !moved.has(w) && w !== configWidget);
-    node.widgets = [configWidget, executionHeading, ...seedControls, resultWidget, catalogHeading, ...catalogControls, ...setControls];
+    node.widgets = [configWidget, executionHeading, ...seedControls, resultWidget, catalogHeading, ...catalogControls, ...(setHeading ? [setHeading] : []), ...setControls];
     controller.reload();
     return controller;
 }

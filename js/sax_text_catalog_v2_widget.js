@@ -1,13 +1,30 @@
 import { newId } from "./sax_text_catalog_v2_model.js";
-import { PAD, GAP, ROW_H, HEADER_H, ADD_H, BTN_RADIUS, getComfyTheme } from "./sax_ui_base.js";
+import { PAD, GAP, ROW_H, HEADER_H, BTN_RADIUS, getComfyTheme } from "./sax_ui_base.js";
 
 const CSS = `
-.sax-shared-sets{width:100%;box-sizing:border-box;color:var(--input-text,#ddd);font:12px/1.4 sans-serif;padding:6px 8px;background:transparent;display:flex;flex-direction:column;gap:7px;overflow:visible}
-.sax-shared-sets *{box-sizing:border-box}.sax-shared-sets .ssw-heading{font-weight:600;font-size:12px;margin:0;line-height:22px}.sax-shared-sets .ssw-list{display:flex;flex-direction:column;gap:6px}.sax-shared-sets .ssw-entry{border:1px solid var(--border-color,#45454b);border-radius:7px;padding:7px;background:transparent;display:flex;flex-direction:column;gap:6px}.sax-shared-sets .ssw-entry[data-off=true]{opacity:.62}.sax-shared-sets .ssw-entry[data-drop=true]{outline:2px solid var(--primary-background,#5686d6)}.sax-shared-sets .ssw-entry[data-drag=true]{opacity:.4}
-.sax-shared-sets .ssw-row{display:flex;align-items:center;gap:6px;min-width:0}.sax-shared-sets select,.sax-shared-sets button{font:inherit;color:inherit;border:1px solid var(--border-color,#45454b);border-radius:5px;background:var(--comfy-menu-bg,#171718);padding:4px 6px;min-width:0;height:27px}.sax-shared-sets button{cursor:pointer;white-space:nowrap}.sax-shared-sets button:hover{border-color:var(--primary-background,#5686d6)}.sax-shared-sets button:disabled{opacity:.4;cursor:default}.sax-shared-sets :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:1px}.sax-shared-sets select{flex:1;width:0;text-overflow:ellipsis}.sax-shared-sets input[type=checkbox]{width:15px;height:15px;margin:0;flex:none;accent-color:var(--primary-background,#5686d6)}.sax-shared-sets .ssw-handle{cursor:grab;touch-action:none;width:23px;padding:0;flex:none;border-color:transparent;background:transparent;font-size:17px}.sax-shared-sets .ssw-remove{width:24px;padding:0;flex:none;font-size:16px}.sax-shared-sets .ssw-edit{flex:1}.sax-shared-sets .ssw-add{width:100%;height:29px}.sax-shared-sets .ssw-message{font-size:11px;opacity:.7;line-height:17px}.sax-shared-sets .ssw-error{color:var(--error-text,#ed9494);opacity:1;white-space:pre-wrap}.sax-shared-sets .ssw-live{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
-.sax-shared-sets{padding:6px ${PAD}px;gap:${GAP}px;color:var(--input-text,var(--ssw-text));background:transparent}.sax-shared-sets .ssw-row,.sax-shared-sets .ssw-list,.sax-shared-sets .ssw-entry{gap:${GAP}px}.sax-shared-sets select,.sax-shared-sets button{height:${ROW_H}px;border-radius:${BTN_RADIUS}px}.sax-shared-sets .ssw-add{height:${ADD_H}px}.sax-shared-sets .ssw-heading{line-height:${HEADER_H}px}
-.sax-shared-sets .ssw-entry{flex-direction:row;align-items:center;padding:4px 6px;min-width:0;flex-wrap:nowrap}.sax-shared-sets .ssw-edit{flex:none;width:${ROW_H}px;padding:0;display:inline-flex;align-items:center;justify-content:center}.sax-shared-sets .ssw-edit svg{width:16px;height:16px;pointer-events:none}
-.sax-shared-sets select{font-size:11px;line-height:16px;padding:1px 6px}
+.sax-shared-sets{width:100%;box-sizing:border-box;color:var(--input-text,var(--ssw-text,#ddd));font:11px/16px sans-serif;padding:0 ${PAD + 7}px 4px;background:transparent;display:flex;flex-direction:column;gap:${GAP}px;overflow:visible}
+.sax-shared-sets *{box-sizing:border-box}
+.sax-shared-sets .ssw-heading{font:600 12px/${HEADER_H}px sans-serif;margin:0}
+.sax-shared-sets .ssw-list{display:flex;flex-direction:column;gap:${GAP}px}
+.sax-shared-sets .ssw-entry{padding:2px 0;background:transparent;display:flex;align-items:center;gap:${GAP}px;min-width:0;flex-wrap:nowrap}
+.sax-shared-sets .ssw-entry[data-off=true]{opacity:.62}
+.sax-shared-sets .ssw-entry[data-drop=true]{outline:2px solid var(--primary-background,#5686d6)}
+.sax-shared-sets .ssw-entry[data-drag=true]{opacity:.4}
+.sax-shared-sets select,.sax-shared-sets button{font:inherit;color:inherit;border:1px solid var(--border-color,#45454b);border-radius:${BTN_RADIUS}px;background:var(--comfy-input-bg,#222222);padding:1px 6px;min-width:0;height:${ROW_H}px}
+.sax-shared-sets button{cursor:pointer;white-space:nowrap}
+.sax-shared-sets button:hover{border-color:var(--primary-background,#5686d6)}
+.sax-shared-sets button:disabled{opacity:.4;cursor:default}
+.sax-shared-sets :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:1px}
+.sax-shared-sets select{flex:1;width:0;text-overflow:ellipsis}
+.sax-shared-sets input[type=checkbox]{width:15px;height:15px;margin:0;flex:none;accent-color:var(--primary-background,#5686d6)}
+.sax-shared-sets .ssw-handle{cursor:grab;touch-action:none;width:20px;padding:0;flex:none;border-color:transparent;background:transparent;font-size:17px}
+.sax-shared-sets .ssw-remove{width:${ROW_H}px;padding:0;flex:none;font-size:16px}
+.sax-shared-sets .ssw-edit{flex:none;width:${ROW_H}px;padding:0;display:inline-flex;align-items:center;justify-content:center}
+.sax-shared-sets .ssw-edit svg{width:16px;height:16px;pointer-events:none}
+.sax-shared-sets .ssw-add{width:100%}
+.sax-shared-sets .ssw-message{font-size:11px;opacity:.7;line-height:17px}
+.sax-shared-sets .ssw-error{color:var(--error-text,#ed9494);opacity:1;white-space:pre-wrap}
+.sax-shared-sets .ssw-live{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 `;
 
 function element(tag, cls = "", text = "") { const n = document.createElement(tag); n.className = cls; n.textContent = text; return n; }
@@ -20,27 +37,28 @@ function editIcon(title, path) {
     svg.setAttribute("stroke-width", "1.7"); svg.setAttribute("stroke-linecap", "round"); svg.setAttribute("stroke-linejoin", "round");
     const shape = document.createElementNS("http://www.w3.org/2000/svg", "path"); shape.setAttribute("d", path); svg.append(shape); n.append(svg); return n;
 }
-const ROW_ESTIMATE = ROW_H + 10 + GAP;
+const ROW_ESTIMATE = ROW_H + 4 + GAP;
 
 /** Catalog actions share one row; set count does not affect their position. */
 export function makeSharedCatalogWidget(node, { chooseCatalog, openItems, openManagement }) {
     const panel = element("div", "sax-shared-catalog");
     const style = element("style"); style.textContent = `
-    .sax-shared-catalog{box-sizing:border-box;width:100%;padding:4px ${PAD}px;display:flex;gap:${GAP}px;color:var(--input-text,#ddd);font:11px/16px sans-serif}
-    .sax-shared-catalog select,.sax-shared-catalog button{box-sizing:border-box;min-width:0;height:${ROW_H}px;border:1px solid var(--border-color,#45454b);border-radius:${BTN_RADIUS}px;background:var(--comfy-menu-bg,#171718);color:inherit;font:inherit;padding:1px 6px}
+    .sax-shared-catalog{box-sizing:border-box;width:100%;padding:0 ${PAD + 7}px;display:flex;gap:${GAP}px;color:var(--input-text,#ddd);font:11px/16px sans-serif}
+    .sax-shared-catalog select,.sax-shared-catalog button{box-sizing:border-box;min-width:0;height:${ROW_H}px;border:1px solid var(--border-color,#45454b);border-radius:${BTN_RADIUS}px;background:var(--comfy-input-bg,#222222);color:inherit;font:inherit;padding:1px 6px}
     .sax-shared-catalog select{flex:1;width:0;text-overflow:ellipsis}.sax-shared-catalog button{flex:none;cursor:pointer}
     .sax-shared-catalog :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:1px}
     `;
     const select = element("select"); select.setAttribute("aria-label", "カタログを選択");
     const items = button("アイテム"), menu = button("⋯");
+    menu.style.width = `${ROW_H}px`; menu.style.padding = "0"; menu.style.fontSize = "16px";
     menu.title = "カタログ作成・入出力"; menu.setAttribute("aria-label", "カタログ作成・入出力");
     select.onchange = () => chooseCatalog(select.value); items.onclick = openItems; menu.onclick = openManagement;
     panel.append(style, select, items, menu);
     for (const event of ["pointerdown", "mousedown", "dblclick", "wheel", "keydown", "keyup"]) panel.addEventListener(event, e => e.stopPropagation());
-    const height = ROW_H + 8;
+    const height = ROW_H;
     for (const name of ["min-height", "max-height", "height"]) panel.style.setProperty(`--comfy-widget-${name}`, `${height}px`);
     const widget = node.addDOMWidget("__sax_shared_catalog", "sax-shared-catalog", panel, {
-        serialize: false, hideOnZoom: false, selectOn: [], margin: 4,
+        serialize: false, hideOnZoom: false, selectOn: [], margin: 0,
         getMinHeight: () => height, getMaxHeight: () => height, getHeight: () => height, getValue: () => "",
     });
     widget.serialize = false; widget.options = { ...widget.options, serialize: false }; widget.computeSize = width => [width, height];
@@ -55,9 +73,10 @@ export function makeSharedCatalogWidget(node, { chooseCatalog, openItems, openMa
 }
 
 /** The workflow stores references only. Unselected draft rows stay in this widget. */
-export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, openSet, openItems, onResize, readCatalogId }) {
+export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, openSet, openItems, onResize, readCatalogId, showHeading = true }) {
     const panel = element("div", "sax-shared-sets"); const style = element("style"); style.textContent = CSS;
     const heading = element("h3", "ssw-heading", "使用するテキストセット");
+    heading.hidden = !showHeading;
     const list = element("div", "ssw-list"), message = element("div", "ssw-message"), live = element("div", "ssw-live"); live.setAttribute("aria-live", "polite");
     const add = button("＋ テキストセットを追加", "ssw-add"); panel.append(style, heading, list, message, add, live);
     panel.dataset.saxWidget = "shared-sets";
@@ -118,7 +137,7 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
         if (disposed) return; const count = displayRows().length;
         // Exact row count is used rather than a scroll cap. ResizeObserver refines wrapped messages.
         // Canvasのzoom変換後の画面座標ではなく、未拡縮のレイアウト寸法を使う。
-        const height = Math.ceil(heading.offsetHeight + list.offsetHeight + add.offsetHeight + (message.hidden ? 0 : message.offsetHeight) + 12 + GAP * (message.hidden ? 2 : 3)) || 75 + count * ROW_ESTIMATE;
+        const height = Math.ceil(heading.offsetHeight + list.offsetHeight + add.offsetHeight + (message.hidden ? 0 : message.offsetHeight) + 4 + GAP * ((showHeading ? 2 : 1) + (message.hidden ? 0 : 1))) || 75 + count * ROW_ESTIMATE;
         panel.style.setProperty("--comfy-widget-min-height", `${height}px`); panel.style.setProperty("--comfy-widget-max-height", `${height}px`); panel.style.setProperty("--comfy-widget-height", `${height}px`);
         if (height !== lastHeight) { lastHeight = height; widget.computedHeight = height; onResize?.(); node.setDirtyCanvas?.(true, true); }
     }
@@ -165,7 +184,7 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
     // Node canvas listeners must not interpret a select, checkbox, or edit click as a node drag.
     const stop = event => event.stopPropagation(); for (const event of ["pointerdown", "mousedown", "dblclick", "wheel", "keydown", "keyup"]) panel.addEventListener(event, stop);
     const widget = node.addDOMWidget("__sax_shared_sets", "sax-shared-sets", panel, {
-        serialize: false, hideOnZoom: false, selectOn: [], margin: 4,
+        serialize: false, hideOnZoom: false, selectOn: [], margin: 0,
         getMinHeight: () => lastHeight || 75 + displayRows().length * ROW_ESTIMATE,
         getMaxHeight: () => lastHeight || 75 + displayRows().length * ROW_ESTIMATE,
         getHeight: () => lastHeight || 75 + displayRows().length * ROW_ESTIMATE,
