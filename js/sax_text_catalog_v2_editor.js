@@ -140,7 +140,7 @@ export function openSharedEditor(session, options = {}) {
                 const edit = field === "text" ? el("textarea") : el("input"); edit.setAttribute("aria-label", field === "text" ? "アイテム本文" : field === "name" ? "アイテム名" : "アイテムタグ"); edit.value = field === "tags" ? latest.tags.join(", ") : latest[field]; if (field === "name") edit.maxLength = 256;
                 const historyKey = newId(); const commit = () => { let next = edit.value; try { if (field === "tags") next = parseTags(next); putItem(entry.itemId, { [field]: next }, historyKey); } catch (error) { localError = error.message; updateStatus(); } };
                 let composing = false; edit.addEventListener("compositionstart", () => { composing = true; }); edit.addEventListener("compositionend", () => { composing = false; commit(); }); edit.addEventListener("input", () => { if (!composing) commit(); });
-                edit.addEventListener("keydown", e => { if ((e.key === "Enter" && field !== "text") || (e.key === "Escape" && !composing)) { e.preventDefault(); edit.blur(); } });
+                edit.addEventListener("keydown", e => { if (e.defaultPrevented) return; if ((e.key === "Enter" && field !== "text") || (e.key === "Escape" && !composing)) { e.preventDefault(); edit.blur(); } });
                 edit.addEventListener("blur", () => { if (active?.edit !== edit) return; commit(); active = null; virtual.pinned = null; refresh(); });
                 c.replaceWith(edit); active = { edit, commit }; if (field === "text") attachAutoComplete(edit); edit.focus(); edit.setSelectionRange?.(edit.value.length, edit.value.length);
             }

@@ -107,5 +107,8 @@ for node_cls in NODE_CLASS_MAPPINGS.values():
 debug_log_module.register_lifecycle_hook()
 text_catalog_v2_store.register_routes()
 
+from .nodes.autocomplete_bridge import register_prompt_handler  # noqa: E402
+register_prompt_handler()
+
 WEB_DIRECTORY = "js"
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']

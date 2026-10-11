@@ -133,7 +133,7 @@ The SAM3 `mask_grow` and this node's `grow` are additive. When fanning out, set 
 - **Tag-aware sorting** keeps related items grouped and matches the tag toggle order
 - Output empty string for unset / orphan Relations — drops cleanly into `SAX Prompt Concat`
 - **`merge_outputs` toggle** collapses all Relations into a single newline-joined output — a clean single wire into `SAX Prompt Concat` that avoids its many-input slot ordering glitch
-- Text editor supports **danbooru tag autocomplete** when [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) is installed (falls back to manual input otherwise)
+- Text editor supports **danbooru tag autocomplete** with optional [Autocomplete++](https://github.com/michikora/ComfyUI-Autocomplete-Plus-Plus) (manual input remains available without it)
 
 See [Node Reference: SAX Text Catalog](docs/nodes_en.md#sax-text-catalog) for full details.
 
@@ -207,9 +207,14 @@ git clone https://github.com/so16tm/SAX_Bridge
 | Dependency | Purpose | Required |
 |---|---|---|
 | ComfyUI | Runtime | ✅ |
-| `comfyui-impact-pack` | Wildcard feature (SAX Prompt) | Optional |
-| `ComfyUI-Custom-Scripts` (pyssss) | Danbooru tag autocomplete in SAX Text Catalog | Optional |
+| [Autocomplete++](https://github.com/michikora/ComfyUI-Autocomplete-Plus-Plus) | Tag autocomplete and dynamic prompt / wildcard expansion before queue submission | Optional |
 | `sam3` | SAX SAM3 nodes | Only when using SAM3 |
+
+SAX no longer requires Impact Pack or ComfyUI-Custom-Scripts. Install Autocomplete++ separately and enable `Enable Prompt Expansion Engine` when using dynamic prompts or wildcards. Move existing wildcard files from Impact Pack to Autocomplete++'s `wildcards` folder; review their syntax for compatibility.
+
+Catalog V1 / V2 text is expanded only in a queue submission snapshot, leaving saved templates unchanged. SAX applies LoRA tags and encodes `BREAK` on the server without expanding the text again. Ordinary text remains usable without Autocomplete++; dynamic syntax remains unexpanded. Direct API clients bypass the browser engine and must submit expanded text.
+
+Autocomplete++ cannot read a Primitive Store seed drawn at execution or a seed inside a Pipe. Use its `Random` expansion mode for these workflows; synchronization with the image seed is not guaranteed. Catalog random item selection retains its backend seed behavior.
 
 > sam3 is not required if you do not use SAX SAM3 nodes.
 

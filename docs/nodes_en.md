@@ -297,7 +297,7 @@ Connect the Loader's `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` to 
 
 ### SAX Prompt
 
-`SAX_Bridge_Prompt` — Handles wildcard expansion, LoRA tag extraction, and `BREAK`-syntax split encoding in one node.
+`SAX_Bridge_Prompt` — Applies LoRA tags and performs `BREAK`-syntax split encoding. Autocomplete++ handles dynamic prompt / wildcard expansion before queue submission.
 
 **Inputs**
 
@@ -311,11 +311,11 @@ Connect the Loader's `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` to 
 **Outputs**: `PIPE`, `POPULATED_TEXT` (expanded text)
 
 **Behavior**:
-1. Randomly expands wildcard tokens based on the seed inherited from the Pipe
-2. Extracts LoRA tags and applies them to Model and CLIP
+1. Receives text expanded by Autocomplete++ in the browser (or plain text when it is absent)
+2. Extracts LoRA tags and applies them to Model and CLIP without Impact Pack
 3. Splits text into chunks at `BREAK`, encodes each chunk with CLIP, and concatenates with `ConditioningConcat`
 
-> Wildcard functionality is only available when `comfyui-impact-pack` is installed.
+> Enable Autocomplete++'s `Enable Prompt Expansion Engine` for dynamic prompts and wildcards. SAX does not expand them again on the server. Without Autocomplete++, ordinary text and LoRA / `BREAK` processing remain available; dynamic syntax is passed through. Direct API clients must send expanded text.
 
 [↑ Back to top](#top)
 
@@ -1112,16 +1112,16 @@ applied_loras: {'lora_a'} (1 entries)
 - Tag filter is fixed to a single line; if it overflows, a `[Show all]` button opens a separate dialog
 
 **Text Editor Autocomplete (Optional)**
-- If [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) is installed, the Item Text editor textarea gets danbooru tag autocomplete
-- Inherits pyssss defaults: category color coding, alias support, ↑↓ Enter/Tab confirmation
-- Auto-appends comma separator (`globalSeparator = ", "`)
-- Falls back silently to manual input if pyssss is not installed
+- Optional [Autocomplete++](https://github.com/michikora/ComfyUI-Autocomplete-Plus-Plus) provides danbooru tag autocomplete in the V1 and V2 text editors. Candidate selection and formatting follow its settings.
+- Without it, text can still be entered, saved, selected, and output manually.
+- Catalog text is expanded in a queue-only snapshot; stored templates are unchanged and catalog JSON is protected from expansion. Shared V2 also takes its text snapshot at submission.
+- Catalog random item selection still uses its backend seed. Autocomplete++ expansion has its own random state; `Follow Seed` cannot resolve a runtime Primitive Store random seed or `Pipe.seed`, so use `Random` unless the browser can see the intended numeric seed. Matching the image seed is not guaranteed.
 
 **LoRA / Wildcard Pickers**
 - Below the Item Text editor area, `[+ LoRA]` and `[+ Wildcard]` buttons are placed
 - `[+ LoRA]`: opens a picker modal listing ComfyUI's LoRA inventory; inserts `<lora:NAME>` at the cursor position (extension stripped, subdirectory kept to avoid same-name collisions, e.g. `<lora:style/foo>`)
-- `[+ Wildcard]`: opens a picker modal listing Impact-Pack wildcards; inserts the wildcard name at the cursor position (auto-prepends `, ` when the preceding text doesn't end with one)
-- Buttons are disabled when no LoRA is found / Impact-Pack is not installed (tooltip explains the reason)
+- `[+ Wildcard]`: opens a picker modal listing Autocomplete++ wildcards; inserts the wildcard name at the cursor position (auto-prepends `, ` when the preceding text doesn't end with one)
+- Buttons are disabled when no LoRA is found / no Autocomplete++ wildcards are available (tooltip explains the reason)
 
 **Sort Order**
 - Tags: favorites (context-aware) → item count desc → alphabetical
@@ -1206,7 +1206,7 @@ External catalog (import creates a fresh ID and revision):
 }
 ```
 
-- Execution obtains the latest saved catalog and fixes that snapshot for the run. Unchanged catalogs reuse the validated server cache; external changes also invalidate ComfyUI's execution cache.
+- Browser queue submission takes a snapshot of the saved catalog and expands its candidate text through Autocomplete++ before sending. Later edits do not change an already submitted job; stored templates remain unchanged. Direct API submissions without a queued snapshot read the latest saved catalog at execution and must provide expanded text when needed. Unchanged catalogs reuse the validated server cache; external changes also invalidate ComfyUI's execution cache.
 - Enabled rows and components are emitted in order. `all` selects all candidates in candidate order; `random` chooses `count` distinct candidates and emits them in candidate order. Zero is valid; insufficient candidates cause an error. The same item may appear in multiple components.
 - Draws depend independently on Seed, set ID, and component ID. Reordering or toggling another component does not change a draw. Editing a shared catalog can change output even with the same Seed.
 - The selection record contains catalog ID/revision, Seed, rows, components, selection order, and executed item names/text. The full catalog is not returned with every execution.

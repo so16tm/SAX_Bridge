@@ -199,6 +199,12 @@ def parse_workflow(config_json):
             _error(path + ".on", "boolean が必要です")
     if rows and not config["catalog_id"]:
         _error("catalog_id", "共有カタログを選択してください")
+    if "_sax_queued_catalog" in config:
+        from .text_catalog_v2_store import validate
+        document = config["_sax_queued_catalog"]
+        validate(document)
+        if document["id"] != config["catalog_id"]:
+            _error("catalog_id", "送信時カタログのIDが一致しません")
     return config
 
 
@@ -212,7 +218,9 @@ def resolve_catalog(config_json=DEFAULT_CONFIG, seed=0):
     if not config["catalog_id"]:
         return "", json.dumps(report, separators=(",", ":"))
     from .text_catalog_v2_store import snapshot
-    document = snapshot(config["catalog_id"])
+    document = config.get("_sax_queued_catalog")
+    if document is None:
+        document = snapshot(config["catalog_id"])
     report["revision"] = document["revision"]
     recipes = {recipe["id"]: recipe for recipe in document["recipes"]}
     items = {item["id"]: item for item in document["catalog"]["items"]}
@@ -287,7 +295,7 @@ class SAX_Bridge_Text_Catalog_V2(io.ComfyNode):
     @classmethod
     def fingerprint_inputs(cls, config_json: str = DEFAULT_CONFIG, seed: int = 0):
         config = parse_workflow(config_json)
-        if config["version"] == 2 or not config["catalog_id"]:
+        if config["version"] == 2 or not config["catalog_id"] or "_sax_queued_catalog" in config:
             return config_json
         from .text_catalog_v2_store import fingerprint
         return fingerprint(config["catalog_id"])

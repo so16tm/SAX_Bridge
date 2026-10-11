@@ -2398,7 +2398,7 @@ export function makeJsonWidgetAccessor(widgetName, fallback = [], { fireCallback
 }
 
 // ---------------------------------------------------------------------------
-// loadWildcardList — Impact-Pack の Wildcard 一覧をモジュールスコープでキャッシュ取得
+// loadWildcardList — Autocomplete++ の Wildcard 一覧をモジュールスコープでキャッシュ取得
 // ---------------------------------------------------------------------------
 
 let _wildcardListCache = null;
@@ -2409,8 +2409,8 @@ const WILDCARD_NAME_MAX_LENGTH_DEFAULT = 200;
 const WILDCARD_LIST_MAX_ITEMS_DEFAULT  = 1000;
 
 /**
- * Impact-Pack の `/impact/wildcards/list` から Wildcard 名一覧を取得する。
- * 成功時にモジュールスコープでメモ化する。Impact-Pack 未導入時は空配列を返す。
+ * Autocomplete++ の `/autocomplete-plus-plus/wildcards/all-data` から Wildcard 名一覧を取得する。
+ * 成功時にモジュールスコープでメモ化する。Autocomplete++ 未導入時は空配列を返す。
  *
  * 信頼境界外の応答に対して、文字列要素のみ採用し長さ・件数の上限を適用する。
  *
@@ -2429,10 +2429,11 @@ export async function loadWildcardList({
     if (!forceRefresh && _wildcardListCache != null) return _wildcardListCache;
     try {
         const { api } = await import("../../scripts/api.js");
-        const res = await api.fetchApi("/impact/wildcards/list");
+        const res = await api.fetchApi("/autocomplete-plus-plus/wildcards/all-data");
         if (!res.ok) return [];
         const data = await res.json();
-        const raw  = Array.isArray(data?.data) ? data.data : [];
+        const raw = data?.success && data.wildcards && typeof data.wildcards === "object" && !Array.isArray(data.wildcards)
+            ? Object.keys(data.wildcards).filter(name => name.length > 0).map(name => `__${name}__`) : [];
         const list = raw
             .filter(v => typeof v === "string" && v.length > 0 && v.length <= maxNameLength)
             .slice(0, maxItems);

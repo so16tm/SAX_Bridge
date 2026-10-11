@@ -1058,7 +1058,7 @@ function showManagerDialog(node, getState, applyDraft, initialItemId = null) {
 
         const wcBtn = h("button", STYLE.btn, "+ Wildcard");
         wcBtn.disabled = wcCount === 0;
-        wcBtn.title = wcCount === 0 ? "No wildcards found (Impact-Pack required)" : "Insert wildcard name at cursor";
+        wcBtn.title = wcCount === 0 ? "No wildcards found (Autocomplete++ required)" : "Insert wildcard name at cursor";
         if (wcCount === 0) wcBtn.style.opacity = "0.5";
         wcBtn.addEventListener("click", () => showWildcardPicker(node, textArea));
         insertRow.appendChild(wcBtn);

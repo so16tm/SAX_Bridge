@@ -41,7 +41,7 @@
 - [ ] Prompt の POPULATED_TEXT が Output の metadata に反映される
 - [ ] Prompt Concat が negative としてエラーなく動作する
 - [ ] BREAK 構文テスト: Prompt のテキストを `a girl BREAK blue sky` に変更 → エラーなし
-- [ ] LoRA テスト: テキストに `<lora:xxx:0.8>` を追加 → LoRA が適用される（Impact Pack 環境のみ）
+- [ ] LoRA テスト: テキストに `<lora:xxx:0.8>` を追加 → LoRA が適用される（Impact Pack 未導入でも動作）
 
 ---
 
@@ -251,18 +251,29 @@
 - [ ] ComfyUI を再読込 → ノード状態が完全復元される（Item, tags, favorites, Relations すべて）
 - [ ] Slot の接続も復元されている
 
-### I-9. オートコンプリート連携（pyssss ComfyUI-Custom-Scripts）
+### I-9. オートコンプリート連携（Autocomplete++）
 
-#### pyssss 導入時
+#### Autocomplete++ 導入時
 - [ ] Item Text 編集 textarea にフォーカスし `1g` と入力 → `1girl` 等の候補ポップアップが出る
 - [ ] ↑↓ キーで候補移動、Enter / Tab で確定
-- [ ] 確定後、自動でカンマ + スペース (`, `) が挿入される
+- [ ] 候補確定後のカンマ付与・アンダースコア置換が Autocomplete++ の設定どおりになる
 - [ ] カテゴリ別の色分けが反映される
 - [ ] Esc で候補を閉じる、textarea からフォーカスが外れた時も閉じる
 
-#### pyssss 未導入時
+#### Autocomplete++ 未導入時
 - [ ] Item Text 編集 textarea で何を入力しても候補は出ない（ノードはエラーなく動作する）
 - [ ] ブラウザコンソールに目立ったエラーが出ない
+
+#### 動的プロンプト・Wildcard の移行
+- [ ] Impact Pack を導入していない環境でも Prompt / Prompt Concat の LoRA 適用と `BREAK` エンコード、および Qwen Image Prompt の LoRA 適用が動作する
+- [ ] Autocomplete++ の展開エンジンを有効にし、Prompt と Catalog V1 / V2 の本文 `{red|blue}` が選択肢の一つに展開される
+- [ ] Autocomplete++ の `wildcards` に登録した `__colors__` が Prompt と Catalog V1 / V2 で展開される
+- [ ] Catalog の本文に選択構文・URL・コメントを含めても JSON が壊れずキューを実行できる
+- [ ] 複数キューの送信後も、保存カタログ本文には展開前テンプレートが残る（共有 V2 も確認）
+- [ ] 共有 V2 を送信後に編集しても、既に送信したキューは送信時の本文を使用する
+- [ ] Autocomplete++ の `Random` と Primitive Store の random seed を使用して複数キューを実行できる（展開と画像 seed の一致は要件にしない）
+- [ ] Autocomplete++ 未導入 / 展開エンジン無効でも通常テキストは保存・選択・出力でき、動的構文は未展開で渡される
+- [ ] API 直接送信で展開済み文字列を渡せる。未展開構文を渡してもサーバーでは展開されない
 
 ### I-10. Relation トグル（ON/OFF）
 
@@ -303,8 +314,8 @@
 
 #### Wildcard ピッカー
 - [ ] Item Text 編集エリア下に `[+ Wildcard]` ボタンが表示される
-- [ ] Impact-Pack 未導入時は `[+ Wildcard]` が無効化され tooltip に理由が表示される
-- [ ] Impact-Pack 導入時、Manager Dialog 起動後しばらくして API 取得が完了するとボタンが有効化される
+- [ ] Autocomplete++ 未導入、または Wildcard 一覧が空の場合は `[+ Wildcard]` が無効化され tooltip に理由が表示される
+- [ ] Autocomplete++ に Wildcard を登録した環境で、Manager Dialog 起動後しばらくして API 取得が完了するとボタンが有効化される
 - [ ] `[+ Wildcard]` クリックで Wildcard 一覧モーダルが開く
 - [ ] Wildcard 選択でカーソル位置に Wildcard 名が挿入される
 - [ ] カーソル前のテキストが空でなく `, ` で終わっていない場合、`, ` が前置される

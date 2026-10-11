@@ -297,7 +297,7 @@ Loader の `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` を Director 
 
 ### SAX Prompt
 
-`SAX_Bridge_Prompt` — Wildcard 展開・LoRA タグ抽出・`BREAK` 構文による分割エンコードをまとめて処理します。
+`SAX_Bridge_Prompt` — LoRA タグの適用と `BREAK` 構文による分割エンコードを処理します。動的プロンプト・Wildcard は Autocomplete++ がキュー送信前に展開します。
 
 **入力**
 
@@ -311,11 +311,11 @@ Loader の `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` を Director 
 **出力**: `PIPE`, `POPULATED_TEXT`（展開後テキスト）
 
 **動作**:
-1. Pipe から継承したシードに基づき Wildcard トークンをランダム展開
-2. LoRA タグを抽出し、Model・CLIP に適用
+1. ブラウザで Autocomplete++ が展開したテキストを受け取る（未導入時は通常テキスト）
+2. Impact Pack を使わず LoRA タグを抽出し、Model・CLIP に適用
 3. `BREAK` でテキストをチャンク分割し、各チャンクを CLIP エンコード → `ConditioningConcat` で結合
 
-> Wildcard 機能は `comfyui-impact-pack` がインストールされている場合のみ有効です。
+> 動的プロンプト・Wildcard には Autocomplete++ の `Enable Prompt Expansion Engine` を有効にしてください。SAX はサーバーで再展開しません。未導入時も通常テキスト・LoRA・`BREAK` は使用できますが、動的構文は未展開で渡されます。API から直接送信する場合は展開済みテキストを指定してください。
 
 [↑ トップへ](#top)
 
@@ -1112,16 +1112,16 @@ applied_loras: {'lora_a'} (1 entries)
 - タグフィルタは 1 行固定、件数超過時は `[Show all]` ボタンで別ダイアログ展開
 
 **Text 編集エリアのオートコンプリート（オプション）**
-- [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) が導入されていれば、Item Text 編集 textarea で danbooru タグ補完が有効になる
-- カテゴリ別の色分け、エイリアス対応、↑↓ Enter/Tab で確定など、pyssss 標準動作をそのまま継承
-- カンマ区切り（`globalSeparator = ", "`）を自動付与
-- 未導入時は何もしない（手動入力にフォールバック）
+- オプションの [Autocomplete++](https://github.com/michikora/ComfyUI-Autocomplete-Plus-Plus) により V1 / V2 の本文編集欄で danbooru タグ補完が利用できます。候補の確定や整形は同拡張の設定に従います。
+- 未導入時も、手動で本文を入力・保存・選択・出力できます。
+- 本文はキュー送信専用のスナップショットで展開し、保存したテンプレートは変更しません。カタログ JSON 自体は展開対象から保護します。共有 V2 も送信時に本文のスナップショットを取得します。
+- カタログのランダム項目選択は従来どおりバックエンドの seed を使用します。Autocomplete++ の展開乱数は別です。`Follow Seed` では Primitive Store の実行時 random seed や `Pipe.seed` を解決できないため、ブラウザで対象の数値 seed を参照できる場合以外は `Random` を推奨します。画像 seed との同期は保証しません。
 
 **LoRA / Wildcard ピッカー**
 - Item Text 編集エリアの直下に `[+ LoRA]` `[+ Wildcard]` ボタンを配置
 - `[+ LoRA]`：ComfyUI の LoRA 一覧からピッカーモーダルで選択 → カーソル位置に `<lora:NAME>` を挿入（拡張子のみ除去、サブディレクトリは保持して同名衝突を防ぐ。例: `<lora:style/foo>`）
-- `[+ Wildcard]`：Impact-Pack の Wildcard 一覧から選択 → カーソル位置に Wildcard 名を挿入（既存テキストとの間に `, ` を自動付与）
-- LoRA が 0 件 or Impact-Pack 未導入時は対応するボタンを無効化（ツールチップで理由表示）
+- `[+ Wildcard]`：Autocomplete++ の Wildcard 一覧から選択 → カーソル位置に Wildcard 名を挿入（既存テキストとの間に `, ` を自動付与）
+- LoRA が 0 件、または Autocomplete++ の Wildcard 一覧を取得できない場合は対応するボタンを無効化（ツールチップで理由表示）
 
 **並び順仕様**
 - タグ：お気に入り（コンテキスト連動）→ アイテム数降順 → アルファベット順
@@ -1206,7 +1206,7 @@ applied_loras: {'lora_a'} (1 entries)
 }
 ```
 
-- 実行時に最新の保存済みカタログを取得し、その実行中は同じスナップショットを使います。更新がなければ検証済みサーバーキャッシュを再利用し、更新はComfyUIの実行キャッシュ判定にも反映します。
+- ブラウザからのキュー送信時に保存済みカタログのスナップショットを取得し、候補本文を Autocomplete++ で展開して送信します。送信後の編集は既に送信したキューへ影響せず、保存したテンプレートは変更しません。送信専用スナップショットのない API 直接実行は実行時の最新カタログを読み込み、必要な本文は事前に展開しておく必要があります。更新がなければ検証済みサーバーキャッシュを再利用し、更新は ComfyUI の実行キャッシュ判定にも反映します。
 - 有効なセット行・構成要素の順に出力します。`all` は候補配列の順にすべてを選び、`random` は `count` 件を重複なしで選んで候補順に出力します。`count: 0` は有効で、候補不足は実行エラーです。同じアイテムの複数箇所での使用も可能です。
 - 抽選はSeed・セットID・構成要素IDから独立して決まります。他の有効状態や並び順の変更だけでは抽選は変わりません。Seedが同じでも共有カタログを変更すると出力が変わることがあります。
 - 選択記録にはカタログID・改訂番号・Seed・セット行・構成要素・選択順・実行時の名前と本文を記録します。実行ごとに全カタログを返送しません。

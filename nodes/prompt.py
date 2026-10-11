@@ -10,26 +10,10 @@ from comfy_api.latest import io
 
 from .picker_options import get_lora_options, get_wildcard_options
 from .io_types import PipeLine, _APPLIED_LORAS_KEY, _normalize_lora_name, filter_new_loras, record_applied_loras, require_pipe
+from .lora_tags import split_lora_tags
 
 
 logger = logging.getLogger("SAX_Bridge")
-
-
-def _get_impact_wildcards():
-    """
-    impact.wildcards モジュールを遅延取得する。
-    Impact Pack はオプション依存のため、未インストール時は None を返す。
-    呼び出し側で None の場合はワイルドカード展開をスキップしてテキストをそのまま使う。
-    """
-    try:
-        import impact.wildcards
-        return impact.wildcards
-    except ImportError:
-        logger.warning(
-            "[SAX_Bridge] ComfyUI-Impact-Pack is not installed. "
-            "Wildcard expansion will be skipped."
-        )
-        return None
 
 
 def _encode_with_break(clip: Any, text: str) -> list:
@@ -102,7 +86,7 @@ def _encode_with_break(clip: Any, text: str) -> list:
 
 def _apply_loras(model, clip, loras, applied_loras=()):
     """
-    extract_lora_values で取得した LoRA リストを適用する。
+    split_lora_tags で取得した LoRA リストを適用する。
     loras: [(lora_name, model_weight, clip_weight, lbw, lbw_a, lbw_b, loader), ...]
     戻り値: (model, clip, applied_names) — applied_names は実際に適用できたLoRA名のリスト
     """
@@ -196,7 +180,7 @@ def _resolve_lora_name(name):
 
 
 def _process_prompt(pipe: dict, wildcard_text: str, target_key: str):
-    """Wildcard 展開 → LoRA 適用 → CLIP エンコード → 新しい pipe の構築。
+    """送信前に展開された文章 → LoRA 適用 → CLIP エンコード → pipe の構築。
 
     SAX Prompt と SAX Prompt Concat の共通処理。両ノードの違いは
     conditioning を pipe のどちらのキーに載せるか (`target_key`) だけなので、
@@ -204,8 +188,6 @@ def _process_prompt(pipe: dict, wildcard_text: str, target_key: str):
 
     戻り値: (new_pipe, conditioning, populated)
     """
-    wildcards = _get_impact_wildcards()
-
     model = pipe.get("model")
     clip = pipe.get("clip")
 
@@ -214,15 +196,8 @@ def _process_prompt(pipe: dict, wildcard_text: str, target_key: str):
     if clip is None:
         raise ValueError("[SAX_Bridge] Pipe does not contain a CLIP model.")
 
-    actual_seed = pipe.get("seed", 0)
-    if wildcards is not None:
-        populated = wildcards.process(wildcard_text, actual_seed)
-        loras = wildcards.extract_lora_values(populated)
-        clean_text = wildcards.remove_lora_tags(populated)
-    else:
-        populated = wildcard_text
-        loras = []
-        clean_text = wildcard_text
+    populated = wildcard_text
+    clean_text, loras = split_lora_tags(populated)
 
     new_loras = filter_new_loras(pipe, loras)
     applied_names = []
@@ -252,7 +227,7 @@ def _process_prompt(pipe: dict, wildcard_text: str, target_key: str):
 
 class SAX_Bridge_Prompt(io.ComfyNode):
     """
-    Impact Pack の ImpactWildcardEncode を改良したノード。
+    送信前に展開されたプロンプトを Pipe へエンコードするノード。
     - Pipe 方式の入出力（Easy-Use 親和性）
     - populated prompt UI の撤去
     - CUDA デバイス不一致エラーの根本解消
@@ -271,7 +246,7 @@ class SAX_Bridge_Prompt(io.ComfyNode):
                 io.String.Input(
                     "wildcard_text",
                     multiline=True,
-                    tooltip="Enter your prompt using wildcard syntax. LoRA syntax and BREAK syntax are also supported.",
+                    tooltip="Autocomplete++ expands dynamic prompts and wildcards before submission. LoRA and BREAK syntax are processed here.",
                 ),
                 io.Combo.Input("select_to_add_lora", options=get_lora_options()),
                 io.Combo.Input("select_to_add_wildcard", options=get_wildcard_options()),
@@ -291,8 +266,8 @@ class SAX_Bridge_Prompt(io.ComfyNode):
 
 class SAX_Bridge_Prompt_Concat(io.ComfyNode):
     """
-    可変テキスト入力に対応した Wildcard エンコーダー。
-    テキストを改行で連結 → Wildcard/LoRA 展開 → CLIP エンコード → Pipe 更新。
+    可変テキスト入力に対応したプロンプトエンコーダー。
+    展開済みテキストを改行で連結 → LoRA 適用 → CLIP エンコード → Pipe 更新。
     """
 
     @classmethod
@@ -306,7 +281,7 @@ class SAX_Bridge_Prompt_Concat(io.ComfyNode):
         return io.Schema(
             node_id="SAX_Bridge_Prompt_Concat",
             display_name="SAX Prompt Concat",
-            description="Concatenates multiple text inputs, expands Wildcards/LoRA tags, and encodes them with CLIP.",
+            description="Concatenates text inputs expanded before submission, applies LoRA tags, and encodes them with CLIP.",
             category="SAX/Bridge/Prompt",
             inputs=[
                 PipeLine.Input("pipe"),
