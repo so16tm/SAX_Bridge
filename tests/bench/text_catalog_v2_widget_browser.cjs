@@ -3,7 +3,7 @@ const { chromium } = require(process.env.SAX_PLAYWRIGHT_PATH || 'playwright');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..');
 const docs = ['one', 'two'].map(id => ({ version: 3, id, name: `カタログ${id}`, revision: 1,
-    catalog: { items: [{ id: 'z', name: 'Z アイテム', text: '乙の本文', tags: [] }, { id: 'a', name: 'A アイテム', text: '甲の本文', tags: [] }] },
+    catalog: { items: [{ id: 'z', name: 'Z アイテム', text: '乙の本文', tags: ['背景'] }, { id: 'a', name: 'A アイテム', text: '甲の本文', tags: [] }] },
     recipes: [{ id: 's', name: 'テキストセット', groups: [{id:'g',name:'構成要素',mode:'all',on:true,count:2,item_ids:['z','a']}] }] }));
 const html = `<meta charset="utf-8"><style>body{background:#181818;color:#ddd;font:12px sans-serif}#host{width:350px;background:#353535;padding:8px}#host>button,#host>.native{display:block;box-sizing:border-box;width:100%;height:24px;margin:4px 0}h3{font-size:12px;margin:4px}</style><div id="host"></div><script type="module">
 import {installSharedControls,sharedController} from '/js/sax_text_catalog_v2_shared.js';
@@ -57,8 +57,11 @@ const server = http.createServer((req, res) => {
         assert.deepEqual(await itemOrder(), nameOrder);
         await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('catalog');
         assert.deepEqual(await itemOrder(), ['z','a']);
+        await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('tags');
+        assert.deepEqual(await itemOrder(), ['z','a']);
         await page.getByRole('button', { name: 'テキストセット', exact: true }).click();
-        assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'catalog');
+        assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'tags');
+        assert.deepEqual(await page.locator('.se-candidate').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.key)),['z','a']);
         await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('name');
         assert.deepEqual(await page.locator('.se-candidate').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.key)),nameOrder);
         await page.getByRole('button', { name: '閉じる', exact: true }).click();
@@ -66,6 +69,8 @@ const server = http.createServer((req, res) => {
         await page.getByRole('button', { name: '前回の実行結果', exact: true }).click();
         assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'name');
         assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.itemId)),nameOrder);
+        await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('tags');
+        assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.itemId)),['z','a']);
         assert.deepEqual(await page.evaluate(()=>shared().result.selection.rows[0].groups[0].items.map(i=>i.id)),['z','a']);
         await page.getByRole('button', { name: '閉じる', exact: true }).click();
         await page.locator('.sax-shared-catalog select').selectOption('two');

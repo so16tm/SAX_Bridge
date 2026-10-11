@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showDialog, showConfirmDialog, showPromptDialog, showAlertDialog, hideWidget } from "./sax_ui_base.js";
-import { LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow } from "./sax_text_catalog_v2_model.js";
+import { LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys } from "./sax_text_catalog_v2_model.js";
 import { installQuickControls } from "./sax_text_catalog_v2_quick.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { installSharedControls, sharedController, flushCatalogNodes, flushCatalogPrompt, readReference } from "./sax_text_catalog_v2_shared.js";
@@ -216,12 +216,16 @@ function openCatalog(node) {
         const controls = row(search, filters);
         if (full) {
             const sort = el("select"); sort.setAttribute("aria-label", "並べ替え");
-            for (const [value, name] of [["catalog", "登録順"], ["name", "名前順"], ["used", "使用件数順"]]) sort.append(new Option(name, value));
+            for (const [value, name] of [["catalog", "登録順"], ["name", "名前順"], ["tags", "タグ順"], ["used", "使用件数順"]]) sort.append(new Option(name, value));
             sort.value = state.sort; sort.addEventListener("change", () => { state.sort = sort.value; render(); }); controls.append(sort);
         }
         pane.append(controls);
         const visible = filteredItems(config, state.query, state.tag);
         if (state.sort === "name") visible.sort((a, b) => a.name.localeCompare(b.name));
+        else if (state.sort === "tags") {
+            const keys = itemTagSortKeys(visible);
+            visible.sort((a, b) => compareItemTagKeys(keys.get(a.id), keys.get(b.id)) || a.name.localeCompare(b.name, "ja") || a.id.localeCompare(b.id));
+        }
         else if (state.sort === "used") visible.sort((a, b) => (referenceCounts.get(b.id) || 0) - (referenceCounts.get(a.id) || 0));
         const selecting = managing || state.mode === "composition";
         if (selecting) {

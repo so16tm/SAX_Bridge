@@ -1,6 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow } from "../../js/sax_text_catalog_v2_model.js";
+import { emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys } from "../../js/sax_text_catalog_v2_model.js";
+
+test("タグ順は複数タグの入力順に依存せず、同タグは名前順、タグなしは末尾", () => {
+    const items = [
+        { id: "none", name: "A", tags: [] },
+        { id: "b", name: "B", tags: ["b"] },
+        { id: "az", name: "Z", tags: ["b", "a"] },
+        { id: "aa", name: "A", tags: ["a", "b"] },
+        { id: "a", name: "Z", tags: ["a"] },
+    ];
+    const before = structuredClone(items), keys = itemTagSortKeys(items);
+    const sorted = [...items].sort((a, b) => compareItemTagKeys(keys.get(a.id), keys.get(b.id)) || a.name.localeCompare(b.name, "ja"));
+    assert.deepEqual(sorted.map(i => i.id), ["a", "aa", "az", "b", "none"]);
+    assert.deepEqual(items, before);
+    assert.equal(compareItemTagKeys([], []), 0);
+    const japanese = ["背景", "人物"].sort((a, b) => a.localeCompare(b, "ja"));
+    assert.ok(compareItemTagKeys([japanese[0]], [japanese[1]]) < 0);
+});
 
 const fixture = count => {
     const config = emptyConfig();

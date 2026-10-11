@@ -9,6 +9,19 @@ export function newId() {
     return globalThis.crypto?.randomUUID?.() ?? `v2_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
+export function itemTagSortKeys(items) {
+    return new Map(items.map(item => [item.id, [...(item.tags ?? [])].sort((a, b) => a.localeCompare(b, "ja"))]));
+}
+
+export function compareItemTagKeys(left, right) {
+    if (!left.length || !right.length) return Number(!left.length) - Number(!right.length);
+    for (let i = 0; i < Math.min(left.length, right.length); i++) {
+        const difference = left[i].localeCompare(right[i], "ja");
+        if (difference) return difference;
+    }
+    return left.length - right.length;
+}
+
 function fail(message) { throw new Error(message); }
 function object(value, path) {
     if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${path}: オブジェクトが必要です`);

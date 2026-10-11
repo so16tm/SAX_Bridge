@@ -1,5 +1,5 @@
 import { showDialog, showConfirmDialog } from "./sax_ui_base.js";
-import { newId, parseTags } from "./sax_text_catalog_v2_model.js";
+import { newId, parseTags, itemTagSortKeys, compareItemTagKeys } from "./sax_text_catalog_v2_model.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { openWildcardPicker } from "./sax_text_catalog_v2_wildcards.js";
 
@@ -101,18 +101,20 @@ export function openSharedEditor(session, options = {}) {
     const showCandidates = new Set();
     const doc = () => session.document;
     function sortItems(values, resolve = value => value) {
+        const tagKeys = pref.sort === "tags" ? itemTagSortKeys(values.map(resolve)) : null;
         const ranks = pref.sort === "catalog" ? new Map(doc().catalog.items.map((item, index) => [item.id, index])) : null;
         const counts = new Map();
         if (pref.sort === "usage") for (const r of doc().recipes) for (const g of r.groups) for (const id of g.item_ids) counts.set(id, (counts.get(id) ?? 0) + 1);
         return values.sort((a, b) => {
             const left = resolve(a), right = resolve(b);
+            if (tagKeys) { const difference = compareItemTagKeys(tagKeys.get(left.id), tagKeys.get(right.id)); if (difference) return difference; }
             if (ranks) { const difference = (ranks.get(left.id) ?? Infinity) - (ranks.get(right.id) ?? Infinity); if (difference) return difference; }
             if (pref.sort === "usage") { const difference = (counts.get(right.id) ?? 0) - (counts.get(left.id) ?? 0); if (difference) return difference; }
             return left.name.localeCompare(right.name, "ja") || left.id.localeCompare(right.id);
         });
     }
     const sortControl = onChange => {
-        const control = select([["catalog", "登録順"], ["name", "名前順"], ["usage", "利用数順"]], pref.sort, value => { releaseActive(); pref.sort = value; onChange(); });
+        const control = select([["catalog", "登録順"], ["name", "名前順"], ["tags", "タグ順"], ["usage", "利用数順"]], pref.sort, value => { releaseActive(); pref.sort = value; onChange(); });
         control.setAttribute("aria-label", "アイテムの並び順"); return control;
     };
     const recipe = () => doc().recipes.find(r => r.id === pref.recipeId) ?? doc().recipes[0];
