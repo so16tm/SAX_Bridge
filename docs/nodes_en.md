@@ -1256,6 +1256,27 @@ Samples: `tests/workflows/22_text_catalog_v2.json` checks legacy migration. `23_
 
 ---
 
+### SAX Text Catalog Converter
+
+`SAX_Bridge_Text_Catalog_Converter` converts V1 items into a new or existing shared V2 catalog (`SAX/Bridge/Utility`).
+
+1. Add the converter to the same graph as a V1 node.
+2. Use the V1-source button to select that node and capture its current data.
+3. Select the destination: enter `catalog_name` for a new catalog, or choose an existing saved catalog from the list.
+4. Click the registration/add-V2 button. A V2 node referencing that catalog is added with only the newly imported set enabled. Connect its output where needed.
+
+Appending preserves the destination's items, sets, and catalog name. Imported item/set IDs are regenerated and references remapped, so matching names or IDs never overwrite existing records. Duplicate set names receive a numeric suffix. The append is an atomic revision-checked update; conflicts or limits leave the destination unchanged. Existing catalogs come from the same ComfyUI server's saved catalog list, without arbitrary file paths.
+
+All item names, text, and tags are retained, including unused items. Each V1 relation becomes a separate component, preserving order, duplicates, and enabled states in the V1-selection set. The original V1 node and links stay intact. Unused tag definitions and favorite-tag preferences are excluded. V2 trims each text, omits blank text, and joins the result with newlines.
+
+Registration happens only through the button. Queue execution creates no catalogs; the `catalog_json` STRING output contains importable V2 JSON. Duplicate registration of the loaded data is prevented. Reload the V1 source to register another copy. Invalid references, formats, and limits fail before registration.
+
+Sample: `tests/workflows/24_text_catalog_converter.json`.
+
+[↑ Top](#top)
+
+---
+
 ### SAX Cache
 
 `SAX_Bridge_Cache` — Applies DeepCache to the model in the Pipe with one touch, accelerating all downstream KSampler and Detailer processing.

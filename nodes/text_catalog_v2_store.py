@@ -253,7 +253,10 @@ def register_routes():
                     if len(raw) > 32 * 1024 * 1024:
                         raise ValueError("要求が32 MiBを超えています")
                 payload = json.loads(raw)
-                if action == "create":
+                if action == "convert_v1":
+                    from .text_catalog_converter import register_v1
+                    result = await asyncio.to_thread(register_v1, payload)
+                elif action == "create":
                     result = await asyncio.to_thread(create, payload)
                 else:
                     if not isinstance(payload, dict):
@@ -276,6 +279,10 @@ def register_routes():
     @routes.post(prefix)
     async def catalog_create(request):
         return await handle(request, "create")
+
+    @routes.post(prefix + "/convert-v1")
+    async def catalog_convert_v1(request):
+        return await handle(request, "convert_v1")
 
     @routes.get(prefix + "/{catalog_id}")
     async def catalog_get(request):

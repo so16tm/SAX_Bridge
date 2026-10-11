@@ -137,6 +137,8 @@ SAM3 側の `mask_grow` と本ノードの `grow` は加算的に効くため、
 
 詳細は [ノードリファレンス: SAX Text Catalog](docs/nodes_ja.md#sax-text-catalog) を参照してください。
 
+**SAX Text Catalog Converter** でV1の全アイテムと選択行を、新規または既存のV2共有カタログへ取り込めます。元V1の接続を維持し、新しいV2ノードを追加します。[変換ノードの使い方](docs/nodes_ja.md#sax-text-catalog-converter)。
+
 **SAX Text Catalog V2** は外部カタログを複数のワークフローで共有する独立ノードです。1万件までのアイテムを本文のインライン編集・検索・一括操作・仮想一覧で管理し、複数のテキストセットをノード上で選択・並び替えできます。固定文とSeed付きランダムN件を結合し、実行結果からも本文を修正できます。V1は維持し、旧V2は明示的に移行できます。詳しくは [V2 ノードリファレンス](docs/nodes_ja.md#sax-text-catalog-v2) を参照してください。
 
 [↑ トップへ](#sax_bridge)

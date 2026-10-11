@@ -8,6 +8,7 @@ from .nodes import image_collector as image_collector_node
 from .nodes import primitive_store as primitive_store_node
 from .nodes import text_catalog as text_catalog_node
 from .nodes import text_catalog_v2 as text_catalog_v2_node
+from .nodes import text_catalog_converter as text_catalog_converter_node
 from .nodes import text_catalog_v2_store
 from .nodes import tag_dictionary
 from .nodes import guidance as guidance_node
@@ -86,6 +87,7 @@ for v3_node in [
     primitive_store_node.SAX_Bridge_Primitive_Store,
     text_catalog_node.SAX_Bridge_Text_Catalog,
     text_catalog_v2_node.SAX_Bridge_Text_Catalog_V2,
+    text_catalog_converter_node.SAX_Bridge_Text_Catalog_Converter,
     tag_dictionary.SAX_Bridge_Tag_Dictionary,
     toggle_manager_node.SAX_Bridge_Toggle_Manager,
 ]:

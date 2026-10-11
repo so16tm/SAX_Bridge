@@ -137,6 +137,8 @@ The SAM3 `mask_grow` and this node's `grow` are additive. When fanning out, set 
 
 See [Node Reference: SAX Text Catalog](docs/nodes_en.md#sax-text-catalog) for full details.
 
+**SAX Text Catalog Converter** imports all V1 items and relation rows into a new or existing shared V2 catalog, preserving the original V1 links and adding a new V2 node. See the [converter reference](docs/nodes_en.md#sax-text-catalog-converter).
+
 **SAX Text Catalog V2** shares external catalogs across workflows. Manage up to 10,000 items with inline text editing, search, bulk operations, and virtualized lists; select and reorder multiple text sets directly on the node. Combine fixed text and seeded random-N selections, then edit items from the execution result. V1 remains unchanged, and legacy V2 catalogs can be migrated explicitly. See the [V2 node reference](docs/nodes_en.md#sax-text-catalog-v2).
 
 [↑ Back to top](#sax_bridge)
