@@ -39,6 +39,15 @@ const STYLE = `
 .sax-shared-editor .se-single-mode{font-size:11px;white-space:nowrap}
 .sax-shared-editor .se-item-actions{display:flex;gap:4px}
 .sax-shared-editor .se-item-actions button{flex:1;min-width:0;padding:4px 0;font-size:11px}
+.sax-shared-editor .se-record{gap:8px;padding:4px 6px;font-size:13px}
+.sax-shared-editor .se-cell{line-height:18px;padding:2px 3px}
+.sax-shared-editor .se-record button,.sax-shared-editor .se-record input:not([type=checkbox]){font-size:12px;padding:3px 5px;min-height:24px}
+.sax-shared-editor .se-record textarea{font-size:13px;line-height:1.5}
+.sax-shared-editor .se-item-actions button{padding:3px 0;font-size:11px;line-height:16px;white-space:nowrap}
+.sax-shared-editor .se-tools{gap:4px}
+.sax-shared-editor .se-section{padding:4px 8px;gap:8px;font-size:12px;min-height:32px}
+.sax-shared-editor .se-section button{font-size:11px;padding:3px 6px}
+.sax-shared-editor .se-columns{gap:8px}
 .sax-shared-editor .se-tag-filter{position:relative;min-width:100px;max-width:180px}
 .sax-shared-editor .se-tag-filter>summary{list-style:none;border:1px solid var(--border-color,#45454b);border-radius:6px;background:var(--comfy-input-bg,#242426);padding:4px 8px;font-size:12px;height:28px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sax-shared-editor .se-tag-popup{position:absolute;top:32px;left:0;z-index:20;width:240px;max-width:80vw;padding:8px;background:var(--comfy-input-bg,#242426);border:1px solid var(--border-color,#45454b);border-radius:6px;box-shadow:0 4px 12px #0006;display:flex;flex-direction:column;gap:6px}
@@ -118,6 +127,8 @@ export function openSharedEditor(session, options = {}) {
     let content, status, conflict, errorMessage, close, virtual = null, active = null, unsubscribe, localError = "", saveTimer, refreshing = false;
     let itemMap = new Map(), selected = new Set(), candidateSelection = new Set(), candidateGroup = null, candidateQuery = "", candidateTag = "", resultRecipe = "", outputTab = false, selectionAnchor = null;
     let candidatesOnly = false, candidateAnchor = null, targetParent = "";
+    const dismissTagFilter = event => { for (const control of content?.querySelectorAll(".se-tag-filter[open]") ?? []) if (!control.contains(event.target)) control.open = false; };
+    document.addEventListener("pointerdown", dismissTagFilter, true);
     const collapsedGroups = new Set();
     const setScroll = { candidates: 0, groups: 0 };
     let orderGroup = null, orderScroll = 0;
@@ -211,26 +222,26 @@ export function openSharedEditor(session, options = {}) {
             let ids = null; const r = doc().recipes.find(r => r.id === pref.recipeFilter); if (r) ids = new Set(groupItemIds(r.groups));
             const q = pref.query.trim().toLocaleLowerCase();
             const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && pref.tags.every(tag => i.tags.includes(tag)) && (!q || `${i.name}\n${i.text}\n${i.tags.join(" ")}`.toLocaleLowerCase().includes(q)));
-            return sortItems(values).map(i => ({ key: i.id, itemId: i.id, height: Math.max(76, 28 + pref.lines * 23) }));
+            return sortItems(values).map(i => ({ key: i.id, itemId: i.id, height: Math.max(33, 13 + pref.lines * 18) }));
         }
         const list = []; const q = pref.query.trim().toLocaleLowerCase();
         for (const [ri, r] of (result?.rows ?? []).entries()) {
             if (resultRecipe && r.recipe_id !== resultRecipe) continue;
-            list.push({ key: `r:${ri}`, section: true, title: r.name, subtitle: r.on ? "テキストセット" : "無効・出力なし", height: 52 });
+            list.push({ key: `r:${ri}`, section: true, title: r.name, subtitle: r.on ? "テキストセット" : "無効・出力なし", height: 32 });
             function appendGroups(groups, prefix, depth = 0, reveal = false) {
                 for (const [gi, g] of groups.entries()) {
                     const key = `${prefix}:${g.group_id ?? gi}`;
                     if (g.kind === "nested") {
                         const selected = new Set(g.selected_group_ids ?? []);
-                        list.push({ key, section: true, depth, title: g.name || "ネスト", subtitle: !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・子${g.candidate_group_ids?.length ?? 0}件から${selected.size}件選択` : `子をすべて使用・${selected.size}件`, candidates: g, height: 52 });
+                        list.push({ key, section: true, depth, title: g.name || "ネスト", subtitle: !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・子${g.candidate_group_ids?.length ?? 0}件から${selected.size}件選択` : `子をすべて使用・${selected.size}件`, candidates: g, height: 32 });
                         const expanded = reveal || showCandidates.has(key);
                         appendGroups((g.groups ?? []).filter(child => expanded || selected.has(child.group_id)), key, depth + 1, expanded);
                         continue;
                     }
                     const snapshots = g.items ?? []; const chosen = new Set(g.item_ids ?? snapshots.map(i => i.id));
-                    list.push({ key, section: true, depth, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 52 });
-                    const values = snapshots.map((snapshot, i) => ({ key: `${key}:${i}`, depth, itemId: snapshot.id, snapshot, height: Math.max(90, 28 + pref.lines * 23) }));
-                    if (reveal || showCandidates.has(key)) for (const id of g.candidate_ids ?? []) if (!chosen.has(id)) { const item = itemMap.get(id); if (item) values.push({ key: `${key}:candidate:${id}`, depth, itemId: id, candidate: true, height: 90 }); }
+                    list.push({ key, section: true, depth, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 32 });
+                    const values = snapshots.map((snapshot, i) => ({ key: `${key}:${i}`, depth, itemId: snapshot.id, snapshot, height: Math.max(33, 13 + pref.lines * 18) + 32 }));
+                    if (reveal || showCandidates.has(key)) for (const id of g.candidate_ids ?? []) if (!chosen.has(id)) { const item = itemMap.get(id); if (item) values.push({ key: `${key}:candidate:${id}`, depth, itemId: id, candidate: true, height: Math.max(33, 13 + pref.lines * 18) }); }
                     list.push(...sortItems(values.filter(e => { const i = itemMap.get(e.itemId) ?? e.snapshot; return pref.tags.every(tag => i?.tags?.includes(tag)) && (!q || `${i?.name ?? ""}\n${i?.text ?? ""}`.toLocaleLowerCase().includes(q)); }), e => itemMap.get(e.itemId) ?? e.snapshot));
                 }
             }
@@ -422,7 +433,7 @@ export function openSharedEditor(session, options = {}) {
             const included = new Set(ids);
             for (const item of doc().catalog.items) if (candidateSelection.has(item.id) && !included.has(item.id)) ids.push(item.id);
             if (candidateGroup) { const g = [...walkGroups(next.groups)].find(g => g.id === candidateGroup); if (g) { Object.assign(g, { item_ids: ids, mode: chosenMode, count: chosenCount }); if (locateGroup(next.groups,g.id).parentId !== targetParent && !relocate(next, g.id, targetParent)) return; } }
-            else groupChildren(next, targetParent).push({ id: newId(), name: "構成要素", on: true, mode: chosenMode, count: chosenCount, item_ids: ids });
+            else groupChildren(next, targetParent).push({ id: newId(), name: itemMap.get(ids[0])?.name || "構成要素", on: true, mode: chosenMode, count: chosenCount, item_ids: ids });
             if (putRecipe(next)) { candidateSelection.clear(); candidateGroup = null; candidatesOnly = false; candidateAnchor = null; render(); }
         }, "se-primary"), ...(candidateGroup ? [btn("キャンセル", () => { candidateGroup = null; candidateSelection.clear(); candidatesOnly = false; render(); })] : [])));
         right.append(row(el("strong", "se-grow", `構成要素 ${[...walkGroups(r.groups)].length}件（上から出力）`), btn("＋ ネスト", () => { const next = structuredClone(recipe()); const g = {id:newId(),name:"ネスト",kind:"nested",mode:"all",count:1,on:true,groups:[]}; groupChildren(next,targetParent).push(g); if (putRecipe(next)) render(); }))); const groups = el("div", "se-scroll se-group-scroll"); right.append(groups);
@@ -530,6 +541,7 @@ export function openSharedEditor(session, options = {}) {
     }
     const switchMode = next => { releaseActive(); pref.scroll = 0; pref.query = ""; pref.tags = []; mode = next; render(); };
     close = showDialog({ title: `SAX Text Catalog V2 — ${doc().name}`, width: 1200, maxHeight: "97vh", className: "sax-shared-editor", onClose() {
+        document.removeEventListener("pointerdown", dismissTagFilter, true);
         for (const list of orderLists.splice(0)) list.destroy();
         releaseActive(); clearTimeout(saveTimer); unsubscribe?.(); virtual?.destroy(); for (const t of content?.querySelectorAll("textarea") ?? []) detachAutoComplete(t); openEditors.delete(session); void session.flush().catch(() => {});
     }, build(dlg, end) {

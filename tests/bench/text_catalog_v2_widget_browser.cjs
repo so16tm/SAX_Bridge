@@ -51,10 +51,23 @@ const server = http.createServer((req, res) => {
         await page.locator('.sax-shared-catalog').getByRole('button', { name: 'アイテム', exact: true }).click();
         await page.locator('.se-record').first().waitFor();
         assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'name');
+        // 短い本文は3行表示でも余白を作らず、編集時だけ行が広がる。
+        const compactHeight = await page.locator('.se-record').first().evaluate(n=>n.getBoundingClientRect().height);
+        assert.ok(compactHeight <= 36, `短文の行高: ${compactHeight}`);
+        await page.locator('.se-record').first().getByRole('button',{name:'本文を編集',exact:true}).click();
+        assert.ok(await page.locator('.se-record[data-editing=true]').evaluate(n=>n.getBoundingClientRect().height) >= 200);
+        await page.getByPlaceholder('名前・本文を検索').focus();
+        await page.waitForFunction(()=>!document.querySelector('.se-record[data-editing=true]'));
         const itemOrder = () => page.locator('.se-record').evaluateAll(rows => rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.key));
         // 登録順と名前順が異なるデータで、全画面が同じ比較規則を使うことを確認する。
         const nameOrder = docs[0].catalog.items.slice().sort((a,b)=>a.name.localeCompare(b.name,'ja')).map(i=>i.id);
         assert.deepEqual(await itemOrder(), nameOrder);
+        await page.locator('.se-tag-filter summary').click();
+        await page.getByPlaceholder('名前・本文を検索').click();
+        assert.equal(await page.locator('.se-tag-filter').evaluate(n=>n.open),false);
+        await page.locator('.se-tag-filter summary').click();
+        await page.locator('.se-columns>span').last().click();
+        assert.equal(await page.locator('.se-tag-filter').evaluate(n=>n.open),false);
         await page.locator('.se-tag-filter summary').click();
         await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).check();
         assert.equal(await page.locator('.se-record').count(),2);

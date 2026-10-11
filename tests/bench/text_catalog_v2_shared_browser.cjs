@@ -61,6 +61,7 @@ const server=http.createServer(async(req,res)=>{
  await page.getByRole('button',{name:'一覧を全選択',exact:true}).click();assert.equal(await page.locator('.se-selectionbar strong').textContent(),'111件選択');
  await page.getByPlaceholder('名前・本文・タグを検索').fill('アイテム0');assert.equal(await page.locator('.se-selectionbar strong').textContent(),'111件選択');
  await page.getByRole('button',{name:'選んだアイテムを追加',exact:true}).click();assert.equal(await page.locator('.se-card').count(),3);
+ assert.equal(await page.evaluate(()=>{const d=shared().session.document,g=d.recipes[0].groups.at(-1);return g.name===d.catalog.items.find(i=>i.id===g.item_ids[0]).name;}),true);
  assert.equal(await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids.length),111);
  const addedIds=await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids.slice());
  await page.locator('.se-card').last().getByRole('button',{name:'出力順',exact:true}).click();
