@@ -18,6 +18,7 @@ const server=http.createServer(async(req,res)=>{
   if(req.url==='/favicon.ico'){res.statusCode=204;res.end();return}
   if(req.url==='/scripts/app.js'){res.setHeader('Content-Type','text/javascript');res.end(appScript);return}
   if(req.url==='/scripts/api.js'){res.setHeader('Content-Type','text/javascript');res.end(`export const api={fetchApi:(url,opts)=>fetch(url,opts),getLoras:async()=>[],addEventListener(){}}`);return}
+  if(req.url==='/autocomplete-plus-plus/wildcards/all-data'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({success:true,wildcards:{'people/traveler':['traveler'],'style/watercolor':['watercolor']}}));return}
   if(req.url.startsWith('/sax/text-catalog/v2/catalogs')){
    res.setHeader('Content-Type','application/json');const send=(v,status=200)=>{res.statusCode=status;res.end(JSON.stringify(v))};
    if(req.method==='GET'){send(req.url.endsWith('catalogs')?{catalogs:[{id:doc.id,name:doc.name,revision:doc.revision}]}:doc);return}
@@ -32,9 +33,20 @@ const server=http.createServer(async(req,res)=>{
  browser=await chromium.launch({headless:true,channel:'msedge'});const page=await browser.newPage({viewport:{width:1280,height:950}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  page.setDefaultTimeout(10000);await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready&&window.shared()?.session);await page.evaluate(()=>draw());
  console.log('ready');await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.waitForSelector('.se-record');assert.ok(await page.locator('.se-record').count()<40);
+ const compact=await page.locator('.sax-shared-editor').evaluate(e=>({height:e.querySelector('.se-scroll').clientHeight,header:e.querySelector('.se-header').clientHeight}));assert.ok(compact.height>740,JSON.stringify(compact));assert.ok(compact.header<=32,JSON.stringify(compact));assert.equal(await page.getByPlaceholder('一括操作するタグ').isVisible(),false);
  console.log('list visible');await page.locator('.se-record').first().getByRole('button',{name:'本文を編集',exact:true}).click();console.log('edit opened');const edit=page.getByRole('textbox',{name:'アイテム本文',exact:true});await edit.fill('更新された本文');console.log('filled');await page.evaluate(()=>{window.firstQueue=app.queuePrompt()});console.log('queue started');await page.waitForFunction(()=>shared().session.status==='saved'||shared().session.error);const saveError=await page.evaluate(()=>shared().session.error?.message);if(saveError)throw new Error(saveError);console.log('saved');await page.evaluate(()=>window.firstQueue);assert.equal(doc.catalog.items[0].text,'更新された本文');assert.ok(calls.at(-1).bytes<400);
  await page.evaluate(()=>{const s=document.querySelector('.se-scroll');s.scrollTop=s.scrollHeight;s.dispatchEvent(new Event('scroll'))});assert.ok(await page.locator('.se-record').count()<40);assert.equal(await edit.inputValue(),'更新された本文');await page.getByRole('button',{name:'閉じる',exact:true}).click();
- console.log('inline passed'); // 行のアイテム編集は候補全件で絞り込まれる。
+ // 一覧で選択範囲へ挿入。ファイル検索中も編集中の行とカーソルを保持する。
+ await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.locator('.se-record').first().getByRole('button',{name:'本文を編集',exact:true}).click();
+ const wcArea=page.getByRole('textbox',{name:'アイテム本文',exact:true});await wcArea.fill('alpha SELECT omega');await wcArea.evaluate(e=>e.setSelectionRange(6,12));
+ await page.getByRole('button',{name:'＋ ワイルドカード',exact:true}).click();await page.getByPlaceholder('ファイル名・フォルダー名を検索…').fill('people/traveler');await page.waitForFunction(()=>[...document.querySelectorAll('.__sax_text_catalog_v2_wc_picker button')].filter(e=>e.textContent==='Select').length===1);await page.getByRole('button',{name:'Select',exact:true}).click();
+ assert.equal(await wcArea.inputValue(),'alpha __people/traveler__ omega');assert.equal(await wcArea.evaluate(e=>document.activeElement===e),true);await page.evaluate(()=>app.queuePrompt());assert.equal(doc.catalog.items[0].text,'alpha __people/traveler__ omega');
+ await page.getByRole('button',{name:'＋ ワイルドカード',exact:true}).click();await page.getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(await wcArea.inputValue(),'alpha __people/traveler__ omega');await wcArea.evaluate(e=>e.blur());
+ // 全選択と選択解除に応じて一括操作を表示・収納する。
+ await page.getByRole('checkbox',{name:'表示中のアイテムを全選択',exact:true}).check();assert.equal(await page.getByPlaceholder('一括操作するタグ').isVisible(),true);await page.getByRole('button',{name:'選択解除',exact:true}).click();assert.equal(await page.getByPlaceholder('一括操作するタグ').isVisible(),false);
+ // 拡大編集でも同じ検索ピッカーを使う。
+ await page.locator('.se-record').first().getByRole('button',{name:'拡大',exact:true}).click();const large=page.getByRole('textbox',{name:'アイテム本文（拡大）',exact:true});await large.fill('');await page.getByRole('button',{name:'＋ ワイルドカード',exact:true}).click();await page.getByPlaceholder('ファイル名・フォルダー名を検索…').fill('style/watercolor');await page.waitForFunction(()=>[...document.querySelectorAll('.__sax_text_catalog_v2_wc_picker button')].filter(e=>e.textContent==='Select').length===1);await page.getByRole('button',{name:'Select',exact:true}).click();assert.equal(await large.inputValue(),'__style/watercolor__');await page.getByRole('button',{name:'閉じる',exact:true}).last().click();await page.getByRole('button',{name:'閉じる',exact:true}).click();
+ console.log('inline/wildcard/compact header passed'); // 行のアイテム編集は候補全件で絞り込まれる。
  await page.evaluate(()=>{const w=node.widgets.find(w=>w.name==='__sax_shared_sets');w.mouse({type:'pointerdown'},[170,48])});await page.waitForSelector('.se-record');assert.equal(await page.locator('.se-record').count(),5);
  await page.getByRole('button',{name:'閉じる',exact:true}).click();
  console.log('filter passed'); // セット編集と本文編集は分離されている。

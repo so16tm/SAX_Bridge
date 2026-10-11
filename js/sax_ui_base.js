@@ -2761,6 +2761,7 @@ export function buildPickerContent({
  * @param {"single"|"multi"} [opts.mode="single"] - 選択モード
  * @param {string}  [opts.className]      - ダイアログの CSS クラス
  * @param {Function} [opts.onSelect]      - single モード: (name) => void
+ * @param {Function} [opts.onClose]       - 選択・キャンセル・外側クリックで閉じた時に呼ぶ
  * @param {Set}     [opts.selection]      - multi モード: 初期選択セット
  * @param {Function} [opts.onConfirm]     - multi モード: (names: string[]) => void
  * @param {Function} [opts.displayName]   - 表示名変換関数（デフォルト: 拡張子除去 + パス除去）
@@ -2917,11 +2918,11 @@ export function showFilePicker(opts) {
     // -- ダイアログ表示 --
 
     let pickerCleanup = null;
-    showDialog({
+    return showDialog({
         title,
         width:     480,
         className,
-        onClose:   () => { pickerCleanup?.(); },
+        onClose:   () => { pickerCleanup?.(); opts.onClose?.(); },
         build(dlg, close) {
             const closeFn = () => { pickerCleanup?.(); close(); };
 

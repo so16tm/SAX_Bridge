@@ -1,6 +1,7 @@
 import { showDialog, showConfirmDialog } from "./sax_ui_base.js";
 import { newId, parseTags } from "./sax_text_catalog_v2_model.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
+import { openWildcardPicker } from "./sax_text_catalog_v2_wildcards.js";
 
 const preferences = new WeakMap();
 const openEditors = new WeakMap();
@@ -10,6 +11,9 @@ const STYLE = `
 .sax-shared-editor .se-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sax-shared-editor .se-grow{flex:1;min-width:110px}.sax-shared-editor .se-muted{opacity:.68;font-size:12px}.sax-shared-editor .se-error{color:var(--error-text,#ed9494);white-space:pre-wrap}.sax-shared-editor .se-status{min-height:18px}.sax-shared-editor .se-scroll{flex:1;min-height:0;overflow:auto;position:relative;scrollbar-gutter:stable;overflow-anchor:none}.sax-shared-editor .se-canvas{position:relative}.sax-shared-editor .se-record{position:absolute;left:0;right:0;display:grid;grid-template-columns:24px minmax(130px,.8fr) minmax(260px,3fr) minmax(120px,.7fr) 72px;gap:12px;padding:10px 6px;border-bottom:1px solid var(--border-color,#45454b);align-items:start}.sax-shared-editor .se-cell{border:0;background:transparent;text-align:left;cursor:text;line-height:1.7;padding:3px;white-space:pre-wrap;overflow-wrap:anywhere;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:var(--se-lines,3)}.sax-shared-editor .se-cell:hover{background:color-mix(in srgb,var(--primary-background,#5686d6) 12%,transparent);border-radius:5px}.sax-shared-editor .se-cell:empty:before{content:attr(data-placeholder);opacity:.45}.sax-shared-editor .se-record input:not([type=checkbox]){width:100%}.sax-shared-editor .se-record textarea{resize:none;min-height:200px}.sax-shared-editor .se-record[data-editing=true]{background:color-mix(in srgb,var(--primary-background,#5686d6) 8%,transparent)}.sax-shared-editor .se-tools{display:flex;flex-direction:column;gap:6px}.sax-shared-editor .se-section{position:absolute;left:0;right:0;padding:12px 8px;background:var(--comfy-input-bg,#242426);border-radius:6px;display:flex;align-items:center;gap:12px;overflow:hidden}.sax-shared-editor .se-section strong{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sax-shared-editor .se-empty{padding:24px;opacity:.7}.sax-shared-editor .se-columns{display:grid;grid-template-columns:24px minmax(130px,.8fr) minmax(260px,3fr) minmax(120px,.7fr) 72px;gap:12px;padding:0 6px;font-size:12px;opacity:.65}.sax-shared-editor .se-layout{display:grid;grid-template-columns:minmax(240px,1fr) minmax(320px,1.4fr);gap:16px;flex:1;min-height:0}.sax-shared-editor .se-pane{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}.sax-shared-editor .se-card{padding:12px;border:1px solid var(--border-color,#45454b);border-radius:8px;margin-bottom:10px}.sax-shared-editor .se-card[data-off=true]{opacity:.55}.sax-shared-editor .se-card>.se-row{margin-bottom:8px}.sax-shared-editor .se-candidate{position:absolute;left:0;right:0;height:40px;display:flex;align-items:center;gap:10px;padding:6px;border-bottom:1px solid var(--border-color,#45454b)}.sax-shared-editor .se-candidate span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sax-shared-editor .se-primary{background:var(--primary-background,#386cb8);color:#fff}.sax-shared-editor .se-result-text{flex:1;min-height:0;resize:none!important}.sax-shared-editor .se-badge{font-size:11px;color:var(--primary-background,#80adf2);display:block}.sax-shared-editor .se-conflict{padding:8px;border:1px solid var(--error-text,#ed9494);border-radius:6px}.sax-shared-editor details>summary{cursor:pointer}
 @media(max-width:760px){.sax-shared-editor>div{padding:10px!important}.sax-shared-editor .se-layout{grid-template-columns:1fr;grid-template-rows:minmax(180px,.7fr) minmax(220px,1fr)}.sax-shared-editor .se-record,.sax-shared-editor .se-columns{grid-template-columns:20px minmax(75px,.7fr) minmax(140px,2fr) 65px;gap:6px}.sax-shared-editor .se-tags{display:none}.sax-shared-editor .se-row{gap:5px}.sax-shared-editor .se-row button{padding:6px}.sax-shared-editor .se-section .se-muted{display:none}}
 @media(max-width:760px){.sax-shared-editor .se-mobile-tags{display:block}}
+.sax-shared-editor>div{padding:10px!important;gap:6px!important}.sax-shared-editor .se-header{flex-wrap:nowrap;gap:5px;min-width:0}.sax-shared-editor .se-header strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-size:12px}.sax-shared-editor .se-header button,.sax-shared-editor .se-filterbar button,.sax-shared-editor .se-filterbar input,.sax-shared-editor .se-filterbar select{padding:3px 7px;height:28px;font-size:12px}.sax-shared-editor .se-header .se-status{flex:none;max-width:180px;min-height:0;gap:4px;font-size:11px}.sax-shared-editor .se-status>span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}.sax-shared-editor .se-list-view{gap:5px}.sax-shared-editor .se-filterbar{gap:5px}.sax-shared-editor .se-filterbar select{max-width:180px}.sax-shared-editor .se-filterbar .se-grow{min-width:140px}.sax-shared-editor .se-wildcard{font-size:11px;padding:3px 6px;margin-top:5px}.sax-shared-editor .se-columns{line-height:18px}.sax-shared-editor .se-error-message{font-size:12px;white-space:pre-wrap}
+@media(max-width:760px){.sax-shared-editor .se-header{flex-wrap:wrap}.sax-shared-editor .se-header strong{flex-basis:100%}.sax-shared-editor .se-header .se-status{margin-left:auto;max-width:130px}.sax-shared-editor .se-filterbar select{flex:1;max-width:none;min-width:80px}.sax-shared-editor .se-filterbar .se-grow{flex-basis:100%}}
+.sax-shared-expanded>div{width:min(1000px,96vw)!important}.sax-shared-expanded textarea{width:100%;font:13px/1.7 sans-serif;background:var(--comfy-input-bg,#242426);color:var(--input-text,#ddd);border:1px solid var(--border-color,#45454b);border-radius:6px;padding:8px}.sax-shared-expanded button{font:inherit;padding:4px 8px;background:var(--comfy-input-bg,#242426);color:var(--input-text,#ddd);border:1px solid var(--border-color,#45454b);border-radius:6px;cursor:pointer}.sax-shared-expanded .se-row{display:flex;gap:8px;align-items:center}.sax-shared-expanded .se-grow{flex:1}
 `;
 
 function el(tag, cls = "", text = "") { const n = document.createElement(tag); n.className = cls; n.textContent = text; return n; }
@@ -64,7 +68,7 @@ export function openSharedEditor(session, options = {}) {
     let pref = preferences.get(session); if (!pref) { pref = { query: "", tag: "", recipeFilter: "", lines: 3, scroll: 0, recipeId: null, sort: "catalog" }; preferences.set(session, pref); }
     let mode = options.mode ?? "items", result = options.result ?? null;
     if (options.recipeId) { if (mode === "items") { pref.recipeFilter = options.recipeId; pref.query = ""; pref.tag = ""; pref.scroll = 0; } else pref.recipeId = options.recipeId; }
-    let content, status, conflict, close, virtual = null, active = null, unsubscribe, localError = "", saveTimer, refreshing = false;
+    let content, status, conflict, errorMessage, close, virtual = null, active = null, unsubscribe, localError = "", saveTimer, refreshing = false;
     let itemMap = new Map(), selected = new Set(), candidateSelection = new Set(), candidateGroup = null, candidateQuery = "", candidateTag = "", resultRecipe = "", outputTab = false, selectionAnchor = null;
     const showCandidates = new Set();
     const doc = () => session.document;
@@ -78,7 +82,7 @@ export function openSharedEditor(session, options = {}) {
         mutate([{ type: "item.put", item: { ...current, ...patch } }], historyKey);
     };
     const putRecipe = next => mutate([{ type: "recipe.put", recipe: next }]);
-    function updateStatus() { if (!status) return; const messages = { saved: "共有カタログへ保存済み", pending: "変更を保存中…", saving: "変更を保存中…", error: "保存に失敗しました", conflict: "他の編集と競合しています" }; status.firstChild.textContent = localError || session.error?.message || messages[session.status] || session.status || "保存済み"; status.classList.toggle("se-error", Boolean(localError || session.error) || session.conflict); conflict.hidden = !session.conflict; status.lastChild.hidden = !session.error || session.conflict; }
+    function updateStatus() { if (!status) return; const messages = { saved: "保存済み", pending: "保存中…", saving: "保存中…", error: "保存に失敗", conflict: "編集が競合" }; const message = localError || session.error?.message || ""; status.firstChild.textContent = message ? "エラー" : messages[session.status] || session.status || "保存済み"; status.title = message || "共有カタログへ自動保存"; status.classList.toggle("se-error", Boolean(message) || session.conflict); conflict.hidden = !session.conflict; status.lastChild.hidden = !session.error || session.conflict; errorMessage.textContent = message; errorMessage.hidden = !message || session.conflict; }
     async function safeAsync(fn) { try { await fn(); localError = ""; } catch (error) { localError = error.message; } updateStatus(); }
     function dispose(n) { for (const t of n.querySelectorAll("textarea")) detachAutoComplete(t); }
     function releaseActive() { if (!active) return; active.commit?.(); active = null; if (virtual) virtual.pinned = null; }
@@ -89,6 +93,25 @@ export function openSharedEditor(session, options = {}) {
         else if (mode === "sets" && !content.contains(document.activeElement)) render();
     }
     function scheduleRefresh() { clearTimeout(saveTimer); saveTimer = setTimeout(refresh, 80); }
+    function wildcardButton(area, { commit, current, inline = false } = {}) {
+        const control = btn("＋ ワイルドカード", async () => {
+            const target = inline ? active : null;
+            if (inline && target?.edit !== area) return;
+            if (target) target.picker = true;
+            await openWildcardPicker(area, {
+                isCurrent: () => area.isConnected && (!inline || active === target) && current(),
+                onInsert: () => { commit(); updateStatus(); },
+                onError: message => { localError = message; updateStatus(); },
+                onClose: () => { if (target) target.picker = false; if (area.isConnected && (!inline || active === target)) area.focus({ preventScroll: true }); },
+            });
+        }, "se-wildcard");
+        control.title = "ワイルドカードファイルを検索してカーソル位置へ挿入";
+        control.addEventListener("pointerdown", event => event.preventDefault());
+        if (inline) control.addEventListener("blur", event => {
+            if (active?.edit === area && !active.picker && event.relatedTarget !== area) { releaseActive(); refresh(); }
+        });
+        return control;
+    }
     function entries() {
         if (mode === "items") {
             let ids = null; const r = doc().recipes.find(r => r.id === pref.recipeFilter); if (r) ids = new Set(r.groups.flatMap(g => g.item_ids));
@@ -116,9 +139,9 @@ export function openSharedEditor(session, options = {}) {
     function expandedEditor(id) {
         const item = itemMap.get(id); if (!item) return;
         let area;
-        showDialog({ title: `${item.name || "アイテム"} — 本文編集`, width: 1000, maxHeight: "90vh", build(dlg, end) {
+        showDialog({ title: `${item.name || "アイテム"} — 本文編集`, className: "sax-shared-expanded", width: 1000, maxHeight: "90vh", build(dlg, end) {
             area = el("textarea"); area.style.height = "65vh"; area.value = item.text; area.setAttribute("aria-label", "アイテム本文（拡大）"); const historyKey = newId(); let composing = false; area.addEventListener("compositionstart", () => { composing = true; }); area.addEventListener("input", () => { if (!composing) putItem(id, { text: area.value }, historyKey); }); area.addEventListener("compositionend", () => { composing = false; putItem(id, { text: area.value }, historyKey); }); attachAutoComplete(area);
-            dlg.append(el("p", "se-muted", "共有カタログの元アイテムへ自動保存されます"), area, btn("閉じる", end)); queueMicrotask(() => area.focus());
+            dlg.append(row(el("span", "se-muted se-grow", "共有カタログへ自動保存"), wildcardButton(area, { commit: () => putItem(id, { text: area.value }, historyKey), current: () => doc().catalog.items.some(i => i.id === id) })), area, btn("閉じる", end)); queueMicrotask(() => area.focus());
         }, onClose() { detachAutoComplete(area); refresh(); } });
     }
     function itemRow(entry) {
@@ -141,8 +164,15 @@ export function openSharedEditor(session, options = {}) {
                 const historyKey = newId(); const commit = () => { let next = edit.value; try { if (field === "tags") next = parseTags(next); putItem(entry.itemId, { [field]: next }, historyKey); } catch (error) { localError = error.message; updateStatus(); } };
                 let composing = false; edit.addEventListener("compositionstart", () => { composing = true; }); edit.addEventListener("compositionend", () => { composing = false; commit(); }); edit.addEventListener("input", () => { if (!composing) commit(); });
                 edit.addEventListener("keydown", e => { if (e.defaultPrevented) return; if ((e.key === "Enter" && field !== "text") || (e.key === "Escape" && !composing)) { e.preventDefault(); edit.blur(); } });
-                edit.addEventListener("blur", () => { if (active?.edit !== edit) return; commit(); active = null; virtual.pinned = null; refresh(); });
-                c.replaceWith(edit); active = { edit, commit }; if (field === "text") attachAutoComplete(edit); edit.focus(); edit.setSelectionRange?.(edit.value.length, edit.value.length);
+                let pickerButton;
+                edit.addEventListener("blur", event => { if (active?.edit !== edit || active.picker || event.relatedTarget === pickerButton) return; commit(); active = null; virtual.pinned = null; refresh(); });
+                c.replaceWith(edit); active = { edit, commit, picker: false };
+                if (field === "text") {
+                    attachAutoComplete(edit);
+                    pickerButton = wildcardButton(edit, { commit, inline: true, current: () => doc().catalog.items.some(i => i.id === entry.itemId) });
+                    edit.after(pickerButton);
+                }
+                edit.focus(); edit.setSelectionRange?.(edit.value.length, edit.value.length);
             }
             return c;
         }
@@ -152,8 +182,11 @@ export function openSharedEditor(session, options = {}) {
         n.append(textWrap, cell("tags", shown?.tags?.join(", ") ?? "", "se-tags"));
         const tools = el("div", "se-tools"); if (current) { tools.append(btn("拡大", () => { releaseActive(); expandedEditor(entry.itemId); })); const tags = btn("タグ", () => { const value = input(current.tags.join(", "), () => {}); value.setAttribute("aria-label", "アイテムタグ"); showDialog({ title: "タグを編集", build(dlg, end) { dlg.append(value, btn("反映", () => { try { putItem(entry.itemId, { tags: parseTags(value.value) }); end(); } catch (error) { localError = error.message; updateStatus(); } })); } }); }); tags.classList.add("se-mobile-tags"); tools.append(tags); } n.append(tools); return n;
     }
-    let bulkBar;
-    function updateBulk() { if (bulkBar) bulkBar.firstChild.textContent = `${selected.size}件選択`; }
+    let bulkBar, selectAllControl;
+    function updateBulk() {
+        if (bulkBar) { bulkBar.firstChild.textContent = `${selected.size}件選択`; bulkBar.hidden = !selected.size; }
+        if (selectAllControl && virtual) { const ids = virtual.entries.map(e => e.itemId); const count = ids.filter(id => selected.has(id)).length; selectAllControl.checked = Boolean(ids.length) && count === ids.length; selectAllControl.indeterminate = count > 0 && count < ids.length; }
+    }
     function filters() {
         const q = input(pref.query, value => { pref.query = value; releaseActive(); scheduleRefresh(); }); q.placeholder = "名前・本文を検索"; q.className = "se-grow";
         const tags = [...new Set(doc().catalog.items.flatMap(i => i.tags))].sort(); const tag = select([["", "タグ：すべて"], ...tags.map(t => [t, t])], pref.tag, value => { pref.tag = value; releaseActive(); refresh(); });
@@ -161,15 +194,17 @@ export function openSharedEditor(session, options = {}) {
         const set = select(sets, mode === "results" ? resultRecipe : pref.recipeFilter, value => { releaseActive(); if (mode === "results") resultRecipe = value; else pref.recipeFilter = value; refresh(); });
         const lines = select([["1", "本文1行"], ["3", "本文3行"], ["6", "本文6行"]], String(pref.lines), value => { releaseActive(); pref.lines = Number(value); virtual.heights.clear(); refresh(); });
         const sort = select([["catalog", "登録順"], ["name", "名前順"], ["usage", "利用数順"]], pref.sort, value => { releaseActive(); pref.sort = value; refresh(); });
-        return row(q, tag, set, lines, ...(mode === "items" ? [sort] : []));
+        const bar = row(q, tag, set, lines, ...(mode === "items" ? [sort] : [])); bar.classList.add("se-filterbar"); return bar;
     }
     function renderList() {
-        content.append(filters());
+        const filterBar = filters(); content.append(filterBar);
         if (mode === "items") {
             const newItem = btn("＋ アイテム", () => { const item = { id: newId(), name: "新しいアイテム", text: "", tags: [] }; if (mutate([{ type: "item.put", item }])) { pref.query = ""; pref.tag = ""; pref.recipeFilter = ""; render(); const index = virtual.entries.findIndex(e => e.itemId === item.id); virtual.scroll.scrollTop = virtual.index.offsets[index]; virtual.paint(); virtual.nodes.get(item.id)?.querySelector('[aria-label="名前を編集"]')?.click(); } });
             const tagEdit = input("", () => {}); tagEdit.placeholder = "一括操作するタグ";
-            bulkBar = row(el("span", "se-muted", `${selected.size}件選択`), btn("表示中を選択", () => { selected = new Set(entries().map(e => e.itemId)); virtual.set(entries(), true); updateBulk(); }), btn("選択解除", () => { selected.clear(); virtual.set(entries(), true); updateBulk(); }), tagEdit,
-                btn("タグ追加", () => bulkTags(tagEdit.value, true)), btn("タグ削除", () => bulkTags(tagEdit.value, false)), btn("削除", async () => { if (!selected.size) return; if (await showConfirmDialog({ title: "アイテムを削除", message: `${selected.size}件を削除します。すべてのセットの候補からも除かれます。`, danger: true, okLabel: "削除" })) { mutate([...selected].map(id => ({ type: "item.delete", id }))); selected.clear(); refresh(); updateBulk(); } }), newItem);
+            filterBar.append(newItem);
+            bulkBar = row(el("span", "se-muted", `${selected.size}件選択`), btn("選択解除", () => { selected.clear(); virtual.set(entries(), true); updateBulk(); }), tagEdit,
+                btn("タグ追加", () => bulkTags(tagEdit.value, true)), btn("タグ削除", () => bulkTags(tagEdit.value, false)), btn("削除", async () => { if (!selected.size) return; if (await showConfirmDialog({ title: "アイテムを削除", message: `${selected.size}件を削除します。すべてのセットの候補からも除かれます。`, danger: true, okLabel: "削除" })) { mutate([...selected].map(id => ({ type: "item.delete", id }))); selected.clear(); refresh(); updateBulk(); } }));
+            bulkBar.hidden = !selected.size;
             content.append(bulkBar);
         } else {
             const meta = el("div", "se-muted", result ? `カタログ改訂 ${result.revision ?? result.catalog_revision ?? "—"} · Seed ${result.seed ?? "—"} · 本文の修正は次回実行に反映` : "まだ実行結果がありません。ワークフローを実行してください。");
@@ -177,8 +212,11 @@ export function openSharedEditor(session, options = {}) {
             if (outputTab) { const text = el("textarea", "se-result-text"); text.readOnly = true; text.value = result?.text ?? ""; content.append(text, btn("コピー", async () => { try { await navigator.clipboard.writeText(text.value); } catch { text.focus(); text.select(); localError = "選択したテキストをCtrl+Cでコピーしてください"; updateStatus(); } })); return; }
         }
         const columns = el("div", "se-columns"); for (const [name, cls] of [["", ""], ["名前", ""], ["本文（クリックして編集）", ""], ["タグ", "se-tags"], ["", ""]]) columns.append(el("span", cls, name)); content.append(columns);
+        selectAllControl = null;
+        if (mode === "items") { selectAllControl = check(false, yes => { selected = yes ? new Set(entries().map(e => e.itemId)) : new Set(); virtual.set(entries(), true); updateBulk(); }); selectAllControl.setAttribute("aria-label", "表示中のアイテムを全選択"); columns.firstChild.replaceWith(selectAllControl); }
         const scroll = el("div", "se-scroll"); content.append(scroll); virtual = new VirtualRows(scroll, itemRow, dispose); virtual.set(entries()); scroll.scrollTop = pref.scroll; scroll.addEventListener("scroll", () => { pref.scroll = scroll.scrollTop; }); virtual.paint();
         if (!virtual.entries.length) virtual.canvas.append(el("div", "se-empty", mode === "items" ? "該当するアイテムがありません。検索・絞り込みを変更するか、アイテムを追加してください。" : "表示する実行結果がありません。"));
+        updateBulk();
     }
     function bulkTags(value, add) { try { const tags = parseTags(value); mutate([...selected].map(id => itemMap.get(id)).filter(Boolean).map(item => ({ type: "item.put", item: { ...item, tags: add ? [...new Set([...item.tags, ...tags])] : item.tags.filter(t => !tags.includes(t)) } }))); } catch (error) { localError = error.message; updateStatus(); } }
     function editGroup(groupId, change) { const r = recipe(); if (!r) return; const next = structuredClone(r); const g = next.groups.find(g => g.id === groupId); if (!g) return; change(g, next); putRecipe(next); }
@@ -224,17 +262,22 @@ export function openSharedEditor(session, options = {}) {
     }
     function moveGroup(id, offset) { const next = structuredClone(recipe()); const from = next.groups.findIndex(g => g.id === id), to = from + offset; if (to < 0 || to >= next.groups.length) return; [next.groups[from], next.groups[to]] = [next.groups[to], next.groups[from]]; putRecipe(next); render(); }
     function render() {
-        refreshing = true; releaseActive(); virtual?.destroy(); virtual = null; content.replaceChildren(); itemMap = new Map(doc().catalog.items.map(i => [i.id, i]));
+        refreshing = true; releaseActive(); virtual?.destroy(); virtual = null; bulkBar = null; selectAllControl = null; content.replaceChildren(); itemMap = new Map(doc().catalog.items.map(i => [i.id, i]));
+        content.classList.toggle("se-list-view", mode !== "sets");
         if (mode === "sets") renderSets(); else renderList(); updateStatus(); refreshing = false;
     }
     const switchMode = next => { releaseActive(); pref.scroll = 0; pref.query = ""; pref.tag = ""; mode = next; render(); };
     close = showDialog({ title: `SAX Text Catalog V2 — ${doc().name}`, width: 1200, maxHeight: "97vh", className: "sax-shared-editor", onClose() {
         releaseActive(); clearTimeout(saveTimer); unsubscribe?.(); virtual?.destroy(); for (const t of content?.querySelectorAll("textarea") ?? []) detachAutoComplete(t); openEditors.delete(session); void session.flush().catch(() => {});
     }, build(dlg, end) {
+        dlg.children[0].style.display = "none";
         const style = el("style"); style.textContent = STYLE; dlg.append(style);
-        dlg.append(row(btn("アイテム", () => switchMode("items")), btn("テキストセット", () => switchMode("sets")), ...(result ? [btn("前回の実行結果", () => switchMode("results"))] : []), el("span", "se-grow"), btn("元に戻す", () => { releaseActive(); session.undo(); render(); }), btn("やり直す", () => { releaseActive(); session.redo(); render(); }), btn("閉じる", end)));
-        status = row(el("span", "se-grow"), btn("保存を再試行", () => safeAsync(() => session.retry()))); status.classList.add("se-status", "se-muted"); conflict = row(el("span", "", "他の編集と競合しています。編集内容を保持しています。"), btn("最新を読み込み", async () => { if (await showConfirmDialog({ title: "最新データを読み込み", message: "この画面の未保存の編集を取り消し、保存済みの最新データを読み込みます。", okLabel: "読み込み" })) await safeAsync(() => session.reload()); render(); }), btn("最新に編集を再適用", () => safeAsync(() => session.reapply()))); conflict.classList.add("se-conflict"); conflict.hidden = true;
-        dlg.append(status, conflict); content = el("div", "se-pane"); content.style.flex = "1"; dlg.append(content); render();
+        status = row(el("span"), btn("保存を再試行", () => safeAsync(() => session.retry()))); status.classList.add("se-status", "se-muted");
+        const title = el("strong", "", doc().name); title.title = `SAX Text Catalog V2 — ${doc().name}`;
+        const header = row(title, btn("アイテム", () => switchMode("items")), btn("テキストセット", () => switchMode("sets")), ...(result ? [btn("前回の実行結果", () => switchMode("results"))] : []), status, btn("元に戻す", () => { releaseActive(); session.undo(); render(); }), btn("やり直す", () => { releaseActive(); session.redo(); render(); }), btn("閉じる", end)); header.classList.add("se-header");
+        errorMessage = el("div", "se-error se-error-message"); errorMessage.setAttribute("role", "alert"); errorMessage.hidden = true;
+        conflict = row(el("span", "", "他の編集と競合しています。編集内容を保持しています。"), btn("最新を読み込み", async () => { if (await showConfirmDialog({ title: "最新データを読み込み", message: "この画面の未保存の編集を取り消し、保存済みの最新データを読み込みます。", okLabel: "読み込み" })) await safeAsync(() => session.reload()); render(); }), btn("最新に編集を再適用", () => safeAsync(() => session.reapply()))); conflict.classList.add("se-conflict"); conflict.hidden = true;
+        dlg.append(header, errorMessage, conflict); content = el("div", "se-pane"); content.style.flex = "1"; dlg.append(content); render();
     } });
     unsubscribe = session.subscribe(() => { updateStatus(); scheduleRefresh(); });
     openEditors.set(session, { close, open(next) { if (next.result) result = next.result; if (next.recipeId) { if (next.mode === "items") { pref.recipeFilter = next.recipeId; pref.query = ""; pref.tag = ""; pref.scroll = 0; } else pref.recipeId = next.recipeId; } if (next.mode && next.mode !== mode) { pref.query = ""; pref.tag = ""; pref.scroll = 0; } mode = next.mode ?? mode; render(); close.show(); } });
