@@ -119,6 +119,86 @@ def test_zero_and_all_candidates(count):
     assert bool(text) == bool(count)
 
 
+def test_random_count_range_is_seeded_and_reports_selected_count():
+    data = config(items=8, count=5)
+    group(data)["count_min"] = 0
+    outputs = [resolve(data, seed) for seed in range(12)]
+    assert outputs == [resolve(data, seed) for seed in range(12)]
+    for _, report in outputs:
+        selected = report["groups"][0]["item_ids"]
+        assert 0 <= len(selected) <= 5
+        assert report["groups"][0]["chosen_count"] == len(selected)
+        assert report["groups"][0]["count_min"] == 0
+    assert {len(report["groups"][0]["item_ids"]) for _, report in outputs} >= {0, 1, 2}
+
+
+def test_fixed_count_preserves_existing_seed_selection():
+    data = config(items=30, count=7)
+    candidates = group(data)["item_ids"]
+    material = json.dumps([123, "r", "g"], ensure_ascii=True, separators=(",", ":"))
+    seed_value = int.from_bytes(catalog.hashlib.sha256(material.encode("utf-8")).digest(), "big")
+    expected = [candidates[index] for index in sorted(random.Random(seed_value).sample(range(30), 7))]
+    assert resolve(data, 123)[1]["groups"][0]["item_ids"] == expected
+    group(data)["count_min"] = 7
+    assert resolve(data, 123)[1]["groups"][0]["item_ids"] == expected
+
+
+def test_nested_range_and_disabled_report_counts():
+    data = config(items=8, count=5)
+    leaf = group(data)
+    leaf["count_min"] = 0
+    data["recipes"][0]["groups"] = [nested("outer", [leaf], "random", 1)]
+    _, report = resolve(data)
+    outer = report["groups"][0]
+    child = outer["groups"][0]
+    assert outer["chosen_count"] == 1
+    assert child["count_min"] == 0
+    assert child["chosen_count"] == len(child["item_ids"])
+    outer_config = data["recipes"][0]["groups"][0]
+    outer_config["on"] = False
+    _, report = resolve(data)
+    assert report["groups"][0]["chosen_count"] == 0
+    assert report["groups"][0]["groups"][0]["chosen_count"] == 0
+
+
+def test_nested_component_can_randomly_choose_zero_to_two_children():
+    data = config(items=4, count=2)
+    first = group(data)
+    second = {**copy.deepcopy(first), "id": "second", "item_ids": ["i2", "i3"]}
+    outer = nested("outer", [first, second], "random", 2)
+    outer["count_min"] = 0
+    data["recipes"][0]["groups"] = [outer]
+    selected_counts = set()
+    for seed in range(20):
+        _, report = resolve(data, seed)
+        result = report["groups"][0]
+        selected_counts.add(result["chosen_count"])
+        assert result["chosen_count"] == len(result["selected_group_ids"])
+        assert result["count_min"] == 0
+        assert report == resolve(data, seed)[1]
+    assert selected_counts == {0, 1, 2}
+
+
+@pytest.mark.parametrize(("mode", "value"), [("all", -1), ("all", 6), ("random", True), ("random", 1.5)])
+def test_invalid_count_min_fails_for_every_mode(mode, value):
+    data = config()
+    group(data)["mode"] = mode
+    group(data)["count_min"] = value
+    with pytest.raises(ValueError, match="count_min"):
+        resolve(data)
+
+
+def test_count_min_cannot_exceed_count_and_random_upper_bound_stays_enforced():
+    data = config(items=2, count=1)
+    group(data)["count_min"] = 2
+    with pytest.raises(ValueError, match="count_min"):
+        resolve(data)
+    group(data)["count_min"] = 0
+    group(data)["count"] = 3
+    with pytest.raises(ValueError, match="count"):
+        resolve(data)
+
+
 def test_empty_candidates_can_select_zero():
     assert resolve(config(items=0, count=0))[0] == ""
 

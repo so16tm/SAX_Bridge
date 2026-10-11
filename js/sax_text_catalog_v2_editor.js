@@ -1,5 +1,5 @@
 import { showDialog, showConfirmDialog } from "./sax_ui_base.js";
-import { sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "./sax_text_catalog_v2_model.js";
+import { parseRandomCount, formatRandomCount, sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "./sax_text_catalog_v2_model.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { openWildcardPicker } from "./sax_text_catalog_v2_wildcards.js";
 
@@ -130,6 +130,7 @@ export function openSharedEditor(session, options = {}) {
     let itemMap = new Map(), selected = new Set(), candidateSelection = new Set(), candidateGroup = null, candidateQuery = pref.candidateQuery ?? "", candidateTags = pref.candidateTags ?? [], resultRecipe = "", outputTab = false, selectionAnchor = null;
     let candidatesOnly = false, candidateAnchor = null, targetParent = "";
     let additionMode = "combined";
+    let candidateSettings = null;
     const dismissTagFilter = event => { for (const control of content?.querySelectorAll(".se-tag-filter[open]") ?? []) if (!control.contains(event.target)) control.open = false; };
     document.addEventListener("pointerdown", dismissTagFilter, true);
     const collapsedGroups = new Set();
@@ -236,13 +237,13 @@ export function openSharedEditor(session, options = {}) {
                     const key = `${prefix}:${g.group_id ?? gi}`;
                     if (g.kind === "nested") {
                         const selected = new Set(g.selected_group_ids ?? []);
-                        list.push({ key, section: true, depth, title: g.name || "ネスト", subtitle: !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・子${g.candidate_group_ids?.length ?? 0}件から${selected.size}件選択` : `子をすべて使用・${selected.size}件`, candidates: g, height: 32 });
+                        list.push({ key, section: true, depth, title: g.name || "ネスト", subtitle: !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム${Object.hasOwn(g,"count_min") ? formatRandomCount(g) + "件" : ""}・子${g.candidate_group_ids?.length ?? 0}件から${selected.size}件選択` : `子をすべて使用・${selected.size}件`, candidates: g, height: 32 });
                         const expanded = reveal || showCandidates.has(key);
                         appendGroups((g.groups ?? []).filter(child => expanded || selected.has(child.group_id)), key, depth + 1, expanded);
                         continue;
                     }
                     const snapshots = g.items ?? []; const chosen = new Set(g.item_ids ?? snapshots.map(i => i.id));
-                    list.push({ key, section: true, depth, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 32 });
+                    list.push({ key, section: true, depth, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム${Object.hasOwn(g,"count_min") ? formatRandomCount(g) + "件" : ""}・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 32 });
                     const values = snapshots.map((snapshot, i) => ({ key: `${key}:${i}`, depth, itemId: snapshot.id, snapshot, height: Math.max(33, 13 + pref.lines * 18) + 32 }));
                     if (reveal || showCandidates.has(key)) for (const id of g.candidate_ids ?? []) if (!chosen.has(id)) { const item = itemMap.get(id); if (item) values.push({ key: `${key}:candidate:${id}`, depth, itemId: id, candidate: true, height: Math.max(33, 13 + pref.lines * 18) }); }
                     list.push(...sortItems(values.filter(e => matchesItem(itemMap.get(e.itemId) ?? e.snapshot, q, pref.tags)), e => itemMap.get(e.itemId) ?? e.snapshot));
@@ -262,9 +263,10 @@ export function openSharedEditor(session, options = {}) {
             dlg.append(row(el("span", "se-muted se-grow", "共有カタログへ自動保存"), wildcardButton(area, { commit: () => putItem(id, { text: area.value }, historyKey), current: () => doc().catalog.items.some(i => i.id === id) })), area, btn("閉じる", end)); queueMicrotask(() => area.focus());
         }, onClose() { detachAutoComplete(area); refresh(); } });
     }
-    function revealNewItem(item) {
-        pref.query = ""; pref.tags = []; pref.recipeFilter = ""; render();
+    function revealNewItem(item, resetFilters = true) {
+        if (resetFilters) { pref.query = ""; pref.tags = []; pref.recipeFilter = ""; } render();
         const index = virtual.entries.findIndex(e => e.itemId === item.id);
+        if (index < 0) return;
         virtual.scroll.scrollTop = virtual.index.offsets[index]; virtual.paint();
         virtual.nodes.get(item.id)?.querySelector('[aria-label="名前を編集"]')?.click();
     }
@@ -275,7 +277,7 @@ export function openSharedEditor(session, options = {}) {
         let name, number = 1;
         do { const suffix = number === 1 ? " コピー" : ` コピー（${number}）`; name = [...original.name].slice(0, 256 - [...suffix].length).join("") + suffix; number++; } while (names.has(name));
         const item = { ...original, id: newId(), name, tags: [...original.tags] };
-        if (mutate([{ type: "item.put", item }])) revealNewItem(item);
+        if (mutate([{ type: "item.put", item }])) revealNewItem(item, false);
     }
     function itemRow(entry) {
         if (entry.section) {
@@ -436,9 +438,12 @@ export function openSharedEditor(session, options = {}) {
         const selectionbar = row(count, label("選択済みだけ", check(candidatesOnly, yes => { candidatesOnly = yes; renderCandidates(); })), matched); selectionbar.classList.add("se-selectionbar"); left.insertBefore(selectionbar, scroll);
         const selectAll = btn("一覧を全選択", () => { for (const e of candidateVirtual.entries) candidateSelection.add(e.itemId); renderCandidates(); }); selectAll.title = "検索・タグに一致する全件を選択（画面外の行も含む）";
         left.append(row(selectAll, btn("一覧の選択を解除", () => { for (const e of candidateVirtual.entries) candidateSelection.delete(e.itemId); renderCandidates(); }), btn("すべて解除", () => { candidateSelection.clear(); renderCandidates(); })));
-        let chosenMode = "all", chosenCount = 1; const edited = [...walkGroups(r.groups)].find(g => g.id === candidateGroup); if (edited) { chosenMode = edited.mode; chosenCount = edited.count; }
+        const edited = [...walkGroups(r.groups)].find(g => g.id === candidateGroup), settingsKey = `${r.id}:${candidateGroup ?? ""}`;
+        if (candidateSettings?.key !== settingsKey) candidateSettings = {key:settingsKey,mode:edited?.mode ?? "all",count:edited ? formatRandomCount(edited) : "1"};
+        let chosenMode = candidateSettings.mode, chosenCount = candidateSettings.count;
         const unit = el("span", "se-muted", "件");
-        const modeSelect = select([["all", "すべて使う"], ["random", "ランダム"]], chosenMode, value => { chosenMode = value; number.hidden = unit.hidden = value !== "random"; }); const number = input(chosenCount, value => { chosenCount = Number(value); }, "number"); number.min = "0"; number.max = "10000"; number.step = "1"; number.style.width = "60px"; number.hidden = unit.hidden = chosenMode !== "random";
+        const modeSelect = select([["all", "すべて使う"], ["random", "ランダム"]], chosenMode, value => { candidateSettings.mode = chosenMode = value; number.hidden = unit.hidden = value !== "random"; }); const number = input(chosenCount, value => { candidateSettings.count = chosenCount = value; }); number.style.width = "85px"; number.placeholder = "0～2"; number.title = "固定件数（2）または範囲（0～2）"; number.setAttribute("aria-label", "追加する構成要素のランダム件数"); number.hidden = unit.hidden = chosenMode !== "random";
+        modeSelect.setAttribute("aria-label", "追加する構成要素の選択方式");
         const separate = () => !candidateGroup && additionMode === "separate";
         const updateAdditionMode = () => { modeSelect.hidden = separate(); number.hidden = unit.hidden = separate() || chosenMode !== "random"; };
         if (!candidateGroup) {
@@ -448,15 +453,17 @@ export function openSharedEditor(session, options = {}) {
         updateAdditionMode();
         left.append(row(modeSelect, number, unit, btn(candidateGroup ? "候補を更新" : "選んだアイテムを追加", () => {
             if (!candidateSelection.size) { localError = "候補アイテムを選択してください"; updateStatus(); return; }
-            if (!separate() && chosenMode === "random" && (!Number.isSafeInteger(chosenCount) || chosenCount < 0 || chosenCount > candidateSelection.size)) { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); return; }
+            let bounds;
+            try { bounds = separate() ? {count:1} : parseRandomCount(chosenCount); if (chosenMode === "random" && !separate() && bounds.count > candidateSelection.size) throw new Error("ランダム件数の上限は候補数以下にしてください"); }
+            catch (error) { localError = error.message; updateStatus(); return; }
             const next = structuredClone(recipe());
             const previous = [...walkGroups(next.groups)].find(g => g.id === candidateGroup)?.item_ids ?? [];
             const ids = previous.filter(id => candidateSelection.has(id));
             const included = new Set(ids);
             for (const item of doc().catalog.items) if (candidateSelection.has(item.id) && !included.has(item.id)) ids.push(item.id);
-            if (candidateGroup) { const g = [...walkGroups(next.groups)].find(g => g.id === candidateGroup); if (g) { Object.assign(g, { item_ids: ids, mode: chosenMode, count: chosenCount }); if (locateGroup(next.groups,g.id).parentId !== targetParent && !relocate(next, g.id, targetParent)) return; } }
-            else for (const itemIds of separate() ? ids.map(id => [id]) : [ids]) groupChildren(next, targetParent).push({ id: newId(), name: itemMap.get(itemIds[0])?.name || "構成要素", on: true, mode: separate() ? "all" : chosenMode, count: separate() ? 1 : chosenCount, item_ids: itemIds });
-            if (putRecipe(next)) { candidateSelection.clear(); candidateGroup = null; candidatesOnly = false; candidateAnchor = null; render(); }
+            if (candidateGroup) { const g = [...walkGroups(next.groups)].find(g => g.id === candidateGroup); if (g) { Object.assign(g, { item_ids: ids, mode: chosenMode, ...bounds }); if (!Object.hasOwn(bounds,"count_min")) delete g.count_min; if (locateGroup(next.groups,g.id).parentId !== targetParent && !relocate(next, g.id, targetParent)) return; } }
+            else for (const itemIds of separate() ? ids.map(id => [id]) : [ids]) groupChildren(next, targetParent).push({ id: newId(), name: itemMap.get(itemIds[0])?.name || "構成要素", on: true, mode: separate() ? "all" : chosenMode, ...bounds, item_ids: itemIds });
+            if (putRecipe(next)) { candidateSettings = null; candidateSelection.clear(); candidateGroup = null; candidatesOnly = false; candidateAnchor = null; render(); }
         }, "se-primary"), ...(candidateGroup ? [btn("キャンセル", () => { candidateGroup = null; candidateSelection.clear(); candidatesOnly = false; render(); })] : [])));
         right.append(row(el("strong", "se-grow", `構成要素 ${[...walkGroups(r.groups)].length}件（上から出力）`), btn("＋ ネスト", () => { const next = structuredClone(recipe()); const g = {id:newId(),name:"ネスト",kind:"nested",mode:"all",count:1,on:true,groups:[]}; groupChildren(next,targetParent).push(g); if (putRecipe(next)) render(); }))); const groups = el("div", "se-scroll se-group-scroll"); right.append(groups);
         let dragged = null;
@@ -475,7 +482,7 @@ export function openSharedEditor(session, options = {}) {
             groupName.setAttribute("aria-label", `構成要素 ${index + 1}の名前`);
             const icon = (text, title, fn) => { const control = btn(text, fn, "se-group-icon"); control.title = title; control.setAttribute("aria-label", title); return control; };
             const enabled = check(g.on, yes => { editGroup(g.id, next => { next.on = yes; }); card.dataset.off = !yes; }); enabled.setAttribute("aria-label", `構成要素 ${index + 1}を使用`);
-            const changeCandidates = () => { if (nested) { editNested(g.id); return; } targetParent = locateGroup(recipe().groups,g.id).parentId; candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTags = []; render(); };
+            const changeCandidates = () => { if (nested) { editNested(g.id); return; } targetParent = locateGroup(recipe().groups,g.id).parentId; candidateSettings = null; candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTags = []; render(); };
             const single = !nested && g.item_ids.length === 1;
             card.dataset.single = String(single);
             const header = row(el("span", "se-muted", "≡"), enabled);
@@ -484,14 +491,14 @@ export function openSharedEditor(session, options = {}) {
             if (single) {
                 const itemName = el("span", "se-muted se-group-preview", itemMap.get(g.item_ids[0])?.name ?? "削除済み"); itemName.title = itemName.textContent;
                 header.append(itemName);
-                if (g.mode === "random") header.append(el("span", "se-muted se-single-mode", `ランダム${g.count}件`));
+                if (g.mode === "random") header.append(el("span", "se-muted se-single-mode", `ランダム${formatRandomCount(g)}件`));
             }
             header.append(icon("✎", "候補を変更", changeCandidates), icon("↑", "構成要素を上へ", () => moveGroup(g.id, -1)), icon("↓", "構成要素を下へ", () => moveGroup(g.id, 1)), icon("×", "構成要素を削除", () => { const next = structuredClone(recipe()); const found=locateGroup(next.groups,g.id); found.siblings.splice(found.index,1); putRecipe(next); render(); }));
             card.append(header);
             if (!single) {
                 const candidates = nested ? g.groups : g.item_ids;
                 const groupMode = select([["all", "すべて使う"], ["random", "ランダム"]], g.mode, value => { editGroup(g.id, next => { next.mode = value; }); render(); });
-                const amount = input(g.count, value => { const count = Number(value); if (Number.isSafeInteger(count) && count >= 0 && count <= candidates.length) editGroup(g.id, next => { next.count = count; }); else { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); } }, "number"); amount.style.width = "52px"; amount.min = "0"; amount.max = String(candidates.length); amount.step = "1"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
+                const amount = input(formatRandomCount(g), value => { try { const bounds = parseRandomCount(value); if (bounds.count > candidates.length) throw new Error("ランダム件数の上限は候補数以下にしてください"); editGroup(g.id, next => { Object.assign(next, bounds); if (!Object.hasOwn(bounds,"count_min")) delete next.count_min; }); localError = ""; updateStatus(); } catch (error) { localError = error.message; updateStatus(); } }); amount.style.width = "85px"; amount.placeholder = "0～2"; amount.title = "固定件数（2）または範囲（0～2）"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
                 const preview = el("span", "se-muted se-group-preview", nested ? g.groups.slice(0,4).map(child => child.name).join("、") : g.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name ?? "削除済み").join("、"));
                 preview.title = "編集アイコンで全候補を一覧表示";
                 const orderButton = btn("出力順", () => { orderGroup = orderGroup === g.id ? null : g.id; orderScroll = 0; render(); }); orderButton.setAttribute("aria-expanded", String(orderGroup === g.id)); orderButton.title = "候補アイテムの出力順を並び替え";

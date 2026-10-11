@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sortedNamedOptions, emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "../../js/sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds, parseRandomCount, formatRandomCount } from "../../js/sax_text_catalog_v2_model.js";
+
+test("ランダム抽選数は固定数と3種の範囲表記を解析し、保存形式を整える", () => {
+    assert.deepEqual(parseRandomCount("2"), { count: 2 });
+    for (const value of ["0-2", "0～2", "0〜2", " 0 ～ 2 "]) assert.deepEqual(parseRandomCount(value), { count: 2, count_min: 0 });
+    assert.equal(formatRandomCount({ count: 2 }), "2");
+    assert.equal(formatRandomCount({ count: 2, count_min: 0 }), "0～2");
+    for (const value of ["2-1", "-1", "1.5", "10001", "0-10001", "2--3"]) assert.throws(() => parseRandomCount(value));
+});
 
 test("名前順の選択肢は同名をIDで比較し、元の保存順を変更しない", () => {
     const values = [{id:"z",name:"Z"},{id:"b",name:"A"},{id:"a",name:"A"}];
@@ -102,6 +110,17 @@ test("候補不足は警告、重複/参照切れは拒否、無効グループ�
     group.item_ids.push("item-0"); assert.throws(() => validateConfig(config), /重複/);
     group.item_ids = ["missing"]; assert.throws(() => validateConfig(config), /参照先/);
     group.item_ids = []; group.count = 10001; assert.throws(() => validateConfig(config), /整数/);
+});
+
+test("count_minは全modeで上限以下の整数に限定し、警告は範囲上限で判定する", () => {
+    const config = fixture(2), group = { id: "g", name: "範囲", mode: "random", item_ids: ["item-0"], count: 2, count_min: 0, on: true };
+    config.recipes[0].groups = [group];
+    validateConfig(config);
+    assert.equal(recipeWarnings(config).length, 1);
+    group.count = 1; assert.equal(recipeWarnings(config).length, 0);
+    group.mode = "all"; group.count_min = 2; assert.throws(() => validateConfig(config), /下限/);
+    group.count_min = -1; assert.throws(() => validateConfig(config), /下限/);
+    group.count_min = 1.5; assert.throws(() => validateConfig(config), /下限/);
 });
 
 test("素材削除は全組み合わせの参照を除去し、別グループの重複使用を許容", () => {

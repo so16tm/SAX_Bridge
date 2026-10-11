@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showDialog, showConfirmDialog, showPromptDialog, showAlertDialog, hideWidget } from "./sax_ui_base.js";
-import { sortedNamedOptions, LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, parseRandomCount, formatRandomCount } from "./sax_text_catalog_v2_model.js";
 import { installQuickControls } from "./sax_text_catalog_v2_quick.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { installSharedControls, sharedController, flushCatalogNodes, flushCatalogPrompt, readReference } from "./sax_text_catalog_v2_shared.js";
@@ -331,10 +331,12 @@ function openCatalog(node) {
             const mode = el("select"); mode.setAttribute("aria-label", "選択方式"); mode.append(new Option("すべて使用", "all"), new Option("ランダム選択", "random")); mode.value = group.mode;
             mode.addEventListener("change", () => editGroup(group.id, g => { g.mode = mode.value; }));
             const modeRow = row(mode, hint(`候補 ${group.item_ids.length}件`));
-            if (group.mode === "random") modeRow.append(field(group.count, "抽選する件数", `count:${group.id}`, value => {
-                if (value === "" || !/^\d+$/.test(value) || Number(value) > LIMITS.items) { report("未反映: 抽選数は0〜10000の整数で指定してください", true); return; }
-                editGroup(group.id, g => { g.count = Number(value); }, `count:${group.id}`, false);
-            }, { type: "number" }), hint("件を選ぶ"));
+            if (group.mode === "random") modeRow.append(field(formatRandomCount(group), "抽選する件数（例: 0～2）", `count:${group.id}`, value => {
+                try {
+                    const count = parseRandomCount(value);
+                    editGroup(group.id, g => { g.count = count.count; if (Object.hasOwn(count, "count_min")) g.count_min = count.count_min; else delete g.count_min; }, `count:${group.id}`, false);
+                } catch (error) { report(`未反映: ${error.message}`, true); }
+            }), hint("件を選ぶ"));
             modeRow.append(menu("候補を変更", button("左の選択を候補に設定", () => editGroup(group.id, g => { g.item_ids = selectedIds(); }), { disabled: !selectedIds().length }), button("左で候補を選択", () => { state.selected = new Set(group.item_ids); state.query = ""; state.filterTags = []; state.mobilePane = "library"; state.libraryHidden = false; render(); })));
             card.append(modeRow);
             const candidates = el("details"); candidates.dataset.group = group.id; candidates.open = state.openGroups.has(group.id) || group.item_ids.length === 1;

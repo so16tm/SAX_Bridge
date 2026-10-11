@@ -1,5 +1,5 @@
-import { makeItemListWidget, getComfyTheme, txt, ROW_H, autoResize, showParamPopup } from "./sax_ui_base.js";
-import { sortedNamedOptions, parseConfig, validateConfig, EditHistory } from "./sax_text_catalog_v2_model.js";
+import { makeItemListWidget, getComfyTheme, txt, ROW_H, autoResize, showPromptDialog, showAlertDialog } from "./sax_ui_base.js";
+import { sortedNamedOptions, parseConfig, validateConfig, EditHistory, parseRandomCount, formatRandomCount } from "./sax_text_catalog_v2_model.js";
 
 // 大量の素材と本文は管理画面、生成時の切替・有効化・抽選数はノード上で扱う。
 const controllers = new WeakMap();
@@ -11,6 +11,7 @@ export function installQuickControls(node, callbacks) {
     const json = () => node.widgets?.find(w => w.name === "config_json");
     const controller = { callbacks, raw: null, config: null, error: "", labels: new Map(), signature: null, page: 0, recipeId: null };
     controllers.set(node, controller);
+    let formattingGroup = null;
     let recipeWidget, groupsWidget;
     const read = () => {
         const live = controller.callbacks.read?.();
@@ -89,27 +90,30 @@ export function installQuickControls(node, callbacks) {
                 const updates = new Map(groups.map(g => [g.id, g]));
                 for (const group of recipe.groups) {
                     const update = updates.get(group.id);
-                    if (update) { group.on = update.on; if (group.mode === "random") group.count = update.count; }
+                    if (update) { group.on = update.on; if (group.mode === "random") { group.count = update.count; if (Object.hasOwn(update, "count_min")) group.count_min = update.count_min; else delete group.count_min; } }
                 }
             });
         },
         params: [{
             key: "count", label: "選択数", w: 60,
-            get: group => group.mode === "random" ? group.count : -1,
-            format: value => value < 0 ? "全件" : String(value),
+            get: group => { formattingGroup = group.mode === "random" ? group : null; return formattingGroup ? formattingGroup.count : -1; },
+            format: value => value < 0 ? "全件" : formattingGroup ? formatRandomCount(formattingGroup) : String(value),
             step: 1, min: 0, max: 10000,
-            set: (group, value) => { if (group.mode === "random") group.count = Math.round(value); },
-            onPopup: group => {
+            set: (group, value) => { if (group.mode === "random") { group.count = Math.round(value); delete group.count_min; } },
+            onPopup: async group => {
                 if (group.mode !== "random") return;
                 const recipeId = active()?.id, groupId = group.id;
-                const canvas = node.graph?.list_of_graphcanvas?.[0];
-                const [x, y] = canvas?.last_mouse_position ?? [globalThis.innerWidth / 2 || 300, globalThis.innerHeight / 2 || 200];
-                showParamPopup(x, y, group.count, { label: "ランダム選択数", step: 1, min: 0, max: 10000 }, value => write(config => {
+                const entered = await showPromptDialog({title:"ランダム選択数（例: 2、0～2）",defaultValue:formatRandomCount(group)});
+                if (entered == null) return;
+                let value;
+                try { value = parseRandomCount(entered); }
+                catch (error) { await showAlertDialog({title:"ランダム選択数",message:error.message}); return; }
+                write(config => {
                     // 数値入力中に組み合わせを切り替えた場合、別グループへ値を適用しない。
                     if (config.active_recipe_id !== recipeId) return;
                     const current = config.recipes.find(r => r.id === recipeId)?.groups.find(g => g.id === groupId);
-                    if (current?.mode === "random") current.count = Math.round(value);
-                }));
+                    if (current?.mode === "random") { current.count = value.count; if (Object.hasOwn(value, "count_min")) current.count_min = value.count_min; else delete current.count_min; }
+                });
             },
         }],
         content: {

@@ -110,8 +110,11 @@ const server=http.createServer(async(req,res)=>{
  const nestedId=await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).id);
  await page.locator('[data-group-id="g1"]').getByRole('button',{name:'候補を変更',exact:true}).click();
  await page.getByRole('combobox',{name:'構成要素の配置先',exact:true}).selectOption(nestedId);
+ await page.getByRole('combobox',{name:'追加する構成要素の選択方式',exact:true}).selectOption('random');
+ await page.getByRole('textbox',{name:'追加する構成要素のランダム件数',exact:true}).fill('0-2');
  await page.getByRole('button',{name:'候補を更新',exact:true}).click();
  assert.equal(await page.locator('[data-group-id="g1"]').getAttribute('data-depth'),'1');
+ assert.deepEqual(await page.evaluate(id=>{const g=shared().session.document.recipes[0].groups.find(g=>g.id===id).groups[0];return [g.count_min,g.count];},nestedId),[0,2]);
  const nestedCard=page.locator(`[data-group-id="${nestedId}"]`);
  await nestedCard.getByRole('button',{name:'子の構成要素を開閉',exact:true}).click();
  assert.equal(await page.locator('[data-group-id="g1"]').count(),0);
@@ -121,7 +124,14 @@ const server=http.createServer(async(req,res)=>{
  await page.locator('[data-group-id="g2"]>.se-row').first().locator('span').first().dragTo(page.locator('[data-group-id="g1"]'),{targetPosition:{x:30,y:68}});
  assert.deepEqual(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups.map(g=>g.id),nestedId),['g1','g2']);
  await nestedCard.locator('select').selectOption('random');
- await nestedCard.getByRole('spinbutton').fill('1'); await nestedCard.getByRole('spinbutton').dispatchEvent('change');
+ await nestedCard.getByRole('textbox',{name:/ランダム件数/}).fill('1'); await nestedCard.getByRole('textbox',{name:/ランダム件数/}).dispatchEvent('change');
+ await nestedCard.getByRole('textbox',{name:/ランダム件数/}).fill('0～2');
+ assert.deepEqual(await page.evaluate(id=>{const g=shared().session.document.recipes[0].groups.find(g=>g.id===id);return [g.count_min,g.count];},nestedId),[0,2]);
+ await nestedCard.getByRole('textbox',{name:/ランダム件数/}).fill('2～1');
+ assert.deepEqual(await page.evaluate(id=>{const g=shared().session.document.recipes[0].groups.find(g=>g.id===id);return [g.count_min,g.count];},nestedId),[0,2]);
+ await nestedCard.getByRole('textbox',{name:/ランダム件数/}).fill('1');
+ assert.equal(await page.evaluate(id=>Object.hasOwn(shared().session.document.recipes[0].groups.find(g=>g.id===id),'count_min'),nestedId),false);
+
  assert.equal(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).mode,nestedId),'random');
  await nestedCard.getByRole('button',{name:'候補を変更',exact:true}).click();
  assert.equal(await page.getByRole('combobox',{name:'ネストの配置先',exact:true}).locator(`option[value="${nestedId}"]`).count(),0);
@@ -148,12 +158,20 @@ const server=http.createServer(async(req,res)=>{
 
  // 複製は最新の編集中本文を取り込み、独立したIDを作る。セット参照は変更しない。
  doc=fixture(10);await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.waitForSelector('.se-record');
+ await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('');
+
+
+ await page.getByPlaceholder('名前・本文・タグを検索').fill('アイテム0');
+ await page.locator('.se-tag-filter summary').click();await page.getByRole('checkbox',{name:'tag0で絞り込み',exact:true}).check();await page.locator('.se-tag-filter summary').click();
  const beforeDuplicate=await page.evaluate(()=>structuredClone(shared().session.document));
  await page.locator('.se-record[data-item-id="i0"]').getByRole('button',{name:'本文を編集',exact:true}).click();
  await page.getByRole('textbox',{name:'アイテム本文',exact:true}).fill('複製直前の本文');
  await page.locator('.se-record[data-item-id="i0"]').getByRole('button',{name:'複製',exact:true}).click();
  const copied=await page.evaluate(()=>shared().session.document.catalog.items.at(-1));
  assert.notEqual(copied.id,'i0');assert.equal(copied.name,'アイテム0 コピー');assert.equal(copied.text,'複製直前の本文');assert.deepEqual(copied.tags,['tag0']);
+ assert.equal(await page.getByPlaceholder('名前・本文・タグを検索').inputValue(),'アイテム0');
+ assert.ok(await page.locator('.se-tag-filter summary').textContent().then(t=>t.includes('tag0')));
+
  assert.deepEqual(await page.evaluate(()=>shared().session.document.recipes),beforeDuplicate.recipes);
  assert.equal(await page.getByRole('textbox',{name:'アイテム名',exact:true}).inputValue(),copied.name);
  await page.getByRole('textbox',{name:'アイテム名',exact:true}).press('Enter');
@@ -163,6 +181,19 @@ const server=http.createServer(async(req,res)=>{
  await page.getByRole('button',{name:'やり直す',exact:true}).click();
  await page.locator(`[data-item-id="${copied.id}"]`).getByRole('button',{name:'本文を編集',exact:true}).click();await page.getByRole('textbox',{name:'アイテム本文',exact:true}).fill('コピーだけ変更');await page.evaluate(()=>app.queuePrompt());
  assert.equal(doc.catalog.items.find(i=>i.id==='i0').text,'複製直前の本文');assert.equal(doc.catalog.items.find(i=>i.id===copied.id).text,'コピーだけ変更');
+
+ await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('s1');
+ await page.locator('.se-record[data-item-id="i0"]').getByRole('button',{name:'複製',exact:true}).click();
+ const hiddenCopy=await page.evaluate(()=>shared().session.document.catalog.items.at(-1));
+ assert.equal(hiddenCopy.name,'アイテム0 コピー（2）');
+ assert.equal(await page.getByPlaceholder('名前・本文・タグを検索').inputValue(),'アイテム0');
+ assert.equal(await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).inputValue(),'s1');
+ assert.ok(await page.locator('.se-tag-filter summary').textContent().then(t=>t.includes('tag0')));
+ assert.equal(await page.locator(`[data-item-id="${hiddenCopy.id}"]`).count(),0);
+ assert.deepEqual(await page.evaluate(()=>shared().session.document.recipes),beforeDuplicate.recipes);
+ await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('');
+ await page.getByPlaceholder('名前・本文・タグを検索').fill('');
+ await page.locator('.se-tag-filter summary').click();await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();await page.locator('.se-tag-filter summary').click();
  await page.getByRole('button',{name:'閉じる',exact:true}).click();console.log('duplicate latest text/independent ID/tags/references/Undo/Redo/save passed');
  const measurements=[];
  await page.setViewportSize({width:1280,height:950});
@@ -172,7 +203,7 @@ const server=http.createServer(async(req,res)=>{
   await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('');
   const nodes=await page.locator('.se-record').count();assert.ok(nodes<40);
   const opened=performance.now();await page.locator('.se-record').first().getByRole('button',{name:'本文を編集',exact:true}).click();
-  await page.getByRole('textbox',{name:'アイテム本文',exact:true}).fill('性能確認の本文');await page.evaluate(()=>app.queuePrompt());
+  await page.getByRole('textbox',{name:'アイテム本文',exact:true}).fill('性能確認の本文');await page.evaluate(()=>Promise.race([app.queuePrompt(),new Promise((_,reject)=>setTimeout(()=>reject(new Error(document.querySelector('.__sax_alert_dlg')?.textContent||'Queue timeout')),5000))]));
   const finished=performance.now(),referenceBytes=await page.evaluate(()=>new TextEncoder().encode(node.widgets.find(w=>w.name==='config_json').value).length);assert.ok(referenceBytes<500);
   measurements.push({count,textChars:size,openMs:Math.round(opened-started),editAndQueueMs:Math.round(finished-opened),visibleRows:nodes,workflowReferenceBytes:referenceBytes,patchBytes:calls.at(-1).bytes});
   await page.getByRole('button',{name:'閉じる',exact:true}).click();

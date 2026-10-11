@@ -90,6 +90,10 @@ def _validate_groups(groups, path, item_ids, seen, depth=1):
         if type(group.get("on")) is not bool:
             _error(gp + ".on", "boolean が必要です")
         _integer(group.get("count"), gp + ".count", MAX_ITEMS)
+        if "count_min" in group:
+            count_min = _integer(group["count_min"], gp + ".count_min", MAX_ITEMS)
+            if count_min > group["count"]:
+                _error(gp + ".count_min", "count 以下の整数が必要です")
         if group.get("kind") == "nested":
             if "item_ids" in group:
                 _error(gp, "ネスト型には item_ids を指定できません")
@@ -165,11 +169,17 @@ def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item):
                 # 親IDや位置を含めず、階層移動しても同じ構成要素の抽選を保つ。
                 material = json.dumps([seed, recipe_id, group["id"]], ensure_ascii=True, separators=(",", ":"))
                 rng = random.Random(int.from_bytes(hashlib.sha256(material.encode("utf-8")).digest(), "big"))
-                chosen = [candidates[index] for index in sorted(rng.sample(range(len(candidates)), group["count"]))]
+                chosen_count = group["count"]
+                if "count_min" in group and group["count_min"] < group["count"]:
+                    chosen_count = rng.randint(group["count_min"], group["count"])
+                chosen = [candidates[index] for index in sorted(rng.sample(range(len(candidates)), chosen_count))]
             else:
                 chosen = candidates
+        chosen_count = len(chosen)
         report = {"group_id": group["id"], "name": group["name"], "mode": group["mode"],
-                  "on": effective_on, "count": group["count"]}
+                  "on": effective_on, "count": group["count"], "chosen_count": chosen_count}
+        if "count_min" in group:
+            report["count_min"] = group["count_min"]
         if nested:
             report.update({"kind": "nested", "candidate_group_ids": candidates, "selected_group_ids": chosen, "groups": []})
             chosen_ids = set(chosen)

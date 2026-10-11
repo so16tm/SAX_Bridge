@@ -1,6 +1,21 @@
 // V2 の編集境界。壊れたデータを補正して保存しないため、検証と編集を分離する。
 export const LIMITS = Object.freeze({ items: 10000, recipes: 32, groups: 32, groupDepth: 8, totalGroups: 256, tags: 8, id: 128, name: 256, text: 65536, bytes: 32 * 1024 * 1024 });
 
+export function parseRandomCount(value) {
+    if (typeof value !== "string") fail("抽選数は整数または範囲で指定してください");
+    const match = value.match(/^\s*(\d+)\s*(?:[-～〜]\s*(\d+)\s*)?$/u);
+    if (!match) fail("抽選数は整数または範囲で指定してください");
+    const first = Number(match[1]), second = match[2] === undefined ? null : Number(match[2]);
+    if (!Number.isSafeInteger(first) || first > LIMITS.items || (second !== null && (!Number.isSafeInteger(second) || second > LIMITS.items))) fail("抽選数は0〜10000の整数で指定してください");
+    if (second === null) return { count: first };
+    if (first > second) fail("抽選数の下限は上限以下にしてください");
+    return { count: second, count_min: first };
+}
+
+export function formatRandomCount(group) {
+    return Object.hasOwn(group, "count_min") ? `${group.count_min}～${group.count}` : String(group.count);
+}
+
 export function emptyConfig() {
     return { version: 2, catalog: { items: [] }, recipes: [{ id: "default", name: "組み合わせ 1", groups: [] }], active_recipe_id: "default" };
 }
@@ -75,6 +90,7 @@ export function validateGroups(groups, itemIds) {
             if (!["all", "random"].includes(group.mode)) fail("選択方式が不正です");
             if (typeof group.on !== "boolean") fail("有効状態が不正です");
             if (!Number.isSafeInteger(group.count) || group.count < 0 || group.count > LIMITS.items) fail("抽選数は0〜10000の整数で指定してください");
+            if (Object.hasOwn(group, "count_min") && (!Number.isSafeInteger(group.count_min) || group.count_min < 0 || group.count_min > group.count)) fail("抽選数の下限は0〜上限以下の整数で指定してください");
             if (group.kind === "nested") {
                 if (Object.hasOwn(group, "item_ids")) fail("ネスト構成要素にはアイテム候補を指定できません");
                 visit(group.groups, depth + 1);
@@ -147,7 +163,7 @@ export function recipeWarnings(config) {
         for (const group of groups) {
             if (!group.on) continue;
             const candidates = group.kind === "nested" ? group.groups.length : group.item_ids.length;
-            if (group.mode === "random" && group.count > candidates) warnings.push(`${group.name || "無題のグループ"}: 候補${candidates}件に対して${group.count}件の抽選は実行できません`);
+            if (group.mode === "random" && group.count > candidates) warnings.push(`${group.name || "無題のグループ"}: 候補${candidates}件に対して最大${group.count}件の抽選は実行できません`);
             if (group.kind === "nested" && (group.mode === "all" || group.count > 0)) visit(group.groups);
         }
     }
