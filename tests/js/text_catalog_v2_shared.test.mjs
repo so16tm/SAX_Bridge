@@ -6,6 +6,7 @@ register("../bench/shared_catalog_hooks.mjs", import.meta.url);
 installDomStub();
 const { app } = await import("../bench/stubs/comfy_app.js");
 const { getSession, applyOperations } = await import("../../js/sax_text_catalog_v2_client.js");
+const { newId } = await import("../../js/sax_text_catalog_v2_model.js");
 const { flushCatalogPrompt, readReference, installSharedControls, sharedController } = await import("../../js/sax_text_catalog_v2_shared.js");
 const documents = new Map(); let writes = 0;
 window._saxTestSent = [];
@@ -25,6 +26,16 @@ const nodeFor = (id, count = 1) => {
     node.widgets = [{ name: "config_json", value: JSON.stringify({ version: 3, catalog_id: id, rows: Array.from({length:count}, (_,i) => ({ id:`row${i}`,recipe_id:"r",on:true })) }) }, { name: "seed", value: 123 }];
     return node;
 };
+
+test("crypto.randomUUIDがないHTTP環境でも安全な形式の行IDを生成する", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    try {
+        Object.defineProperty(globalThis, "crypto", { value: {}, configurable: true });
+        assert.match(newId(), /^v2_[a-z0-9]+_[a-z0-9]+$/);
+        Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true });
+        assert.match(newId(), /^v2_[a-z0-9]+_[a-z0-9]+$/);
+    } finally { Object.defineProperty(globalThis, "crypto", descriptor); }
+});
 
 test("共有参照は本文を保存せず、不正な行と重複IDを拒否する", () => {
     const node = nodeFor("reference"); assert.equal(readReference(node).rows.length, 1);

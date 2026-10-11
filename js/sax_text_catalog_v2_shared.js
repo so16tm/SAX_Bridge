@@ -1,9 +1,10 @@
 import { getComfyTheme, txt, autoResize, showDialog, showPromptDialog, showAlertDialog } from "./sax_ui_base.js";
 import { listCatalogs, createCatalog, importCatalog, getSession } from "./sax_text_catalog_v2_client.js";
 import { openSharedEditor } from "./sax_text_catalog_v2_editor.js";
+import { newId } from "./sax_text_catalog_v2_model.js";
+import { makeSharedSetWidget } from "./sax_text_catalog_v2_widget.js";
 
 const controls = new WeakMap();
-const uuid = () => globalThis.crypto.randomUUID();
 const hidden = widget => { widget.serialize = false; widget.options = { ...widget.options, serialize: false }; return widget; };
 export function readReference(node) {
     const ref = JSON.parse(node.widgets.find(w => w.name === "config_json").value);
@@ -42,7 +43,7 @@ export function installSharedControls(node) {
     const act = fn => (...args) => Promise.resolve().then(() => fn(...args)).catch(report);
     const configWidget = node.widgets.find(w => w.name === "config_json");
     const write = ref => { configWidget.value = JSON.stringify(ref); node.graph?.change?.(); redraw(); };
-    const redraw = () => { node.setDirtyCanvas?.(true, true); if (node.graph && node.computeSize && node.setSize) autoResize(node); };
+    const redraw = () => { controller.setWidget?.refresh(); node.setDirtyCanvas?.(true, true); if (node.graph && node.computeSize && node.setSize) autoResize(node); };
     const choose = (title, entries, callback) => showDialog({ title, width: 440, build(dialog, close) {
         const search = document.createElement("input"); search.placeholder = "検索"; dialog.append(search);
         const list = document.createElement("div"); list.style.cssText = "max-height:50vh;overflow:auto;display:grid;gap:6px"; dialog.append(list);
@@ -65,6 +66,14 @@ export function installSharedControls(node) {
         write({ version: 3, catalog_id: catalog.id, rows: [] }); await controller.reload();
     }), { values: [], serialize: false }));
     hidden(node.addWidget("button", "アイテム", null, () => open("items"), { serialize: false }));
+    if (typeof node.addDOMWidget === "function") controller.setWidget = makeSharedSetWidget(node, {
+        readRows: () => readReference(node).rows,
+        readCatalogId: () => readReference(node).catalog_id,
+        readRecipes: () => controller.session?.document.recipes ?? (readReference(node).catalog_id ? null : []),
+        writeRows: rows => { const ref = readReference(node); ref.rows = rows; write(ref); },
+        openSet: id => open("sets", id), openItems: id => open("items", id),
+        onResize: () => { if (node.graph && node.computeSize && node.setSize) autoResize(node); node.setDirtyCanvas?.(true, true); },
+    });
     const rowsWidget = hidden({ name: "__sax_shared_sets", type: "custom", draw(ctx, currentNode, width, y) {
         this.y = y; const ref = readReference(node), theme = getComfyTheme();
         const recipes = new Map((controller.session?.document.recipes ?? []).map(recipe => [recipe.id, recipe]));
@@ -107,12 +116,12 @@ export function installSharedControls(node) {
         });
         return true;
     } });
-    node.addCustomWidget(rowsWidget);
-    hidden(node.addWidget("button", "＋ テキストセットを追加", null, () => {
+    if (!controller.setWidget) node.addCustomWidget(rowsWidget);
+    if (!controller.setWidget) hidden(node.addWidget("button", "＋ テキストセットを追加", null, () => {
         const catalogId = readReference(node).catalog_id;
         const recipes = controller.session?.document.recipes ?? [];
         if (!recipes.length) { open("sets"); return; }
-        choose("テキストセットを追加", recipes, id => { const ref = readReference(node); if (ref.catalog_id !== catalogId) return; ref.rows.push({ id: uuid(), recipe_id: id, on: true }); write(ref); });
+        choose("テキストセットを追加", recipes, id => { const ref = readReference(node); if (ref.catalog_id !== catalogId) return; ref.rows.push({ id: newId(), recipe_id: id, on: true }); write(ref); });
     }, { serialize: false }));
     hidden(node.addWidget("button", "前回の実行結果", null, () => open("results"), { serialize: false }));
     hidden(node.addWidget("button", "カタログ作成・入出力", null, () => showDialog({ title: "カタログ作成・入出力", build(dialog, close) {
@@ -143,7 +152,12 @@ export function installSharedControls(node) {
         if (token !== controller.token) return;
         controller.unsubscribe?.(); controller.session = session; controller.unsubscribe = session?.subscribe(redraw); redraw();
     });
-    controller.dispose = () => { ++controller.token; controller.stopDrag?.(); controller.unsubscribe?.(); controls.delete(node); };
+    controller.dispose = () => {
+        ++controller.token; controller.stopDrag?.();
+        // ComfyUIのDOMウィジェット登録も解除し、configure後の重複表示を防ぐ。
+        controller.setWidget?.widget.onRemove?.(); controller.setWidget?.dispose();
+        controller.unsubscribe?.(); controls.delete(node);
+    };
     const seedControls = node.widgets.filter(w => w.name === "seed" || w.name === "control_after_generate");
     node.widgets = node.widgets.filter(w => !seedControls.includes(w));
     node.widgets.splice(node.widgets.findIndex(w => w.name === "前回の実行結果"), 0, ...seedControls);

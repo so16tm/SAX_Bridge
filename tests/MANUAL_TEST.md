@@ -556,6 +556,8 @@ Node Collector に上流ノードを 2 つ以上登録し、その**出力スロ
 
 ## O. Text Catalog V2
 
+実ComfyUIでのウィジェット回帰テスト: 分離したテスト用サーバーを起動し、`SAX_COMFY_TEST_URL` と必要に応じて `SAX_PLAYWRIGHT_PATH` を設定して `node tests/bench/text_catalog_v2_comfy_browser.cjs` を実行する。テスト用カタログを作成し、モデル不要のText Catalog → Debug TextをQueueする。randomUUIDなしでの追加、行内選択、編集入口、並び替え、有効状態、ズーム、再設定時の重複表示を検証する。
+
 ### O-1. 旧V2の実行と明示移行 (workflows/22_text_catalog_v2.json)
 
 V1と旧version 2埋め込みV2の共存・互換性を確認する。移行前は固定品質1件と3候補から2件のランダム選択をSeed `123` で実行できる。
