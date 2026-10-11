@@ -79,6 +79,14 @@ test("10000件を保持し、検索/タグ絞り込みと未知形式の保全�
     assert.throws(() => parseConfig('{"version":3}'), /対応していない/);
 });
 
+test("埋め込みV2も複数タグをAND条件で絞り込み、本文検索と併用できる", () => {
+    const config = emptyConfig();
+    config.catalog.items = [{id:"a",name:"A",text:"本文",tags:["共通","背景"]},{id:"b",name:"B",text:"別",tags:["共通"]}];
+    assert.deepEqual(filteredItems(config,"",["共通","背景"]).map(i=>i.id),["a"]);
+    assert.deepEqual(filteredItems(config,"別",["共通","背景"]),[]);
+    assert.deepEqual(filteredItems(config,"背景",[]).map(i=>i.id),["a"]);
+});
+
 test("候補不足は警告、重複/参照切れは拒否、無効グループは警告しない", () => {
     const config = fixture(3);
     const group = { id: "g", name: "抽選", mode: "random", item_ids: ["item-0"], count: 2, on: true };

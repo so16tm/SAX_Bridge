@@ -20,6 +20,7 @@ const STYLE = `
 @media(max-width:760px){.sax-catalog-v2>div{padding:10px!important}.sax-catalog-v2 .cv2-tabs{gap:5px;flex-wrap:wrap}.sax-catalog-v2 .cv2-tabs>strong{display:none}.sax-catalog-v2 .cv2-tabs button{padding:6px 8px}.sax-catalog-v2 .cv2-layout{display:flex;gap:0}.sax-catalog-v2 .cv2-pane{flex:1;width:100%;min-height:0}.sax-catalog-v2 .cv2-layout[data-mobile=work]>.cv2-library{display:none}.sax-catalog-v2 .cv2-layout[data-mobile=library]>.cv2-work{display:none}.sax-catalog-v2 .cv2-work{padding-left:0;border-left:0}.sax-catalog-v2 .cv2-editor>textarea{min-height:0}.sax-catalog-v2 .cv2-list{max-height:none}}
 .sax-catalog-v2 .cv2-table .cv2-item,.sax-catalog-v2 .cv2-columns{display:grid;grid-template-columns:20px minmax(160px,1fr) minmax(120px,.7fr) minmax(180px,1.4fr) 80px;gap:12px}.sax-catalog-v2 .cv2-table .cv2-item>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sax-catalog-v2 .cv2-columns{padding:0 5px}.sax-catalog-v2 .cv2-table .cv2-item button{min-width:0}.sax-catalog-v2 .cv2-table .cv2-filter{max-width:560px}
 .sax-catalog-v2 .cv2-card .cv2-menu>div{position:static;margin-top:6px}.sax-catalog-v2 .cv2-card>details>summary,.sax-catalog-v2 .cv2-tags>summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sax-catalog-v2 .cv2-filter>summary{max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sax-catalog-v2 .cv2-tag-options{max-height:240px;overflow:auto}.sax-catalog-v2 .cv2-tag-options label{height:24px;margin:0;padding:2px 3px;gap:6px;flex-wrap:nowrap;font-size:12px;line-height:16px;overflow:hidden;white-space:nowrap}.sax-catalog-v2 .cv2-tag-options input[type=checkbox]{width:14px;height:14px;margin:0;padding:0}
 @media(max-width:1000px){.sax-catalog-v2 .cv2-tabs>strong{display:none}}
 @media(max-width:760px){.sax-catalog-v2 .cv2-table .cv2-item,.sax-catalog-v2 .cv2-columns{grid-template-columns:20px minmax(120px,1fr) minmax(80px,.6fr) 60px;gap:8px}.sax-catalog-v2 .cv2-excerpt{display:none}.sax-catalog-v2 .cv2-layout[data-mode=library]>.cv2-library{display:flex}}
 `;
@@ -41,7 +42,7 @@ function seed(node) { return node.widgets?.find(w => w.name === "seed")?.value; 
 function stateFor(node) {
     let state = states.get(node);
     if (!state) {
-        state = { mode: "library", sort: "catalog", selectionAnchor: null, libraryHidden: false, mobilePane: "work", filtersOpen: false, tagsOpen: false, previewOpen: false, selected: new Set(), activeItem: null, query: "", tag: "", tagQuery: "", openGroups: new Set(), pages: new Map(), scroll: new Map(), history: null, result: null, close: null, refresh: null, status: null, flush: null, getConfig: null, quickCommit: null };
+        state = { mode: "library", sort: "name", selectionAnchor: null, libraryHidden: false, mobilePane: "work", filtersOpen: false, tagsOpen: false, previewOpen: false, selected: new Set(), activeItem: null, query: "", filterTags: [], tagQuery: "", openGroups: new Set(), pages: new Map(), scroll: new Map(), history: null, result: null, close: null, refresh: null, status: null, flush: null, getConfig: null, quickCommit: null };
         states.set(node, state);
     }
     return state;
@@ -198,7 +199,7 @@ function openCatalog(node) {
     const newItem = () => {
         const id = newId();
         if (commit(next => next.catalog.items.push({ id, name: "新しい素材", text: "", tags: [] }))) {
-            state.activeItem = id; state.query = ""; state.tag = ""; switchMode("items");
+            state.activeItem = id; state.query = ""; state.filterTags = []; switchMode("items");
             content.querySelector(`[data-focus="library:${id}:name"]`)?.focus();
         }
     };
@@ -209,16 +210,17 @@ function openCatalog(node) {
         const search = field(state.query, "名前・本文・タグを検索", "search", value => { state.query = value; render(); }, { search: true });
         const filters = el("details", "cv2-filter"); filters.open = state.filtersOpen;
         filters.addEventListener("toggle", () => { if (filters.isConnected) state.filtersOpen = filters.open; });
-        filters.append(el("summary", "cv2-muted", state.tag ? `絞り込み · ${state.tag}` : "絞り込み"));
-        const tags = el("select"); tags.setAttribute("aria-label", "タグで絞り込み"); tags.dataset.focus = "tag-filter";
-        tags.append(new Option("すべてのタグ", ""));
-        const allTags = [...new Set(config.catalog.items.flatMap(i => i.tags))].sort();
-        const visibleTags = allTags.filter(tag => tag.toLocaleLowerCase().includes(state.tagQuery.toLocaleLowerCase())).slice(0, 12);
-        if (state.tag && !visibleTags.includes(state.tag)) visibleTags.unshift(state.tag);
-        for (const tag of visibleTags) tags.append(new Option(tag, tag));
-        tags.value = state.tag; tags.addEventListener("change", () => { state.tag = tags.value; render(); });
-        filters.append(row(field(state.tagQuery, "タグを検索", "tag-search", value => { state.tagQuery = value; render(); }, { search: true }), tags));
-        if (allTags.length > 12) filters.append(hint(`タグ${allTags.length}種類 · 検索結果の先頭12件を表示`));
+        filters.append(el("summary", "cv2-muted", state.filterTags.length ? `タグ：${state.filterTags.join("・")}` : "タグ：すべて"));
+        filters.append(hint("選んだタグをすべて含む（AND）"), field(state.tagQuery, "絞り込みタグを検索", "tag-search", value => { state.tagQuery = value; render(); }, { search: true }));
+        const tags = el("div", "cv2-tag-options");
+        const allTags = [...new Set([...config.catalog.items.flatMap(i => i.tags), ...state.filterTags])].sort((a,b)=>a.localeCompare(b,"ja"));
+        for (const tag of allTags.filter(tag => tag.toLocaleLowerCase().includes(state.tagQuery.toLocaleLowerCase()))) {
+            const option = el("label", "cv2-row"), checkbox = el("input"); checkbox.type = "checkbox"; checkbox.checked = state.filterTags.includes(tag);
+            checkbox.setAttribute("aria-label", `${tag}で絞り込み`); checkbox.dataset.focus = `tag-filter:${tag}`;
+            checkbox.addEventListener("change", () => { state.filterTags = checkbox.checked ? [...new Set([...state.filterTags,tag])] : state.filterTags.filter(value=>value!==tag); render(); });
+            option.title = tag; option.append(checkbox, document.createTextNode(tag)); tags.append(option);
+        }
+        filters.append(tags, button("タグ絞り込みを解除", () => { state.filterTags = []; render(); }));
         const controls = row(search, filters);
         if (full) {
             const sort = el("select"); sort.setAttribute("aria-label", "並べ替え");
@@ -226,8 +228,8 @@ function openCatalog(node) {
             sort.value = state.sort; sort.addEventListener("change", () => { state.sort = sort.value; render(); }); controls.append(sort);
         }
         pane.append(controls);
-        const visible = filteredItems(config, state.query, state.tag);
-        if (state.sort === "name") visible.sort((a, b) => a.name.localeCompare(b.name));
+        const visible = filteredItems(config, state.query, state.filterTags);
+        if (state.sort === "name") visible.sort((a, b) => a.name.localeCompare(b.name, "ja") || a.id.localeCompare(b.id));
         else if (state.sort === "tags") {
             const keys = itemTagSortKeys(visible);
             visible.sort((a, b) => compareItemTagKeys(keys.get(a.id), keys.get(b.id)) || a.name.localeCompare(b.name, "ja") || a.id.localeCompare(b.id));
@@ -333,7 +335,7 @@ function openCatalog(node) {
                 if (value === "" || !/^\d+$/.test(value) || Number(value) > LIMITS.items) { report("未反映: 抽選数は0〜10000の整数で指定してください", true); return; }
                 editGroup(group.id, g => { g.count = Number(value); }, `count:${group.id}`, false);
             }, { type: "number" }), hint("件を選ぶ"));
-            modeRow.append(menu("候補を変更", button("左の選択を候補に設定", () => editGroup(group.id, g => { g.item_ids = selectedIds(); }), { disabled: !selectedIds().length }), button("左で候補を選択", () => { state.selected = new Set(group.item_ids); state.query = ""; state.tag = ""; state.mobilePane = "library"; state.libraryHidden = false; render(); })));
+            modeRow.append(menu("候補を変更", button("左の選択を候補に設定", () => editGroup(group.id, g => { g.item_ids = selectedIds(); }), { disabled: !selectedIds().length }), button("左で候補を選択", () => { state.selected = new Set(group.item_ids); state.query = ""; state.filterTags = []; state.mobilePane = "library"; state.libraryHidden = false; render(); })));
             card.append(modeRow);
             const candidates = el("details"); candidates.dataset.group = group.id; candidates.open = state.openGroups.has(group.id) || group.item_ids.length === 1;
             candidates.addEventListener("toggle", () => {
@@ -402,8 +404,11 @@ function openCatalog(node) {
         }
     }
 
+    const dismissTagFilter = event => { for (const filter of content?.querySelectorAll(".cv2-filter[open]") ?? []) if (!filter.contains(event.target)) { filter.open = false; state.filtersOpen = false; } };
+    document.addEventListener("pointerdown", dismissTagFilter, true);
     state.close = showDialog({ title: "SAX Text Catalog V2", className: "sax-catalog-v2", width: 1180, maxHeight: "98vh", gap: 10,
         onClose: () => {
+            document.removeEventListener("pointerdown", dismissTagFilter, true);
             for (const input of content.querySelectorAll("[data-focus]")) detachAutoComplete(input);
             if (state.discard) buffer.cancel(); else buffer.flush();
             for (const target of content.querySelectorAll("[data-scroll]")) state.scroll.set(target.dataset.scroll, target.scrollTop);

@@ -168,5 +168,11 @@ const server=http.createServer(async(req,res)=>{
   measurements.push({count,textChars:size,openMs:Math.round(opened-started),editAndQueueMs:Math.round(finished-opened),visibleRows:nodes,workflowReferenceBytes:referenceBytes,patchBytes:calls.at(-1).bytes});
   await page.getByRole('button',{name:'閉じる',exact:true}).click();
  }
- assert.deepEqual(errors,[]);console.log(JSON.stringify({browser:'Edge',checks:'inline/queue/filter/set/result/drag/failure/mobile',measurements,patchBytes:calls.map(c=>c.bytes),errors}));
+ await page.evaluate(()=>{const legacy={...node,widgets:[{name:'config_json',value:JSON.stringify({version:2,catalog:{items:[{id:'a',name:'A',text:'本文',tags:['共通','背景']},{id:'b',name:'B',text:'別',tags:['共通']}]},recipes:[{id:'s',name:'セット',groups:[]}],active_recipe_id:'s'})},{name:'seed',value:1}]};Type.prototype.onNodeCreated.call(legacy);legacy.widgets.find(w=>w.name==='管理・編集'||w.name==='カタログを開く').callback();});
+ await page.locator('.cv2-filter summary').click();
+ await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).check();await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).check();
+ assert.equal(await page.locator('.cv2-item').count(),1);
+ await page.getByPlaceholder('名前・本文・タグを検索').click();assert.equal(await page.locator('.cv2-filter').evaluate(n=>n.open),false);
+ await page.getByRole('button',{name:'閉じる',exact:true}).click();
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({browser:'Edge',checks:'inline/queue/filter/set/result/drag/failure/mobile/embedded-multi-tag',measurements,patchBytes:calls.map(c=>c.bytes),errors}));
  }finally{await browser?.close();server.close()}})().catch(e=>{console.error(e);process.exitCode=1});

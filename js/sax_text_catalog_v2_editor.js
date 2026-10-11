@@ -127,7 +127,7 @@ export function openSharedEditor(session, options = {}) {
     let mode = options.mode ?? "items", result = options.result ?? null;
     if (options.recipeId) { if (mode === "items") { pref.recipeFilter = options.recipeId; pref.query = ""; pref.tags = []; pref.scroll = 0; } else pref.recipeId = options.recipeId; }
     let content, status, conflict, errorMessage, close, virtual = null, active = null, unsubscribe, localError = "", saveTimer, refreshing = false;
-    let itemMap = new Map(), selected = new Set(), candidateSelection = new Set(), candidateGroup = null, candidateQuery = "", candidateTag = "", resultRecipe = "", outputTab = false, selectionAnchor = null;
+    let itemMap = new Map(), selected = new Set(), candidateSelection = new Set(), candidateGroup = null, candidateQuery = pref.candidateQuery ?? "", candidateTags = pref.candidateTags ?? [], resultRecipe = "", outputTab = false, selectionAnchor = null;
     let candidatesOnly = false, candidateAnchor = null, targetParent = "";
     let additionMode = "combined";
     const dismissTagFilter = event => { for (const control of content?.querySelectorAll(".se-tag-filter[open]") ?? []) if (!control.contains(event.target)) control.open = false; };
@@ -224,7 +224,7 @@ export function openSharedEditor(session, options = {}) {
         if (mode === "items") {
             let ids = null; const r = doc().recipes.find(r => r.id === pref.recipeFilter); if (r) ids = new Set(groupItemIds(r.groups));
             const q = pref.query.trim().toLocaleLowerCase();
-            const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && pref.tags.every(tag => i.tags.includes(tag)) && (!q || `${i.name}\n${i.text}\n${i.tags.join(" ")}`.toLocaleLowerCase().includes(q)));
+            const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && matchesItem(i, q, pref.tags));
             return sortItems(values).map(i => ({ key: i.id, itemId: i.id, height: Math.max(33, 13 + pref.lines * 18) }));
         }
         const list = []; const q = pref.query.trim().toLocaleLowerCase();
@@ -245,7 +245,7 @@ export function openSharedEditor(session, options = {}) {
                     list.push({ key, section: true, depth, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 32 });
                     const values = snapshots.map((snapshot, i) => ({ key: `${key}:${i}`, depth, itemId: snapshot.id, snapshot, height: Math.max(33, 13 + pref.lines * 18) + 32 }));
                     if (reveal || showCandidates.has(key)) for (const id of g.candidate_ids ?? []) if (!chosen.has(id)) { const item = itemMap.get(id); if (item) values.push({ key: `${key}:candidate:${id}`, depth, itemId: id, candidate: true, height: Math.max(33, 13 + pref.lines * 18) }); }
-                    list.push(...sortItems(values.filter(e => { const i = itemMap.get(e.itemId) ?? e.snapshot; return pref.tags.every(tag => i?.tags?.includes(tag)) && (!q || `${i?.name ?? ""}\n${i?.text ?? ""}`.toLocaleLowerCase().includes(q)); }), e => itemMap.get(e.itemId) ?? e.snapshot));
+                    list.push(...sortItems(values.filter(e => matchesItem(itemMap.get(e.itemId) ?? e.snapshot, q, pref.tags)), e => itemMap.get(e.itemId) ?? e.snapshot));
                 }
             }
             appendGroups(r.groups ?? [], `g:${ri}`);
@@ -326,27 +326,30 @@ export function openSharedEditor(session, options = {}) {
         if (bulkBar) { bulkBar.firstChild.textContent = `${selected.size}件選択`; bulkBar.hidden = !selected.size; }
         if (selectAllControl && virtual) { const ids = virtual.entries.map(e => e.itemId); const count = ids.filter(id => selected.has(id)).length; selectAllControl.checked = Boolean(ids.length) && count === ids.length; selectAllControl.indeterminate = count > 0 && count < ids.length; }
     }
-    function tagFilter() {
+    function matchesItem(item, query, tags) {
+        return tags.every(tag => item?.tags?.includes(tag)) && (!query || `${item?.name ?? ""}\n${item?.text ?? ""}\n${item?.tags?.join(" ") ?? ""}`.toLocaleLowerCase().includes(query));
+    }
+    function tagFilter(getTags = () => pref.tags, setTags = tags => { pref.tags = tags; }, onChange = refresh) {
         const control = el("details", "se-tag-filter"), summary = el("summary"), popup = el("div", "se-tag-popup");
         summary.setAttribute("aria-label", "タグで絞り込み");
         const options = el("div", "se-tag-options");
-        const tags = [...new Set([...doc().catalog.items.flatMap(i => i.tags), ...pref.tags])].sort((a,b) => a.localeCompare(b,"ja"));
-        const updateSummary = () => { summary.textContent = pref.tags.length ? `タグ：${pref.tags.join("・")} ▾` : "タグ：すべて ▾"; summary.title = pref.tags.length ? `すべてに一致（AND）：${pref.tags.join("、")}` : "複数のタグを選んで絞り込み"; };
+        const tags = [...new Set([...doc().catalog.items.flatMap(i => i.tags), ...getTags()])].sort((a,b) => a.localeCompare(b,"ja"));
+        const updateSummary = () => { const chosen = getTags(); summary.textContent = chosen.length ? `タグ：${chosen.join("・")} ▾` : "タグ：すべて ▾"; summary.title = chosen.length ? `すべてに一致（AND）：${chosen.join("、")}` : "複数のタグを選んで絞り込み"; };
         const search = input("", value => { const q = value.toLocaleLowerCase(); for (const option of options.children) option.hidden = !(option.dataset.tag ?? "").toLocaleLowerCase().includes(q); }); search.placeholder = "絞り込みタグを検索";
         for (const tag of tags) {
-            const checkbox = check(pref.tags.includes(tag), yes => { releaseActive(); pref.tags = yes ? [...new Set([...pref.tags, tag])] : pref.tags.filter(value => value !== tag); updateSummary(); refresh(); });
+            const checkbox = check(getTags().includes(tag), yes => { releaseActive(); setTags(yes ? [...new Set([...getTags(), tag])] : getTags().filter(value => value !== tag)); updateSummary(); onChange(); });
             checkbox.setAttribute("aria-label", `${tag}で絞り込み`);
             const option = label(tag, checkbox); option.dataset.tag = tag; option.title = tag; options.append(option);
         }
         if (!tags.length) options.append(el("span", "se-muted", "タグがありません"));
-        popup.append(el("span", "se-muted", "選んだタグをすべて含む（AND）"), search, options, btn("タグ絞り込みを解除", () => { releaseActive(); pref.tags = []; for (const checkbox of options.querySelectorAll("input")) checkbox.checked = false; updateSummary(); refresh(); }));
+        popup.append(el("span", "se-muted", "選んだタグをすべて含む（AND）"), search, options, btn("タグ絞り込みを解除", () => { releaseActive(); setTags([]); for (const checkbox of options.querySelectorAll("input")) checkbox.checked = false; updateSummary(); onChange(); }));
         control.append(summary, popup); updateSummary();
         control.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); control.open = false; summary.focus(); } });
         control.addEventListener("focusout", event => { if (event.relatedTarget && !control.contains(event.relatedTarget)) control.open = false; });
         return control;
     }
     function filters() {
-        const q = input(pref.query, value => { pref.query = value; releaseActive(); scheduleRefresh(); }); q.placeholder = "名前・本文を検索"; q.className = "se-grow";
+        const q = input(pref.query, value => { pref.query = value; releaseActive(); scheduleRefresh(); }); q.placeholder = "名前・本文・タグを検索"; q.className = "se-grow";
         const tag = tagFilter();
         const sets = [["", "セット：すべて"], ...doc().recipes.map(r => [r.id, r.name])];
         const set = select(sets, mode === "results" ? resultRecipe : pref.recipeFilter, value => { releaseActive(); if (mode === "results") resultRecipe = value; else pref.recipeFilter = value; refresh(); });
@@ -392,7 +395,7 @@ export function openSharedEditor(session, options = {}) {
         const parent = select(parentOptions(candidateGroup), targetParent, value => { targetParent = value; }); parent.setAttribute("aria-label", "構成要素の配置先");
         left.append(row(el("span", "se-muted", "配置先"), parent));
         const q = input(candidateQuery, value => { candidateQuery = value; renderCandidates(); }); q.placeholder = "名前・本文・タグを検索"; q.className = "se-grow";
-        const tag = select([["", "タグ：すべて"], ...[...new Set(doc().catalog.items.flatMap(i => i.tags))].sort().map(t => [t, t])], candidateTag, value => { candidateTag = value; renderCandidates(); });
+        const tag = tagFilter(() => candidateTags, tags => { candidateTags = tags; }, () => renderCandidates());
         const filter = row(q, tag, sortControl(() => renderCandidates())); filter.classList.add("se-filterbar"); left.append(filter);
         const scroll = el("div", "se-scroll se-candidate-scroll"); left.append(scroll);
         function chooseCandidate(id, yes, range = false) {
@@ -416,7 +419,7 @@ export function openSharedEditor(session, options = {}) {
         virtual = candidateVirtual;
         const renderCandidates = () => {
             const query = candidateQuery.trim().toLocaleLowerCase();
-            candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidatesOnly || candidateSelection.has(i.id)) && (!candidateTag || i.tags.includes(candidateTag)) && (!query || `${i.name} ${i.text} ${i.tags.join(" ")}`.toLocaleLowerCase().includes(query)))).map(i => ({ key: i.id, itemId: i.id, height: 48 })));
+            candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidatesOnly || candidateSelection.has(i.id)) && matchesItem(i, query, candidateTags))).map(i => ({ key: i.id, itemId: i.id, height: 48 })));
             for (const [id, n] of candidateVirtual.nodes) { n.querySelector("input").checked = candidateSelection.has(id); n.dataset.selected = String(candidateSelection.has(id)); }
             count.textContent = `${candidateSelection.size}件選択`; matched.textContent = `${candidateVirtual.entries.length}件一致`;
         };
@@ -463,7 +466,7 @@ export function openSharedEditor(session, options = {}) {
             groupName.setAttribute("aria-label", `構成要素 ${index + 1}の名前`);
             const icon = (text, title, fn) => { const control = btn(text, fn, "se-group-icon"); control.title = title; control.setAttribute("aria-label", title); return control; };
             const enabled = check(g.on, yes => { editGroup(g.id, next => { next.on = yes; }); card.dataset.off = !yes; }); enabled.setAttribute("aria-label", `構成要素 ${index + 1}を使用`);
-            const changeCandidates = () => { if (nested) { editNested(g.id); return; } targetParent = locateGroup(recipe().groups,g.id).parentId; candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTag = ""; render(); };
+            const changeCandidates = () => { if (nested) { editNested(g.id); return; } targetParent = locateGroup(recipe().groups,g.id).parentId; candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTags = []; render(); };
             const single = !nested && g.item_ids.length === 1;
             card.dataset.single = String(single);
             const header = row(el("span", "se-muted", "≡"), enabled);
@@ -551,6 +554,7 @@ export function openSharedEditor(session, options = {}) {
     }
     const switchMode = next => { releaseActive(); pref.scroll = 0; pref.query = ""; pref.tags = []; mode = next; render(); };
     close = showDialog({ title: `SAX Text Catalog V2 — ${doc().name}`, width: 1200, maxHeight: "97vh", className: "sax-shared-editor", onClose() {
+        pref.candidateQuery = candidateQuery; pref.candidateTags = [...candidateTags];
         document.removeEventListener("pointerdown", dismissTagFilter, true);
         for (const list of orderLists.splice(0)) list.destroy();
         releaseActive(); clearTimeout(saveTimer); unsubscribe?.(); virtual?.destroy(); for (const t of content?.querySelectorAll("textarea") ?? []) detachAutoComplete(t); openEditors.delete(session); void session.flush().catch(() => {});

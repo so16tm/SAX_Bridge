@@ -56,7 +56,7 @@ const server = http.createServer((req, res) => {
         assert.ok(compactHeight <= 36, `短文の行高: ${compactHeight}`);
         await page.locator('.se-record').first().getByRole('button',{name:'本文を編集',exact:true}).click();
         assert.ok(await page.locator('.se-record[data-editing=true]').evaluate(n=>n.getBoundingClientRect().height) >= 200);
-        await page.getByPlaceholder('名前・本文を検索').focus();
+        await page.getByPlaceholder('名前・本文・タグを検索').focus();
         await page.waitForFunction(()=>!document.querySelector('.se-record[data-editing=true]'));
         const itemOrder = () => page.locator('.se-record').evaluateAll(rows => rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.key));
         // 登録順と名前順が異なるデータで、全画面が同じ比較規則を使うことを確認する。
@@ -66,7 +66,7 @@ const server = http.createServer((req, res) => {
         const tagRows = await page.locator('.se-tag-options label').evaluateAll(rows=>rows.map(n=>({height:n.getBoundingClientRect().height,top:n.getBoundingClientRect().top})));
         assert.ok(tagRows.every(n=>n.height===24));
         assert.ok(tagRows.slice(1).every((n,i)=>n.top-tagRows[i].top===24));
-        await page.getByPlaceholder('名前・本文を検索').click();
+        await page.getByPlaceholder('名前・本文・タグを検索').click();
         assert.equal(await page.locator('.se-tag-filter').evaluate(n=>n.open),false);
         await page.locator('.se-tag-filter summary').click();
         await page.locator('.se-columns>span').last().click();
@@ -87,9 +87,9 @@ const server = http.createServer((req, res) => {
         await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();
         await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).check();
         await page.locator('.se-tag-filter summary').click();
-        await page.getByPlaceholder('名前・本文を検索').fill('甲');
+        await page.getByPlaceholder('名前・本文・タグを検索').fill('甲');
         await page.waitForFunction(()=>document.querySelectorAll('.se-record').length===0);
-        await page.getByPlaceholder('名前・本文を検索').fill('');
+        await page.getByPlaceholder('名前・本文・タグを検索').fill('');
         await page.waitForFunction(()=>document.querySelectorAll('.se-record').length===1);
         await page.locator('.se-tag-filter summary').click();
         await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();
@@ -119,10 +119,37 @@ const server = http.createServer((req, res) => {
         await singleCard.getByRole('button', {name:'候補を変更',exact:true}).click();
         assert.equal(await page.getByRole('checkbox', {name:'選択済みだけ',exact:true}).isChecked(),true);
         await page.getByRole('checkbox', {name:'選択済みだけ',exact:true}).uncheck();
+        await page.locator('.se-tag-filter summary').click();
+        await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).check();
+        await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).check();
+        assert.deepEqual(await page.locator('.se-candidate').evaluateAll(rows=>rows.map(n=>n.dataset.itemId)),['z']);
+        assert.equal(await page.locator('.se-selectionbar strong').textContent(),'1件選択');
+        await page.getByPlaceholder('名前・本文・タグを検索').click();
+        assert.equal(await page.locator('.se-tag-filter').evaluate(n=>n.open),false);
+        await page.getByPlaceholder('名前・本文・タグを検索').fill('風景');
+        assert.equal(await page.locator('.se-candidate').count(),0);
+        await page.getByPlaceholder('名前・本文・タグを検索').fill('');
+        await page.locator('.se-tag-filter summary').click();
+        await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();
+        await page.locator('.se-tag-filter summary').click();
+
         await page.getByRole('button', {name:'一覧を全選択',exact:true}).click();
         await page.getByRole('button', {name:'候補を更新',exact:true}).click();
         assert.equal(await page.locator('.se-card[data-single=true]').count(),0);
         assert.equal(await page.locator('.se-card').last().locator(':scope > .se-row').count(),2);
+        await page.locator('.se-tag-filter summary').click();
+        await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).check();
+        await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).check();
+        await page.getByRole('button', { name: '閉じる', exact: true }).click();
+        await page.locator('.sax-shared-catalog').getByRole('button',{name:'アイテム',exact:true}).click();
+        await page.getByRole('button',{name:'テキストセット',exact:true}).click();
+        assert.deepEqual(await page.locator('.se-candidate').evaluateAll(rows=>rows.map(n=>n.dataset.itemId)),['z']);
+        await page.locator('.se-tag-filter summary').click();
+        assert.equal(await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).isChecked(),true);
+        assert.equal(await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).isChecked(),true);
+        await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();
+        await page.locator('.se-tag-filter summary').click();
+
         await page.getByRole('button', { name: '閉じる', exact: true }).click();
         await page.evaluate(() => { const d=shared().session.document;shared().result={text:'保存済み出力',selection:{rows:[{name:'セット',on:true,groups:[{name:'構成要素',on:true,mode:'all',item_ids:['z','a'],candidate_ids:['z','a'],items:[...d.catalog.items]}]}]}}; });
         await page.getByRole('button', { name: '前回の実行結果', exact: true }).click();
@@ -134,6 +161,11 @@ const server = http.createServer((req, res) => {
         assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.map(row=>row.dataset.itemId)),['z']);
         await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();
         await page.locator('.se-tag-filter summary').click();
+        await page.getByPlaceholder('名前・本文・タグを検索').fill('風景');
+        await page.waitForFunction(()=>document.querySelectorAll('.se-record').length===1);
+        assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.map(n=>n.dataset.itemId)),['a']);
+        await page.getByPlaceholder('名前・本文・タグを検索').fill('');
+        await page.waitForFunction(()=>document.querySelectorAll('.se-record').length===2);
         await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('tags');
         assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.itemId)),['z','a']);
         assert.deepEqual(await page.evaluate(()=>shared().result.selection.rows[0].groups[0].items.map(i=>i.id)),['z','a']);

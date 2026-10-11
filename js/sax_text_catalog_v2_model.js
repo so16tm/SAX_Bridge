@@ -126,7 +126,8 @@ export function parseTags(text) {
 
 export function filteredItems(config, query = "", tag = "") {
     const needle = query.trim().toLocaleLowerCase();
-    return config.catalog.items.filter(item => (!tag || item.tags.includes(tag)) &&
+    const tags = Array.isArray(tag) ? tag : tag ? [tag] : [];
+    return config.catalog.items.filter(item => tags.every(value => item.tags.includes(value)) &&
         (!needle || `${item.name}\n${item.text}\n${item.tags.join(" ")}`.toLocaleLowerCase().includes(needle)));
 }
 
