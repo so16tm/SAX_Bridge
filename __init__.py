@@ -10,6 +10,7 @@ from .nodes import text_catalog as text_catalog_node
 from .nodes import text_catalog_v2 as text_catalog_v2_node
 from .nodes import text_catalog_v2_store
 from .nodes import tag_dictionary
+from .nodes import wildcard_editor
 from .nodes import guidance as guidance_node
 from .nodes import sam3 as sam3_node
 from .nodes import mask_adjust as mask_adjust_node
@@ -109,6 +110,7 @@ for node_cls in NODE_CLASS_MAPPINGS.values():
 debug_log_module.register_lifecycle_hook()
 text_catalog_v2_store.register_routes()
 tag_dictionary.register_routes()
+wildcard_editor.register_routes()
 
 from .nodes.autocomplete_bridge import register_prompt_handler  # noqa: E402
 register_prompt_handler()
