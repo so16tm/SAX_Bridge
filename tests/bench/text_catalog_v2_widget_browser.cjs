@@ -5,6 +5,7 @@ const root = path.resolve(__dirname, '../..');
 const docs = ['one', 'two'].map(id => ({ version: 3, id, name: `カタログ${id}`, revision: 1,
     catalog: { items: [{ id: 'z', name: 'Z アイテム', text: '乙の本文', tags: ['共通','背景'] }, { id: 'a', name: 'A アイテム', text: '甲の本文', tags: ['共通','風景'] }] },
     recipes: [{ id: 's', name: 'テキストセット', groups: [{id:'g',name:'構成要素',mode:'all',on:true,count:2,item_ids:['z','a']},{id:'single',name:'単一',mode:'random',on:true,count:0,item_ids:['z']}] }] }));
+for (const doc of docs) doc.recipes.push({id:'a-set',name:'A セット',groups:[]});
 const html = `<meta charset="utf-8"><style>body{background:#181818;color:#ddd;font:12px sans-serif}#host{width:350px;background:#353535;padding:8px}#host>button,#host>.native{display:block;box-sizing:border-box;width:100%;height:24px;margin:4px 0}h3{font-size:12px;margin:4px}</style><div id="host"></div><script type="module">
 import {installSharedControls,sharedController} from '/js/sax_text_catalog_v2_shared.js';
 const host=document.querySelector('#host');
@@ -48,9 +49,13 @@ const server = http.createServer((req, res) => {
         await page.locator('.sax-shared-catalog').getByRole('button', { name: 'カタログ作成・入出力', exact: true }).click();
         await page.getByRole('button', { name: '新しいカタログ', exact: true }).waitFor();
         await page.mouse.click(2, 2);
+        await page.evaluate(()=>shared().setWidget.refresh());
+        assert.deepEqual(await page.locator('.ssw-entry select').first().locator('option').evaluateAll(options=>options.filter(o=>o.value).map(o=>o.value)),['a-set','s']);
         await page.locator('.sax-shared-catalog').getByRole('button', { name: 'アイテム', exact: true }).click();
         await page.locator('.se-record').first().waitFor();
         assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'name');
+        assert.deepEqual(await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).locator('option').evaluateAll(options=>options.filter(o=>o.value).map(o=>o.value)),['a-set','s']);
+
         // 短い本文は3行表示でも余白を作らず、編集時だけ行が広がる。
         const compactHeight = await page.locator('.se-record').first().evaluate(n=>n.getBoundingClientRect().height);
         assert.ok(compactHeight <= 36, `短文の行高: ${compactHeight}`);

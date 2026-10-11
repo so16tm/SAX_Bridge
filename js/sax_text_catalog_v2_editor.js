@@ -1,5 +1,5 @@
 import { showDialog, showConfirmDialog } from "./sax_ui_base.js";
-import { newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "./sax_text_catalog_v2_model.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { openWildcardPicker } from "./sax_text_catalog_v2_wildcards.js";
 
@@ -351,7 +351,7 @@ export function openSharedEditor(session, options = {}) {
     function filters() {
         const q = input(pref.query, value => { pref.query = value; releaseActive(); scheduleRefresh(); }); q.placeholder = "名前・本文・タグを検索"; q.className = "se-grow";
         const tag = tagFilter();
-        const sets = [["", "セット：すべて"], ...doc().recipes.map(r => [r.id, r.name])];
+        const sets = [["", "セット：すべて"], ...sortedNamedOptions(doc().recipes).map(r => [r.id, r.name])];
         const set = select(sets, mode === "results" ? resultRecipe : pref.recipeFilter, value => { releaseActive(); if (mode === "results") resultRecipe = value; else pref.recipeFilter = value; refresh(); });
         set.setAttribute("aria-label", "テキストセットで絞り込み");
         const lines = select([["1", "本文1行"], ["3", "本文3行"], ["6", "本文6行"]], String(pref.lines), value => { releaseActive(); pref.lines = Number(value); virtual.heights.clear(); refresh(); });
@@ -383,7 +383,7 @@ export function openSharedEditor(session, options = {}) {
     function editGroup(groupId, change) { const r = recipe(); if (!r) return; const next = structuredClone(r); const g = [...walkGroups(next.groups)].find(g => g.id === groupId); if (!g) return; change(g, next); putRecipe(next); }
     function renderSets() {
         const r = recipe(); if (r) pref.recipeId = r.id;
-        const setSelect = select(doc().recipes.map(s => [s.id, s.name]), r?.id ?? "", value => { pref.recipeId = value; candidateGroup = null; targetParent = ""; candidateSelection.clear(); candidatesOnly = false; candidateAnchor = null; render(); });
+        const setSelect = select(sortedNamedOptions(doc().recipes).map(s => [s.id, s.name]), r?.id ?? "", value => { pref.recipeId = value; candidateGroup = null; targetParent = ""; candidateSelection.clear(); candidatesOnly = false; candidateAnchor = null; render(); });
         const create = () => { const next = { id: newId(), name: "新しいテキストセット", groups: [] }; if (putRecipe(next)) { pref.recipeId = next.id; render(); } };
         content.append(row(el("strong", "", "テキストセット"), setSelect, btn("＋ 作成", create), btn("コピー", () => { if (!r) return; const next = structuredClone(r); next.id = newId(); next.name += " コピー"; for (const g of walkGroups(next.groups)) g.id = newId(); if (putRecipe(next)) { pref.recipeId = next.id; render(); } }), btn("削除", async () => { if (r && await showConfirmDialog({ title: "テキストセットを削除", message: `${r.name}を共有カタログから削除します。参照しているワークフローではセットの選び直しが必要です。`, danger: true, okLabel: "削除" })) { mutate([{ type: "recipe.delete", id: r.id }]); pref.recipeId = null; render(); } })));
         if (!r) { content.append(el("div", "se-empty", "「＋ 作成」でテキストセットを作成してください。")); return; }

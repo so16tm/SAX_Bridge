@@ -9,6 +9,11 @@ export function newId() {
     return globalThis.crypto?.randomUUID?.() ?? `v2_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
+// 選択肢だけを並べ替え、保存された実行順は変更しない。
+export function sortedNamedOptions(values) {
+    return [...values].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "ja") || a.id.localeCompare(b.id));
+}
+
 export function itemTagSortKeys(items) {
     return new Map(items.map(item => [item.id, [...(item.tags ?? [])].sort((a, b) => a.localeCompare(b, "ja"))]));
 }

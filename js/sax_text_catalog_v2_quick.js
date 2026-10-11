@@ -1,5 +1,5 @@
 import { makeItemListWidget, getComfyTheme, txt, ROW_H, autoResize, showParamPopup } from "./sax_ui_base.js";
-import { parseConfig, validateConfig, EditHistory } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, parseConfig, validateConfig, EditHistory } from "./sax_text_catalog_v2_model.js";
 
 // 大量の素材と本文は管理画面、生成時の切替・有効化・抽選数はノード上で扱う。
 const controllers = new WeakMap();
@@ -44,7 +44,7 @@ export function installQuickControls(node, callbacks) {
     controller.refresh = () => {
         const config = read();
         controller.labels.clear();
-        for (const recipe of config?.recipes ?? []) {
+        for (const recipe of sortedNamedOptions(config?.recipes ?? [])) {
             const base = recipe.name || "無題の組み合わせ";
             let label = base, suffix = 2;
             while (controller.labels.has(label)) label = `${base} (${suffix++})`;

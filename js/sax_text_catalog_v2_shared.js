@@ -1,7 +1,7 @@
 import { getComfyTheme, txt, autoResize, showDialog, showPromptDialog, showAlertDialog } from "./sax_ui_base.js";
 import { listCatalogs, createCatalog, importCatalog, getSession } from "./sax_text_catalog_v2_client.js";
 import { openSharedEditor } from "./sax_text_catalog_v2_editor.js";
-import { newId } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, newId } from "./sax_text_catalog_v2_model.js";
 import { makeSharedSetWidget, makeSharedCatalogWidget } from "./sax_text_catalog_v2_widget.js";
 
 const controls = new WeakMap();
@@ -47,7 +47,7 @@ export function installSharedControls(node) {
     const choose = (title, entries, callback) => showDialog({ title, width: 440, build(dialog, close) {
         const search = document.createElement("input"); search.placeholder = "検索"; dialog.append(search);
         const list = document.createElement("div"); list.style.cssText = "max-height:50vh;overflow:auto;display:grid;gap:6px"; dialog.append(list);
-        const render = () => { list.replaceChildren(); for (const entry of entries.filter(e => e.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()))) {
+        const render = () => { list.replaceChildren(); for (const entry of sortedNamedOptions(entries).filter(e => e.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()))) {
             const button = document.createElement("button"); button.textContent = entry.name || "無題"; button.onclick = act(async () => { await callback(entry.id); close(); }); list.append(button);
         } }; search.oninput = render; render();
     } });
@@ -146,7 +146,7 @@ export function installSharedControls(node) {
         const token = ++controller.token, ref = readReference(node);
         controller.unsubscribe?.(); controller.unsubscribe = null; controller.session = null;
         const catalogs = await listCatalogs(); if (token !== controller.token) return;
-        controller.catalogs = catalogs.catalogs ?? catalogs;
+        controller.catalogs = sortedNamedOptions(catalogs.catalogs ?? catalogs);
         catalogWidget.options.values = controller.catalogs.map(c => `${c.name} · ${c.id.slice(0, 8)}`);
         catalogWidget.value = catalogWidget.options.values[controller.catalogs.findIndex(c => c.id === ref.catalog_id)] ?? "カタログを選択／作成";
         controller.catalogToolbar?.refresh(controller.catalogs, ref.catalog_id);

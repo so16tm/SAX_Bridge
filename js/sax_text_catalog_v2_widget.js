@@ -1,4 +1,4 @@
-import { newId } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, newId } from "./sax_text_catalog_v2_model.js";
 import { PAD, GAP, ROW_H, HEADER_H, BTN_RADIUS, getComfyTheme } from "./sax_ui_base.js";
 
 const CSS = `
@@ -65,7 +65,7 @@ export function makeSharedCatalogWidget(node, { chooseCatalog, openItems, openMa
     function refresh(catalogs, id) {
         select.replaceChildren();
         const placeholder = element("option", "", "カタログを選択／作成"); placeholder.value = ""; placeholder.disabled = true; select.append(placeholder);
-        for (const catalog of catalogs) { const option = element("option", "", `${catalog.name} · ${catalog.id.slice(0, 8)}`); option.value = catalog.id; select.append(option); }
+        for (const catalog of sortedNamedOptions(catalogs)) { const option = element("option", "", `${catalog.name} · ${catalog.id.slice(0, 8)}`); option.value = catalog.id; select.append(option); }
         select.value = catalogs.some(c => c.id === id) ? id : "";
     }
     refresh([], "");
@@ -151,7 +151,7 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
         try { current = displayRows(); recipes = readRecipes(); } catch (error) { fail(error); return; }
         const valid = new Set(current.map(row => row.id));
         for (const [id, value] of elements) if (!valid.has(id)) { value.root.remove(); elements.delete(id); }
-        const recipeList = recipes ?? []; const recipesById = new Map(recipeList.map(recipe => [recipe.id, recipe]));
+        const recipeList = sortedNamedOptions(recipes ?? []); const recipesById = new Map(recipeList.map(recipe => [recipe.id, recipe]));
         const signature = JSON.stringify(recipeList.map(recipe => [recipe.id, recipe.name]));
         let missing = 0;
         for (const [index, currentRow] of current.entries()) {

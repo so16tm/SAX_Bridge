@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showDialog, showConfirmDialog, showPromptDialog, showAlertDialog, hideWidget } from "./sax_ui_base.js";
-import { LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys } from "./sax_text_catalog_v2_model.js";
 import { installQuickControls } from "./sax_text_catalog_v2_quick.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { installSharedControls, sharedController, flushCatalogNodes, flushCatalogPrompt, readReference } from "./sax_text_catalog_v2_shared.js";
@@ -308,7 +308,7 @@ function openCatalog(node) {
     function renderRecipe(pane) {
         const current = recipe();
         const select = el("select", "cv2-grow"); select.setAttribute("aria-label", "組み合わせ");
-        for (const item of config.recipes) { const option = new Option(item.name || "無題の組み合わせ", item.id); option.dataset.recipename = item.id; select.append(option); }
+        for (const item of sortedNamedOptions(config.recipes)) { const option = new Option(item.name || "無題の組み合わせ", item.id); option.dataset.recipename = item.id; select.append(option); }
         select.value = current.id; select.addEventListener("change", () => commit(next => { next.active_recipe_id = select.value; }));
         const metadata = menu("操作", field(current.name, "組み合わせ名", `recipe:${current.id}`, value => commit(next => { next.recipes.find(r => r.id === current.id).name = value; }, `recipe:${current.id}`, false)), button("組み合わせを複製", () => commit(next => {
             const copy = structuredClone(current); copy.id = newId(); copy.name = `${copy.name.slice(0, 250)} コピー`; copy.groups.forEach(g => { g.id = newId(); }); next.recipes.push(copy); next.active_recipe_id = copy.id;

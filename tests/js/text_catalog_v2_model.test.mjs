@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "../../js/sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "../../js/sax_text_catalog_v2_model.js";
+
+test("名前順の選択肢は同名をIDで比較し、元の保存順を変更しない", () => {
+    const values = [{id:"z",name:"Z"},{id:"b",name:"A"},{id:"a",name:"A"}];
+    assert.deepEqual(sortedNamedOptions(values).map(v=>v.id), ["a","b","z"]);
+    assert.deepEqual(values.map(v=>v.id), ["z","b","a"]);
+});
 
 test("タグ順は複数タグの入力順に依存せず、同タグは名前順、タグなしは末尾", () => {
     const items = [
