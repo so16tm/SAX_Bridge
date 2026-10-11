@@ -2,7 +2,7 @@ import { getComfyTheme, txt, autoResize, showDialog, showPromptDialog, showAlert
 import { listCatalogs, createCatalog, importCatalog, getSession } from "./sax_text_catalog_v2_client.js";
 import { openSharedEditor } from "./sax_text_catalog_v2_editor.js";
 import { newId } from "./sax_text_catalog_v2_model.js";
-import { makeSharedSetWidget } from "./sax_text_catalog_v2_widget.js";
+import { makeSharedSetWidget, makeSharedCatalogWidget } from "./sax_text_catalog_v2_widget.js";
 
 const controls = new WeakMap();
 const hidden = widget => { widget.serialize = false; widget.options = { ...widget.options, serialize: false }; return widget; };
@@ -65,7 +65,7 @@ export function installSharedControls(node) {
         if (controller.session) await controller.session.flush();
         write({ version: 3, catalog_id: catalog.id, rows: [] }); await controller.reload();
     }), { values: [], serialize: false }));
-    hidden(node.addWidget("button", "アイテム", null, () => open("items"), { serialize: false }));
+    const itemsWidget = hidden(node.addWidget("button", "アイテム", null, () => open("items"), { serialize: false }));
     if (typeof node.addDOMWidget === "function") controller.setWidget = makeSharedSetWidget(node, {
         readRows: () => readReference(node).rows,
         readCatalogId: () => readReference(node).catalog_id,
@@ -123,8 +123,8 @@ export function installSharedControls(node) {
         if (!recipes.length) { open("sets"); return; }
         choose("テキストセットを追加", recipes, id => { const ref = readReference(node); if (ref.catalog_id !== catalogId) return; ref.rows.push({ id: newId(), recipe_id: id, on: true }); write(ref); });
     }, { serialize: false }));
-    hidden(node.addWidget("button", "前回の実行結果", null, () => open("results"), { serialize: false }));
-    hidden(node.addWidget("button", "カタログ作成・入出力", null, () => showDialog({ title: "カタログ作成・入出力", build(dialog, close) {
+    const resultWidget = hidden(node.addWidget("button", "前回の実行結果", null, () => open("results"), { serialize: false }));
+    const managementWidget = hidden(node.addWidget("button", "カタログ作成・入出力", null, () => showDialog({ title: "カタログ作成・入出力", build(dialog, close) {
         for (const [label, callback] of [["新しいカタログ", async () => {
             const name = await showPromptDialog({ title: "カタログ名", defaultValue: "共通カタログ" }); if (name === null) return;
             const doc = await createCatalog({ name }); write({ version: 3, catalog_id: doc.id, rows: [] }); await controller.reload(); close();
@@ -148,6 +148,7 @@ export function installSharedControls(node) {
         controller.catalogs = catalogs.catalogs ?? catalogs;
         catalogWidget.options.values = controller.catalogs.map(c => `${c.name} · ${c.id.slice(0, 8)}`);
         catalogWidget.value = catalogWidget.options.values[controller.catalogs.findIndex(c => c.id === ref.catalog_id)] ?? "カタログを選択／作成";
+        controller.catalogToolbar?.refresh(controller.catalogs, ref.catalog_id);
         const session = ref.catalog_id ? await getSession(ref.catalog_id) : null;
         if (token !== controller.token) return;
         controller.unsubscribe?.(); controller.session = session; controller.unsubscribe = session?.subscribe(redraw); redraw();
@@ -156,11 +157,27 @@ export function installSharedControls(node) {
         ++controller.token; controller.stopDrag?.();
         // ComfyUIのDOMウィジェット登録も解除し、configure後の重複表示を防ぐ。
         controller.setWidget?.widget.onRemove?.(); controller.setWidget?.dispose();
+        controller.catalogToolbar?.widget.onRemove?.(); controller.catalogToolbar?.dispose();
         controller.unsubscribe?.(); controls.delete(node);
     };
     const seedControls = node.widgets.filter(w => w.name === "seed" || w.name === "control_after_generate");
-    node.widgets = node.widgets.filter(w => !seedControls.includes(w));
-    node.widgets.splice(node.widgets.findIndex(w => w.name === "前回の実行結果"), 0, ...seedControls);
+    if (typeof node.addDOMWidget === "function") controller.catalogToolbar = makeSharedCatalogWidget(node, {
+        chooseCatalog: id => {
+            const catalog = controller.catalogs.find(c => c.id === id);
+            if (catalog) return catalogWidget.callback(`${catalog.name} · ${catalog.id.slice(0, 8)}`);
+        },
+        openItems: () => open("items"), openManagement: managementWidget.callback,
+    });
+    const heading = (name, label) => hidden(node.addCustomWidget({ name, type: "custom", computeSize: width => [width, 24],
+        draw(ctx, currentNode, width, y) { txt(ctx, label, 12, y + 15, getComfyTheme().inputText); },
+    }));
+    const executionHeading = heading("__sax_execution_heading", "実行設定");
+    const catalogHeading = heading("__sax_catalog_heading", "カタログ管理");
+    const catalogControls = controller.catalogToolbar ? [controller.catalogToolbar.widget] : [catalogWidget, itemsWidget, managementWidget];
+    const moved = new Set([...seedControls, resultWidget, catalogWidget, itemsWidget, managementWidget,
+        controller.catalogToolbar?.widget, executionHeading, catalogHeading]);
+    const setControls = node.widgets.filter(w => !moved.has(w) && w !== configWidget);
+    node.widgets = [configWidget, executionHeading, ...seedControls, resultWidget, catalogHeading, ...catalogControls, ...setControls];
     controller.reload();
     return controller;
 }

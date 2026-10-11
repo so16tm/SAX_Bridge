@@ -1234,6 +1234,7 @@ External catalog (import creates a fresh ID and revision):
 
 #### UI and Editing
 
+- The node is ordered as execution settings, catalog management, then set composition. Seed and previous results stay above the growing set list. Catalog selection, items, and the management menu (⋯) share one row.
 - Select a catalog on the node, then choose sets directly in each row's dropdown. Toggle the checkbox, drag the handle or use arrow keys to reorder, and remove a row with ×. Set-edit and item-edit icons appear to the right of each dropdown, keeping each set on one line. Tooltips explain both icons. All rows are displayed without paging. An added draft row is excluded from the workflow until a set is selected. Seed and post-run seed behavior remain on the node.
 - Each row's set-edit action opens that set directly. Edit candidates, counts, enabled components, and component order, or switch/create sets in the same editor. Item text fields are separate.
 - The item action opens a name/text/tag list. Click a field to edit inline; expand long text when needed. No save or return-to-list action is required between edits.

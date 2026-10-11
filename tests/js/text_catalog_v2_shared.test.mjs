@@ -54,6 +54,10 @@ test("シリアライズ済みpromptは重複参照をまとめて保存して�
 test("セット行は全件表示し、ONとドラッグ順はワークフローだけに保存する", async () => {
     const id = "widget-test"; documents.set(id, fixture(id)); const node = nodeFor(id, 20);
     installSharedControls(node); await new Promise(resolve => setTimeout(resolve, 20));
+    const names = node.widgets.map(w => w.name);
+    assert.ok(names.indexOf("seed") < names.indexOf("前回の実行結果"));
+    assert.ok(names.indexOf("前回の実行結果") < names.indexOf("カタログ"));
+    assert.ok(names.indexOf("カタログ作成・入出力") < names.indexOf("__sax_shared_sets"));
     const widget = node.widgets.find(w => w.name === "__sax_shared_sets"); assert.equal(widget.computeSize(400)[1],1040);
     widget.y=0; widget.mouse({type:"pointerdown"},[20,15]); assert.equal(readReference(node).rows[0].on,false);
     const handlers = new Map(); window.addEventListener=(type,fn)=>handlers.set(type,fn);window.removeEventListener=type=>handlers.delete(type);

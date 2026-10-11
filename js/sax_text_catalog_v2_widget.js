@@ -22,6 +22,38 @@ function editIcon(title, path) {
 }
 const ROW_ESTIMATE = ROW_H + 10 + GAP;
 
+/** Catalog actions share one row; set count does not affect their position. */
+export function makeSharedCatalogWidget(node, { chooseCatalog, openItems, openManagement }) {
+    const panel = element("div", "sax-shared-catalog");
+    const style = element("style"); style.textContent = `
+    .sax-shared-catalog{box-sizing:border-box;width:100%;padding:4px ${PAD}px;display:flex;gap:${GAP}px;color:var(--input-text,#ddd);font:11px/16px sans-serif}
+    .sax-shared-catalog select,.sax-shared-catalog button{box-sizing:border-box;min-width:0;height:${ROW_H}px;border:1px solid var(--border-color,#45454b);border-radius:${BTN_RADIUS}px;background:var(--comfy-menu-bg,#171718);color:inherit;font:inherit;padding:1px 6px}
+    .sax-shared-catalog select{flex:1;width:0;text-overflow:ellipsis}.sax-shared-catalog button{flex:none;cursor:pointer}
+    .sax-shared-catalog :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:1px}
+    `;
+    const select = element("select"); select.setAttribute("aria-label", "カタログを選択");
+    const items = button("アイテム"), menu = button("⋯");
+    menu.title = "カタログ作成・入出力"; menu.setAttribute("aria-label", "カタログ作成・入出力");
+    select.onchange = () => chooseCatalog(select.value); items.onclick = openItems; menu.onclick = openManagement;
+    panel.append(style, select, items, menu);
+    for (const event of ["pointerdown", "mousedown", "dblclick", "wheel", "keydown", "keyup"]) panel.addEventListener(event, e => e.stopPropagation());
+    const height = ROW_H + 8;
+    for (const name of ["min-height", "max-height", "height"]) panel.style.setProperty(`--comfy-widget-${name}`, `${height}px`);
+    const widget = node.addDOMWidget("__sax_shared_catalog", "sax-shared-catalog", panel, {
+        serialize: false, hideOnZoom: false, selectOn: [], margin: 4,
+        getMinHeight: () => height, getMaxHeight: () => height, getHeight: () => height, getValue: () => "",
+    });
+    widget.serialize = false; widget.options = { ...widget.options, serialize: false }; widget.computeSize = width => [width, height];
+    function refresh(catalogs, id) {
+        select.replaceChildren();
+        const placeholder = element("option", "", "カタログを選択／作成"); placeholder.value = ""; placeholder.disabled = true; select.append(placeholder);
+        for (const catalog of catalogs) { const option = element("option", "", `${catalog.name} · ${catalog.id.slice(0, 8)}`); option.value = catalog.id; select.append(option); }
+        select.value = catalogs.some(c => c.id === id) ? id : "";
+    }
+    refresh([], "");
+    return { widget, refresh, dispose: () => panel.remove() };
+}
+
 /** The workflow stores references only. Unselected draft rows stay in this widget. */
 export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, openSet, openItems, onResize, readCatalogId }) {
     const panel = element("div", "sax-shared-sets"); const style = element("style"); style.textContent = CSS;
