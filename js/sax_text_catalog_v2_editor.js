@@ -23,6 +23,8 @@ const STYLE = `
 .sax-shared-editor .se-card>.se-row{gap:5px;margin-bottom:0;flex-wrap:nowrap;min-width:0}
 .sax-shared-editor .se-card>.se-row+ .se-row{margin-top:4px}
 .sax-shared-editor .se-card input.se-grow{min-width:60px;width:0}
+.sax-shared-editor .se-card[data-single=true] input.se-grow{min-width:40px}
+.sax-shared-editor .se-single-mode{font-size:11px;white-space:nowrap}
 .sax-shared-editor .se-group-icon{width:26px;padding:0!important;flex:none}
 .sax-shared-editor .se-group-preview{flex:1;min-width:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:11px}
 .sax-shared-editor .se-candidate{height:48px;gap:8px;padding:4px 6px;cursor:pointer}
@@ -329,14 +331,26 @@ export function openSharedEditor(session, options = {}) {
             groupName.setAttribute("aria-label", `構成要素 ${index + 1}の名前`);
             const icon = (text, title, fn) => { const control = btn(text, fn, "se-group-icon"); control.title = title; control.setAttribute("aria-label", title); return control; };
             const enabled = check(g.on, yes => { editGroup(g.id, next => { next.on = yes; }); card.dataset.off = !yes; }); enabled.setAttribute("aria-label", `構成要素 ${index + 1}を使用`);
-            card.append(row(el("span", "se-muted", "≡"), enabled, groupName, icon("↑", "構成要素を上へ", () => moveGroup(g.id, -1)), icon("↓", "構成要素を下へ", () => moveGroup(g.id, 1)), icon("×", "構成要素を削除", () => { const next = structuredClone(recipe()); next.groups = next.groups.filter(v => v.id !== g.id); putRecipe(next); render(); })));
-            const groupMode = select([["all", "すべて使う"], ["random", "ランダム"]], g.mode, value => { editGroup(g.id, next => { next.mode = value; }); render(); });
-            const amount = input(g.count, value => { const count = Number(value); if (Number.isSafeInteger(count) && count >= 0 && count <= g.item_ids.length) editGroup(g.id, next => { next.count = count; }); else { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); } }, "number"); amount.style.width = "52px"; amount.min = "0"; amount.max = String(g.item_ids.length); amount.step = "1"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
-            const preview = el("span", "se-muted se-group-preview", g.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name ?? "削除済み").join("、"));
-            preview.title = "候補を変更で全候補を一覧表示";
-            const orderButton = btn("出力順", () => { orderGroup = orderGroup === g.id ? null : g.id; orderScroll = 0; render(); }); orderButton.setAttribute("aria-expanded", String(orderGroup === g.id)); orderButton.title = "候補アイテムの出力順を並び替え";
-            card.append(row(groupMode, amount, el("span", "se-muted", `${g.item_ids.length}候補`), preview, orderButton, btn("候補を変更", () => { candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTag = ""; render(); })));
-            if (orderGroup === g.id) renderOrder(card, g);
+            const changeCandidates = () => { candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTag = ""; render(); };
+            const single = g.item_ids.length === 1;
+            card.dataset.single = String(single);
+            const header = row(el("span", "se-muted", "≡"), enabled, groupName);
+            if (single) {
+                const itemName = el("span", "se-muted se-group-preview", itemMap.get(g.item_ids[0])?.name ?? "削除済み"); itemName.title = itemName.textContent;
+                header.append(itemName);
+                if (g.mode === "random") header.append(el("span", "se-muted se-single-mode", `ランダム${g.count}件`));
+            }
+            header.append(icon("✎", "候補を変更", changeCandidates), icon("↑", "構成要素を上へ", () => moveGroup(g.id, -1)), icon("↓", "構成要素を下へ", () => moveGroup(g.id, 1)), icon("×", "構成要素を削除", () => { const next = structuredClone(recipe()); next.groups = next.groups.filter(v => v.id !== g.id); putRecipe(next); render(); }));
+            card.append(header);
+            if (!single) {
+                const groupMode = select([["all", "すべて使う"], ["random", "ランダム"]], g.mode, value => { editGroup(g.id, next => { next.mode = value; }); render(); });
+                const amount = input(g.count, value => { const count = Number(value); if (Number.isSafeInteger(count) && count >= 0 && count <= g.item_ids.length) editGroup(g.id, next => { next.count = count; }); else { localError = "ランダム件数は候補数以下の整数にしてください"; updateStatus(); } }, "number"); amount.style.width = "52px"; amount.min = "0"; amount.max = String(g.item_ids.length); amount.step = "1"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
+                const preview = el("span", "se-muted se-group-preview", g.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name ?? "削除済み").join("、"));
+                preview.title = "編集アイコンで全候補を一覧表示";
+                const orderButton = btn("出力順", () => { orderGroup = orderGroup === g.id ? null : g.id; orderScroll = 0; render(); }); orderButton.setAttribute("aria-expanded", String(orderGroup === g.id)); orderButton.title = "候補アイテムの出力順を並び替え";
+                card.append(row(groupMode, amount, el("span", "se-muted", `${g.item_ids.length}候補`), preview, orderButton));
+                if (orderGroup === g.id) renderOrder(card, g);
+            }
             card.setAttribute("aria-label", `構成要素 ${index + 1}`); groups.append(card);
         }
         if (!r.groups.length) groups.append(el("div", "se-empty", "左側でアイテムを選び、「選んだアイテムを追加」で構成要素を作ります。")); renderCandidates();

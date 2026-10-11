@@ -4,7 +4,7 @@ const http = require('node:http'), fs = require('node:fs'), path = require('node
 const root = path.resolve(__dirname, '../..');
 const docs = ['one', 'two'].map(id => ({ version: 3, id, name: `カタログ${id}`, revision: 1,
     catalog: { items: [{ id: 'z', name: 'Z アイテム', text: '乙の本文', tags: ['背景'] }, { id: 'a', name: 'A アイテム', text: '甲の本文', tags: [] }] },
-    recipes: [{ id: 's', name: 'テキストセット', groups: [{id:'g',name:'構成要素',mode:'all',on:true,count:2,item_ids:['z','a']}] }] }));
+    recipes: [{ id: 's', name: 'テキストセット', groups: [{id:'g',name:'構成要素',mode:'all',on:true,count:2,item_ids:['z','a']},{id:'single',name:'単一',mode:'random',on:true,count:0,item_ids:['z']}] }] }));
 const html = `<meta charset="utf-8"><style>body{background:#181818;color:#ddd;font:12px sans-serif}#host{width:350px;background:#353535;padding:8px}#host>button,#host>.native{display:block;box-sizing:border-box;width:100%;height:24px;margin:4px 0}h3{font-size:12px;margin:4px}</style><div id="host"></div><script type="module">
 import {installSharedControls,sharedController} from '/js/sax_text_catalog_v2_shared.js';
 const host=document.querySelector('#host');
@@ -64,6 +64,26 @@ const server = http.createServer((req, res) => {
         assert.deepEqual(await page.locator('.se-candidate').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.key)),['z','a']);
         await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('name');
         assert.deepEqual(await page.locator('.se-candidate').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.key)),nameOrder);
+        const singleCard = page.locator('.se-card[data-single=true]');
+        for (const card of await page.locator('.se-card').all()) {
+            assert.equal(await card.locator(':scope > .se-row').first().getByRole('button', {name:'候補を変更',exact:true}).textContent(),'✎');
+            assert.equal(await card.getByRole('button', {name:'候補を変更',exact:true}).count(),1);
+        }
+        assert.equal(await singleCard.locator(':scope > .se-row').count(), 1);
+        assert.ok(await singleCard.evaluate(e => e.offsetHeight <= 44 && e.scrollWidth <= e.clientWidth));
+        await page.setViewportSize({width:600,height:1000});
+        assert.ok(await singleCard.evaluate(e => e.offsetHeight <= 44 && e.scrollWidth <= e.clientWidth));
+        await page.setViewportSize({width:1000,height:1000});
+        assert.equal(await singleCard.getByText('ランダム0件', {exact:true}).count(), 1);
+        assert.equal(await singleCard.getByRole('button', {name:'出力順',exact:true}).count(), 0);
+        assert.deepEqual(await page.evaluate(()=>shared().session.document.recipes[0].groups[1]),{id:'single',name:'単一',mode:'random',on:true,count:0,item_ids:['z']});
+        await singleCard.getByRole('button', {name:'候補を変更',exact:true}).click();
+        assert.equal(await page.getByRole('checkbox', {name:'選択済みだけ',exact:true}).isChecked(),true);
+        await page.getByRole('checkbox', {name:'選択済みだけ',exact:true}).uncheck();
+        await page.getByRole('button', {name:'一覧を全選択',exact:true}).click();
+        await page.getByRole('button', {name:'候補を更新',exact:true}).click();
+        assert.equal(await page.locator('.se-card[data-single=true]').count(),0);
+        assert.equal(await page.locator('.se-card').last().locator(':scope > .se-row').count(),2);
         await page.getByRole('button', { name: '閉じる', exact: true }).click();
         await page.evaluate(() => { const d=shared().session.document;shared().result={text:'保存済み出力',selection:{rows:[{name:'セット',on:true,groups:[{name:'構成要素',on:true,mode:'all',item_ids:['z','a'],candidate_ids:['z','a'],items:[...d.catalog.items]}]}]}}; });
         await page.getByRole('button', { name: '前回の実行結果', exact: true }).click();
