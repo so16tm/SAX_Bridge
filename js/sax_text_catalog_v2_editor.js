@@ -39,6 +39,10 @@ const STYLE = `
 .sax-shared-editor .se-single-mode{font-size:11px;white-space:nowrap}
 .sax-shared-editor .se-item-actions{display:flex;gap:4px}
 .sax-shared-editor .se-item-actions button{flex:1;min-width:0;padding:4px 0;font-size:11px}
+.sax-shared-editor .se-tag-filter{position:relative;min-width:100px;max-width:180px}
+.sax-shared-editor .se-tag-filter>summary{list-style:none;border:1px solid var(--border-color,#45454b);border-radius:6px;background:var(--comfy-input-bg,#242426);padding:4px 8px;font-size:12px;height:28px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sax-shared-editor .se-tag-popup{position:absolute;top:32px;left:0;z-index:20;width:240px;max-width:80vw;padding:8px;background:var(--comfy-input-bg,#242426);border:1px solid var(--border-color,#45454b);border-radius:6px;box-shadow:0 4px 12px #0006;display:flex;flex-direction:column;gap:6px}
+.sax-shared-editor .se-tag-options{max-height:240px;overflow:auto}.sax-shared-editor .se-tag-options label{flex-wrap:nowrap;padding:4px 0;overflow-wrap:anywhere}
 .sax-shared-editor .se-card[data-drop=inside]{outline:2px solid var(--primary-background,#5686d6)}
 .sax-shared-editor .se-card[data-drop=before]{border-top:3px solid var(--primary-background,#5686d6)}
 .sax-shared-editor .se-card[data-drop=after]{border-bottom:3px solid var(--primary-background,#5686d6)}
@@ -108,9 +112,9 @@ class VirtualRows {
 
 export function openSharedEditor(session, options = {}) {
     const existing = openEditors.get(session); if (existing) { existing.open(options); return existing.close; }
-    let pref = preferences.get(session); if (!pref) { pref = { query: "", tag: "", recipeFilter: "", lines: 3, scroll: 0, recipeId: null, sort: "name" }; preferences.set(session, pref); }
+    let pref = preferences.get(session); if (!pref) { pref = { query: "", recipeFilter: "", tags: [], lines: 3, scroll: 0, recipeId: null, sort: "name" }; preferences.set(session, pref); }
     let mode = options.mode ?? "items", result = options.result ?? null;
-    if (options.recipeId) { if (mode === "items") { pref.recipeFilter = options.recipeId; pref.query = ""; pref.tag = ""; pref.scroll = 0; } else pref.recipeId = options.recipeId; }
+    if (options.recipeId) { if (mode === "items") { pref.recipeFilter = options.recipeId; pref.query = ""; pref.tags = []; pref.scroll = 0; } else pref.recipeId = options.recipeId; }
     let content, status, conflict, errorMessage, close, virtual = null, active = null, unsubscribe, localError = "", saveTimer, refreshing = false;
     let itemMap = new Map(), selected = new Set(), candidateSelection = new Set(), candidateGroup = null, candidateQuery = "", candidateTag = "", resultRecipe = "", outputTab = false, selectionAnchor = null;
     let candidatesOnly = false, candidateAnchor = null, targetParent = "";
@@ -206,7 +210,7 @@ export function openSharedEditor(session, options = {}) {
         if (mode === "items") {
             let ids = null; const r = doc().recipes.find(r => r.id === pref.recipeFilter); if (r) ids = new Set(groupItemIds(r.groups));
             const q = pref.query.trim().toLocaleLowerCase();
-            const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && (!pref.tag || i.tags.includes(pref.tag)) && (!q || `${i.name}\n${i.text}\n${i.tags.join(" ")}`.toLocaleLowerCase().includes(q)));
+            const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && pref.tags.every(tag => i.tags.includes(tag)) && (!q || `${i.name}\n${i.text}\n${i.tags.join(" ")}`.toLocaleLowerCase().includes(q)));
             return sortItems(values).map(i => ({ key: i.id, itemId: i.id, height: Math.max(76, 28 + pref.lines * 23) }));
         }
         const list = []; const q = pref.query.trim().toLocaleLowerCase();
@@ -227,7 +231,7 @@ export function openSharedEditor(session, options = {}) {
                     list.push({ key, section: true, depth, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 52 });
                     const values = snapshots.map((snapshot, i) => ({ key: `${key}:${i}`, depth, itemId: snapshot.id, snapshot, height: Math.max(90, 28 + pref.lines * 23) }));
                     if (reveal || showCandidates.has(key)) for (const id of g.candidate_ids ?? []) if (!chosen.has(id)) { const item = itemMap.get(id); if (item) values.push({ key: `${key}:candidate:${id}`, depth, itemId: id, candidate: true, height: 90 }); }
-                    list.push(...sortItems(values.filter(e => { const i = itemMap.get(e.itemId) ?? e.snapshot; return (!pref.tag || i?.tags?.includes(pref.tag)) && (!q || `${i?.name ?? ""}\n${i?.text ?? ""}`.toLocaleLowerCase().includes(q)); }), e => itemMap.get(e.itemId) ?? e.snapshot));
+                    list.push(...sortItems(values.filter(e => { const i = itemMap.get(e.itemId) ?? e.snapshot; return pref.tags.every(tag => i?.tags?.includes(tag)) && (!q || `${i?.name ?? ""}\n${i?.text ?? ""}`.toLocaleLowerCase().includes(q)); }), e => itemMap.get(e.itemId) ?? e.snapshot));
                 }
             }
             appendGroups(r.groups ?? [], `g:${ri}`);
@@ -245,7 +249,7 @@ export function openSharedEditor(session, options = {}) {
         }, onClose() { detachAutoComplete(area); refresh(); } });
     }
     function revealNewItem(item) {
-        pref.query = ""; pref.tag = ""; pref.recipeFilter = ""; render();
+        pref.query = ""; pref.tags = []; pref.recipeFilter = ""; render();
         const index = virtual.entries.findIndex(e => e.itemId === item.id);
         virtual.scroll.scrollTop = virtual.index.offsets[index]; virtual.paint();
         virtual.nodes.get(item.id)?.querySelector('[aria-label="名前を編集"]')?.click();
@@ -308,11 +312,31 @@ export function openSharedEditor(session, options = {}) {
         if (bulkBar) { bulkBar.firstChild.textContent = `${selected.size}件選択`; bulkBar.hidden = !selected.size; }
         if (selectAllControl && virtual) { const ids = virtual.entries.map(e => e.itemId); const count = ids.filter(id => selected.has(id)).length; selectAllControl.checked = Boolean(ids.length) && count === ids.length; selectAllControl.indeterminate = count > 0 && count < ids.length; }
     }
+    function tagFilter() {
+        const control = el("details", "se-tag-filter"), summary = el("summary"), popup = el("div", "se-tag-popup");
+        summary.setAttribute("aria-label", "タグで絞り込み");
+        const options = el("div", "se-tag-options");
+        const tags = [...new Set([...doc().catalog.items.flatMap(i => i.tags), ...pref.tags])].sort((a,b) => a.localeCompare(b,"ja"));
+        const updateSummary = () => { summary.textContent = pref.tags.length ? `タグ：${pref.tags.join("・")} ▾` : "タグ：すべて ▾"; summary.title = pref.tags.length ? `すべてに一致（AND）：${pref.tags.join("、")}` : "複数のタグを選んで絞り込み"; };
+        const search = input("", value => { const q = value.toLocaleLowerCase(); for (const option of options.children) option.hidden = !(option.dataset.tag ?? "").toLocaleLowerCase().includes(q); }); search.placeholder = "絞り込みタグを検索";
+        for (const tag of tags) {
+            const checkbox = check(pref.tags.includes(tag), yes => { releaseActive(); pref.tags = yes ? [...new Set([...pref.tags, tag])] : pref.tags.filter(value => value !== tag); updateSummary(); refresh(); });
+            checkbox.setAttribute("aria-label", `${tag}で絞り込み`);
+            const option = label(tag, checkbox); option.dataset.tag = tag; options.append(option);
+        }
+        if (!tags.length) options.append(el("span", "se-muted", "タグがありません"));
+        popup.append(el("span", "se-muted", "選んだタグをすべて含む（AND）"), search, options, btn("タグ絞り込みを解除", () => { releaseActive(); pref.tags = []; for (const checkbox of options.querySelectorAll("input")) checkbox.checked = false; updateSummary(); refresh(); }));
+        control.append(summary, popup); updateSummary();
+        control.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); control.open = false; summary.focus(); } });
+        control.addEventListener("focusout", event => { if (event.relatedTarget && !control.contains(event.relatedTarget)) control.open = false; });
+        return control;
+    }
     function filters() {
         const q = input(pref.query, value => { pref.query = value; releaseActive(); scheduleRefresh(); }); q.placeholder = "名前・本文を検索"; q.className = "se-grow";
-        const tags = [...new Set(doc().catalog.items.flatMap(i => i.tags))].sort(); const tag = select([["", "タグ：すべて"], ...tags.map(t => [t, t])], pref.tag, value => { pref.tag = value; releaseActive(); refresh(); });
+        const tag = tagFilter();
         const sets = [["", "セット：すべて"], ...doc().recipes.map(r => [r.id, r.name])];
         const set = select(sets, mode === "results" ? resultRecipe : pref.recipeFilter, value => { releaseActive(); if (mode === "results") resultRecipe = value; else pref.recipeFilter = value; refresh(); });
+        set.setAttribute("aria-label", "テキストセットで絞り込み");
         const lines = select([["1", "本文1行"], ["3", "本文3行"], ["6", "本文6行"]], String(pref.lines), value => { releaseActive(); pref.lines = Number(value); virtual.heights.clear(); refresh(); });
         const bar = row(q, tag, set, lines, sortControl(refresh)); bar.classList.add("se-filterbar"); return bar;
     }
@@ -504,7 +528,7 @@ export function openSharedEditor(session, options = {}) {
         content.classList.toggle("se-set-view", mode === "sets");
         if (mode === "sets") renderSets(); else renderList(); updateStatus(); refreshing = false;
     }
-    const switchMode = next => { releaseActive(); pref.scroll = 0; pref.query = ""; pref.tag = ""; mode = next; render(); };
+    const switchMode = next => { releaseActive(); pref.scroll = 0; pref.query = ""; pref.tags = []; mode = next; render(); };
     close = showDialog({ title: `SAX Text Catalog V2 — ${doc().name}`, width: 1200, maxHeight: "97vh", className: "sax-shared-editor", onClose() {
         for (const list of orderLists.splice(0)) list.destroy();
         releaseActive(); clearTimeout(saveTimer); unsubscribe?.(); virtual?.destroy(); for (const t of content?.querySelectorAll("textarea") ?? []) detachAutoComplete(t); openEditors.delete(session); void session.flush().catch(() => {});
@@ -519,6 +543,6 @@ export function openSharedEditor(session, options = {}) {
         dlg.append(header, errorMessage, conflict); content = el("div", "se-pane"); content.style.flex = "1"; dlg.append(content); render();
     } });
     unsubscribe = session.subscribe(() => { updateStatus(); scheduleRefresh(); });
-    openEditors.set(session, { close, open(next) { if (next.result) result = next.result; if (next.recipeId) { if (next.mode === "items") { pref.recipeFilter = next.recipeId; pref.query = ""; pref.tag = ""; pref.scroll = 0; } else pref.recipeId = next.recipeId; } if (next.mode && next.mode !== mode) { pref.query = ""; pref.tag = ""; pref.scroll = 0; } mode = next.mode ?? mode; render(); close.show(); } });
+    openEditors.set(session, { close, open(next) { if (next.result) result = next.result; if (next.recipeId) { if (next.mode === "items") { pref.recipeFilter = next.recipeId; pref.query = ""; pref.tags = []; pref.scroll = 0; } else pref.recipeId = next.recipeId; } if (next.mode && next.mode !== mode) { pref.query = ""; pref.tags = []; pref.scroll = 0; } mode = next.mode ?? mode; render(); close.show(); } });
     return close;
 }

@@ -3,7 +3,7 @@ const { chromium } = require(process.env.SAX_PLAYWRIGHT_PATH || 'playwright');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..');
 const docs = ['one', 'two'].map(id => ({ version: 3, id, name: `カタログ${id}`, revision: 1,
-    catalog: { items: [{ id: 'z', name: 'Z アイテム', text: '乙の本文', tags: ['背景'] }, { id: 'a', name: 'A アイテム', text: '甲の本文', tags: [] }] },
+    catalog: { items: [{ id: 'z', name: 'Z アイテム', text: '乙の本文', tags: ['共通','背景'] }, { id: 'a', name: 'A アイテム', text: '甲の本文', tags: ['共通','風景'] }] },
     recipes: [{ id: 's', name: 'テキストセット', groups: [{id:'g',name:'構成要素',mode:'all',on:true,count:2,item_ids:['z','a']},{id:'single',name:'単一',mode:'random',on:true,count:0,item_ids:['z']}] }] }));
 const html = `<meta charset="utf-8"><style>body{background:#181818;color:#ddd;font:12px sans-serif}#host{width:350px;background:#353535;padding:8px}#host>button,#host>.native{display:block;box-sizing:border-box;width:100%;height:24px;margin:4px 0}h3{font-size:12px;margin:4px}</style><div id="host"></div><script type="module">
 import {installSharedControls,sharedController} from '/js/sax_text_catalog_v2_shared.js';
@@ -55,6 +55,29 @@ const server = http.createServer((req, res) => {
         // 登録順と名前順が異なるデータで、全画面が同じ比較規則を使うことを確認する。
         const nameOrder = docs[0].catalog.items.slice().sort((a,b)=>a.name.localeCompare(b.name,'ja')).map(i=>i.id);
         assert.deepEqual(await itemOrder(), nameOrder);
+        await page.locator('.se-tag-filter summary').click();
+        await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).check();
+        assert.equal(await page.locator('.se-record').count(),2);
+        await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).check();
+        assert.deepEqual(await itemOrder(),['z']);
+        await page.getByPlaceholder('絞り込みタグを検索').fill('背景');
+        assert.equal(await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).isVisible(),false);
+        await page.getByRole('button',{name:'閉じる',exact:true}).click();
+        await page.locator('.sax-shared-catalog').getByRole('button',{name:'アイテム',exact:true}).click();
+        await page.locator('.se-tag-filter summary').click();
+        assert.equal(await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).isChecked(),true);
+        assert.equal(await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).isChecked(),true);
+        assert.deepEqual(await itemOrder(),['z']);
+        await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();
+        await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).check();
+        await page.locator('.se-tag-filter summary').click();
+        await page.getByPlaceholder('名前・本文を検索').fill('甲');
+        await page.waitForFunction(()=>document.querySelectorAll('.se-record').length===0);
+        await page.getByPlaceholder('名前・本文を検索').fill('');
+        await page.waitForFunction(()=>document.querySelectorAll('.se-record').length===1);
+        await page.locator('.se-tag-filter summary').click();
+        await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();
+        await page.locator('.se-tag-filter summary').click();
         await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('catalog');
         assert.deepEqual(await itemOrder(), ['z','a']);
         await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('tags');
@@ -89,6 +112,12 @@ const server = http.createServer((req, res) => {
         await page.getByRole('button', { name: '前回の実行結果', exact: true }).click();
         assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'name');
         assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.itemId)),nameOrder);
+        await page.locator('.se-tag-filter summary').click();
+        await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).check();
+        await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).check();
+        assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.map(row=>row.dataset.itemId)),['z']);
+        await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();
+        await page.locator('.se-tag-filter summary').click();
         await page.getByRole('combobox', { name: 'アイテムの並び順' }).selectOption('tags');
         assert.deepEqual(await page.locator('.se-record').evaluateAll(rows=>rows.slice().sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top)).map(row=>row.dataset.itemId)),['z','a']);
         assert.deepEqual(await page.evaluate(()=>shared().result.selection.rows[0].groups[0].items.map(i=>i.id)),['z','a']);

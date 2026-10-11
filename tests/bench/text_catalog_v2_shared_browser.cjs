@@ -142,7 +142,7 @@ const server=http.createServer(async(req,res)=>{
  for (const [count,size] of [[1000,100],[10000,100],[10000,2000]]) {
   doc=fixture(count,size);const started=performance.now();
   await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.waitForSelector('.se-record');
-  await page.locator('.se-pane>.se-row').first().getByRole('combobox').nth(1).selectOption('');
+  await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('');
   const nodes=await page.locator('.se-record').count();assert.ok(nodes<40);
   const opened=performance.now();await page.locator('.se-record').first().getByRole('button',{name:'本文を編集',exact:true}).click();
   await page.getByRole('textbox',{name:'アイテム本文',exact:true}).fill('性能確認の本文');await page.evaluate(()=>app.queuePrompt());
