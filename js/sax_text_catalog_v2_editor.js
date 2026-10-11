@@ -37,6 +37,8 @@ const STYLE = `
 .sax-shared-editor .se-card input.se-grow{min-width:60px;width:0}
 .sax-shared-editor .se-card[data-single=true] input.se-grow{min-width:40px}
 .sax-shared-editor .se-single-mode{font-size:11px;white-space:nowrap}
+.sax-shared-editor .se-item-actions{display:flex;gap:4px}
+.sax-shared-editor .se-item-actions button{flex:1;min-width:0;padding:4px 0;font-size:11px}
 .sax-shared-editor .se-card[data-drop=inside]{outline:2px solid var(--primary-background,#5686d6)}
 .sax-shared-editor .se-card[data-drop=before]{border-top:3px solid var(--primary-background,#5686d6)}
 .sax-shared-editor .se-card[data-drop=after]{border-bottom:3px solid var(--primary-background,#5686d6)}
@@ -242,6 +244,21 @@ export function openSharedEditor(session, options = {}) {
             dlg.append(row(el("span", "se-muted se-grow", "共有カタログへ自動保存"), wildcardButton(area, { commit: () => putItem(id, { text: area.value }, historyKey), current: () => doc().catalog.items.some(i => i.id === id) })), area, btn("閉じる", end)); queueMicrotask(() => area.focus());
         }, onClose() { detachAutoComplete(area); refresh(); } });
     }
+    function revealNewItem(item) {
+        pref.query = ""; pref.tag = ""; pref.recipeFilter = ""; render();
+        const index = virtual.entries.findIndex(e => e.itemId === item.id);
+        virtual.scroll.scrollTop = virtual.index.offsets[index]; virtual.paint();
+        virtual.nodes.get(item.id)?.querySelector('[aria-label="名前を編集"]')?.click();
+    }
+    function duplicateItem(id) {
+        releaseActive();
+        const original = doc().catalog.items.find(item => item.id === id); if (!original) return;
+        const names = new Set(doc().catalog.items.map(item => item.name));
+        let name, number = 1;
+        do { const suffix = number === 1 ? " コピー" : ` コピー（${number}）`; name = [...original.name].slice(0, 256 - [...suffix].length).join("") + suffix; number++; } while (names.has(name));
+        const item = { ...original, id: newId(), name, tags: [...original.tags] };
+        if (mutate([{ type: "item.put", item }])) revealNewItem(item);
+    }
     function itemRow(entry) {
         if (entry.section) {
             const n = el("div", "se-section"); n.style.paddingLeft = `${8 + (entry.depth ?? 0) * 14}px`; n.append(el("strong", "", entry.title), el("span", "se-muted", entry.subtitle));
@@ -278,7 +295,13 @@ export function openSharedEditor(session, options = {}) {
         const textWrap = el("div"); textWrap.append(cell("text", shown?.text ?? ""));
         if (entry.snapshot) { textWrap.append(el("span", "se-badge", !current ? "削除済み・編集できません" : current.text !== entry.snapshot.text || current.name !== entry.snapshot.name ? "編集済み・次回実行に反映" : "実行時の内容")); const details = el("details"); details.append(el("summary", "se-muted", "実行時の本文"), el("div", "se-cell", entry.snapshot.text)); textWrap.append(details); }
         n.append(textWrap, cell("tags", shown?.tags?.join(", ") ?? "", "se-tags"));
-        const tools = el("div", "se-tools"); if (current) { tools.append(btn("拡大", () => { releaseActive(); expandedEditor(entry.itemId); })); const tags = btn("タグ", () => { const value = input(current.tags.join(", "), () => {}); value.setAttribute("aria-label", "アイテムタグ"); showDialog({ title: "タグを編集", build(dlg, end) { dlg.append(value, btn("反映", () => { try { putItem(entry.itemId, { tags: parseTags(value.value) }); end(); } catch (error) { localError = error.message; updateStatus(); } })); } }); }); tags.classList.add("se-mobile-tags"); tools.append(tags); } n.append(tools); return n;
+        const tools = el("div", "se-tools"); if (current) {
+            const expanded = btn("拡大", () => { releaseActive(); expandedEditor(entry.itemId); });
+            const actions = el("div", "se-item-actions"); actions.append(expanded);
+            if (mode === "items") { const duplicate = btn("複製", () => duplicateItem(entry.itemId)); duplicate.title = "名前・本文・タグをコピーして新しいアイテムを作成"; duplicate.addEventListener("pointerdown", event => event.preventDefault()); actions.append(duplicate); }
+            tools.append(mode === "items" ? actions : expanded);
+            const tags = btn("タグ", () => { const value = input(current.tags.join(", "), () => {}); value.setAttribute("aria-label", "アイテムタグ"); showDialog({ title: "タグを編集", build(dlg, end) { dlg.append(value, btn("反映", () => { try { putItem(entry.itemId, { tags: parseTags(value.value) }); end(); } catch (error) { localError = error.message; updateStatus(); } })); } }); }); tags.classList.add("se-mobile-tags"); tools.append(tags);
+        } n.append(tools); return n;
     }
     let bulkBar, selectAllControl;
     function updateBulk() {
@@ -296,7 +319,7 @@ export function openSharedEditor(session, options = {}) {
     function renderList() {
         const filterBar = filters(); content.append(filterBar);
         if (mode === "items") {
-            const newItem = btn("＋ アイテム", () => { const item = { id: newId(), name: "新しいアイテム", text: "", tags: [] }; if (mutate([{ type: "item.put", item }])) { pref.query = ""; pref.tag = ""; pref.recipeFilter = ""; render(); const index = virtual.entries.findIndex(e => e.itemId === item.id); virtual.scroll.scrollTop = virtual.index.offsets[index]; virtual.paint(); virtual.nodes.get(item.id)?.querySelector('[aria-label="名前を編集"]')?.click(); } });
+            const newItem = btn("＋ アイテム", () => { const item = { id: newId(), name: "新しいアイテム", text: "", tags: [] }; if (mutate([{ type: "item.put", item }])) revealNewItem(item); });
             const tagEdit = input("", () => {}); tagEdit.placeholder = "一括操作するタグ";
             filterBar.append(newItem);
             bulkBar = row(el("span", "se-muted", `${selected.size}件選択`), btn("選択解除", () => { selected.clear(); virtual.set(entries(), true); updateBulk(); }), tagEdit,

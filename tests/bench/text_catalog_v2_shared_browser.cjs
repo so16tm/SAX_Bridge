@@ -118,6 +118,25 @@ const server=http.createServer(async(req,res)=>{
  await page.evaluate(()=>{window.failedQueue=app.queuePrompt().catch(()=>{})});await page.getByRole('button',{name:'OK',exact:true}).click();await page.evaluate(()=>window.failedQueue);assert.equal(await page.evaluate(()=>window.queued),queued);assert.equal(await page.evaluate(()=>shared().session.document.catalog.items[0].text),'未保存');fail=false;await page.evaluate(()=>shared().session.retry());
  // 狭い画面でも本文欄を表示。正常保存時には競合欄を表示しない。
  await page.setViewportSize({width:600,height:900});await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.waitForSelector('.se-record');assert.equal(await page.locator('.se-conflict').isVisible(),false);fs.mkdirSync(path.join(root,'work'),{recursive:true});await page.screenshot({path:root+'/work/shared-v2-mobile.png'});await page.setViewportSize({width:1400,height:950});await page.screenshot({path:root+'/work/shared-v2-desktop.png'});await page.getByRole('button',{name:'閉じる',exact:true}).click();
+
+ // 複製は最新の編集中本文を取り込み、独立したIDを作る。セット参照は変更しない。
+ doc=fixture(10);await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.waitForSelector('.se-record');
+ const beforeDuplicate=await page.evaluate(()=>structuredClone(shared().session.document));
+ await page.locator('.se-record[data-item-id="i0"]').getByRole('button',{name:'本文を編集',exact:true}).click();
+ await page.getByRole('textbox',{name:'アイテム本文',exact:true}).fill('複製直前の本文');
+ await page.locator('.se-record[data-item-id="i0"]').getByRole('button',{name:'複製',exact:true}).click();
+ const copied=await page.evaluate(()=>shared().session.document.catalog.items.at(-1));
+ assert.notEqual(copied.id,'i0');assert.equal(copied.name,'アイテム0 コピー');assert.equal(copied.text,'複製直前の本文');assert.deepEqual(copied.tags,['tag0']);
+ assert.deepEqual(await page.evaluate(()=>shared().session.document.recipes),beforeDuplicate.recipes);
+ assert.equal(await page.getByRole('textbox',{name:'アイテム名',exact:true}).inputValue(),copied.name);
+ await page.getByRole('textbox',{name:'アイテム名',exact:true}).press('Enter');
+ const actions=page.locator(`[data-item-id="${copied.id}"] .se-item-actions`);
+ assert.ok(await actions.evaluate(e=>{const [a,b]=e.children;return a.offsetTop===b.offsetTop&&e.scrollWidth<=e.clientWidth}));
+ await page.getByRole('button',{name:'元に戻す',exact:true}).click();assert.equal(await page.evaluate(id=>shared().session.document.catalog.items.some(i=>i.id===id),copied.id),false);
+ await page.getByRole('button',{name:'やり直す',exact:true}).click();
+ await page.locator(`[data-item-id="${copied.id}"]`).getByRole('button',{name:'本文を編集',exact:true}).click();await page.getByRole('textbox',{name:'アイテム本文',exact:true}).fill('コピーだけ変更');await page.evaluate(()=>app.queuePrompt());
+ assert.equal(doc.catalog.items.find(i=>i.id==='i0').text,'複製直前の本文');assert.equal(doc.catalog.items.find(i=>i.id===copied.id).text,'コピーだけ変更');
+ await page.getByRole('button',{name:'閉じる',exact:true}).click();console.log('duplicate latest text/independent ID/tags/references/Undo/Redo/save passed');
  const measurements=[];
  await page.setViewportSize({width:1280,height:950});
  for (const [count,size] of [[1000,100],[10000,100],[10000,2000]]) {
