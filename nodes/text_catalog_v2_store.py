@@ -219,6 +219,8 @@ def update(catalog_id, base_revision, operations):
                         for group in iter_groups(recipe["groups"]):
                             if group.get("kind") != "nested":
                                 group["item_ids"] = [value for value in group["item_ids"] if value != identifier]
+                                if "item_weights" in group:
+                                    group["item_weights"].pop(identifier, None)
         if not operations:
             return copy.deepcopy(current)
         document["revision"] += 1

@@ -143,6 +143,71 @@ def test_fixed_count_preserves_existing_seed_selection():
     assert resolve(data, 123)[1]["groups"][0]["item_ids"] == expected
 
 
+def test_uniform_explicit_weights_preserve_existing_seed_selection():
+    data = config(items=30, count=7)
+    group(data)["item_weights"] = {identifier: 4 for identifier in group(data)["item_ids"]}
+    candidates = group(data)["item_ids"]
+    material = json.dumps([123, "r", "g"], ensure_ascii=True, separators=(",", ":"))
+    seed_value = int.from_bytes(catalog.hashlib.sha256(material.encode("utf-8")).digest(), "big")
+    expected = [candidates[index] for index in sorted(random.Random(seed_value).sample(range(30), 7))]
+    assert resolve(data, 123)[1]["groups"][0]["item_ids"] == expected
+
+
+def test_weighted_selection_biases_toward_heavier_items_without_replacement():
+    data = config(items=4, count=2)
+    group(data)["item_weights"] = {"i0": 1, "i1": 1000, "i2": 3, "i3": 0}
+    selections = [resolve(data, seed)[1]["groups"][0]["item_ids"] for seed in range(200)]
+    assert all(len(selected) == len(set(selected)) == 2 for selected in selections)
+    assert all("i3" not in selected for selected in selections)
+    assert sum("i1" in selected for selected in selections) > 190
+
+
+def test_random_upper_count_uses_positive_weight_candidate_count():
+    data = config(items=3, count=2)
+    group(data)["item_weights"] = {"i0": 1, "i1": 0, "i2": 0}
+    with pytest.raises(ValueError, match="count"):
+        resolve(data)
+    group(data)["count"] = 1
+    assert resolve(data)[1]["groups"][0]["item_ids"] == ["i0"]
+
+
+def test_random_count_min_cannot_hide_an_invalid_weighted_upper_bound():
+    data = config(items=3, count=2)
+    group(data)["count_min"] = 0
+    group(data)["item_weights"] = {"i0": 1, "i1": 0, "i2": 0}
+    for seed in range(10):
+        with pytest.raises(ValueError, match="count"):
+            resolve(data, seed)
+
+
+def test_nested_weighted_candidates_report_configured_child_weights():
+    data = config(items=2, count=1)
+    leaf = group(data)
+    second = {**copy.deepcopy(leaf), "id": "second"}
+    leaf["weight"] = 0
+    second["weight"] = 10
+    data["recipes"][0]["groups"] = [nested("outer", [leaf, second], "random", 1)]
+    _, report = resolve(data)
+    outer = report["groups"][0]
+    assert outer["selected_group_ids"] == ["second"]
+    assert outer["groups"][0]["weight"] == 0
+    assert outer["groups"][1]["weight"] == 10
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("weight", True), ("weight", -1), ("weight", 1_000_001), ("weight", float("nan")),
+    ("weight", float("inf")), ("item_weights", []),
+    ("item_weights", {"missing": 1}), ("item_weights", {"i0": True}),
+    ("item_weights", {"i0": -0.1}), ("item_weights", {"i0": 1_000_001}),
+    ("item_weights", {"i0": float("nan")}), ("item_weights", {"i0": float("inf")}),
+])
+def test_invalid_weights_fail_with_field_path(field, value):
+    data = config()
+    group(data)[field] = value
+    with pytest.raises(ValueError, match=field):
+        resolve(data)
+
+
 def test_nested_range_and_disabled_report_counts():
     data = config(items=8, count=5)
     leaf = group(data)

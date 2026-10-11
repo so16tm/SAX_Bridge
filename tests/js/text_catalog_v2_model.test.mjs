@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sortedNamedOptions, emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds, parseRandomCount, formatRandomCount } from "../../js/sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, emptyConfig, validateConfig, parseConfig, parseTags, filteredItems, references, removeItems, recipeWarnings, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds, parseRandomCount, formatRandomCount, parseSelectionWeight, candidateWeight } from "../../js/sax_text_catalog_v2_model.js";
 
 test("ランダム抽選数は固定数と3種の範囲表記を解析し、保存形式を整える", () => {
     assert.deepEqual(parseRandomCount("2"), { count: 2 });
@@ -8,6 +8,21 @@ test("ランダム抽選数は固定数と3種の範囲表記を解析し、保�
     assert.equal(formatRandomCount({ count: 2 }), "2");
     assert.equal(formatRandomCount({ count: 2, count_min: 0 }), "0～2");
     for (const value of ["2-1", "-1", "1.5", "10001", "0-10001", "2--3"]) assert.throws(() => parseRandomCount(value));
+});
+
+test("選択重みは有限な10進数を解析し、候補重みと範囲を検証する", () => {
+    for (const value of ["0", "0.5", ".5", "1.", "1000000", 0, 0.25, 1_000_000]) assert.equal(parseSelectionWeight(value), Number(value));
+    for (const value of ["", "  ", "1e2", "-1", "1000001", "NaN", "Infinity", true, NaN, Infinity]) assert.throws(() => parseSelectionWeight(value));
+    assert.equal(candidateWeight({ item_weights: { a: 0.25 } }, "a"), 0.25);
+    assert.equal(candidateWeight({}, "a"), 1);
+    assert.equal(candidateWeight({item_weights:{}}, "constructor"), 1);
+});
+
+test("ネストの抽選警告は重み0の子を候補数から除外する", () => {
+    const config = emptyConfig();
+    const child = {id:"child",name:"子",mode:"all",on:true,count:0,item_ids:[],weight:0};
+    config.recipes[0].groups = [{id:"parent",name:"親",kind:"nested",mode:"random",on:true,count:1,groups:[child]}];
+    assert.match(recipeWarnings(config)[0], /候補0件/);
 });
 
 test("名前順の選択肢は同名をIDで比較し、元の保存順を変更しない", () => {
@@ -123,6 +138,23 @@ test("count_minは全modeで上限以下の整数に限定し、警告は範囲�
     group.count_min = 1.5; assert.throws(() => validateConfig(config), /下限/);
 });
 
+test("重みはmodeを問わず検証し、候補重み0を抽選候補数から除外する", () => {
+    const config = fixture(2), group = { ...leaf("g", ["item-0", "item-1"]), mode: "random", count: 2, item_weights: { "item-0": 0 } };
+    config.recipes[0].groups = [group];
+    validateConfig(config); assert.equal(recipeWarnings(config).length, 1);
+    assert.match(recipeWarnings(config)[0], /候補1件/);
+    group.mode = "all"; group.weight = 1; validateConfig(config);
+    for (const value of [false, NaN, Infinity, -0.1, 1_000_001]) {
+        group.weight = value; assert.throws(() => validateConfig(config), /重み/);
+    }
+    group.weight = 1; group.item_weights = { missing: 0.5 }; assert.throws(() => validateConfig(config), /候補アイテム/);
+    for (const value of [false, NaN, Infinity]) {
+        group.item_weights = { "item-0": value }; assert.throws(() => validateConfig(config), /有限数/);
+    }
+    group.item_weights = { "item-0": 0.5 }; config.recipes[0].groups = [nested("parent", [group])];
+    config.recipes[0].groups[0].item_weights = {}; assert.throws(() => validateConfig(config), /ネスト.*重み/);
+});
+
 test("素材削除は全組み合わせの参照を除去し、別グループの重複使用を許容", () => {
     const config = fixture(3);
     const group = { id: "g", name: "固定", mode: "all", item_ids: ["item-0", "item-1"], count: 0, on: true };
@@ -132,6 +164,12 @@ test("素材削除は全組み合わせの参照を除去し、別グループ�
     removeItems(config, ["item-0"]); validateConfig(config);
     assert.deepEqual(config.recipes.map(r => r.groups[0].item_ids), [["item-1"], ["item-1"]]);
     assert.deepEqual(parseTags("style, style、camera\n"), ["style", "camera"]);
+});
+
+test("素材削除時にitem_weightsの参照キーも除去する", () => {
+    const config = fixture(2), group = { ...leaf("g", ["item-0", "item-1"]), item_weights: { "item-0": 0.2, "item-1": 0.7 } };
+    config.recipes[0].groups = [group]; removeItems(config, ["item-0"]);
+    validateConfig(config); assert.deepEqual(group.item_weights, { "item-1": 0.7 });
 });
 
 test("10000件をスクロールしてもウィンドウは一定件数で端まで到達する", () => {

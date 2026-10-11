@@ -245,3 +245,19 @@ def test_converter_append_preserves_existing_nested_sets():
     imported = result["recipes"][1]
     assert imported["groups"][0]["id"] not in {"parent", "child"}
     assert imported["groups"][0]["item_ids"] != ["a"]
+
+
+def test_converter_append_remaps_item_weight_keys(monkeypatch):
+    target = text_catalog_v2_store.create({"name": "既存", "catalog": {"items": []},
+        "recipes": [{"id": "existing", "name": "既存", "groups": []}]})
+    converted = {"version": 2, "name": "Import", "catalog": {"items": [
+        {"id": "a", "name": "A", "text": "added", "tags": []}]}, "recipes": [
+        {"id": "imported", "name": "Weighted", "groups": [
+            {"id": "g", "name": "G", "mode": "random", "on": True, "count": 1,
+             "item_ids": ["a"], "item_weights": {"a": 7}}]}]}
+    monkeypatch.setattr(text_catalog_converter, "convert_v1", lambda *_: converted)
+    result = text_catalog_converter.register_v1({"destination": "existing", "target_catalog_id": target["id"],
+        "base_revision": 1, "catalog_name": "Import", "v1_json": "{}"})
+    imported_group = result["recipes"][1]["groups"][0]
+    assert imported_group["item_ids"] != ["a"]
+    assert imported_group["item_weights"] == {imported_group["item_ids"][0]: 7}

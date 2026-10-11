@@ -104,12 +104,16 @@ test("競合再読み込みと通信再試行を明示的に実行する", async
 });
 
 test("削除のundoはアイテムと全セット参照を復元しredoで除去する", async () => {
-    const backend = server(); const session = new CatalogSession(fixture(), { request: backend.request, debounceMs: 10000 });
+    const initial = fixture(); initial.recipes[0].groups[0].item_weights = { a: 0.25 };
+    const backend = server(initial); const session = new CatalogSession(initial, { request: backend.request, debounceMs: 10000 });
     session.mutate([{ type: "item.delete", id: "a" }]); assert.equal(session.document.catalog.items.length, 0);
     assert.deepEqual(session.document.recipes[0].groups[0].item_ids, []);
+    assert.deepEqual(session.document.recipes[0].groups[0].item_weights, {});
     assert.equal(session.undo(), true); assert.equal(session.document.catalog.items[0].text, "原文");
     assert.deepEqual(session.document.recipes[0].groups[0].item_ids, ["a"]);
+    assert.deepEqual(session.document.recipes[0].groups[0].item_weights, { a: 0.25 });
     session.redo(); await session.flush(); assert.equal(backend.document().catalog.items.length, 0);
+    assert.deepEqual(backend.document().recipes[0].groups[0].item_weights, {});
 });
 
 test("無効な複数操作は部分変更を残さず、連続本文入力をひとつの履歴にする", async () => {

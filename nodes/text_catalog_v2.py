@@ -1,7 +1,9 @@
 """独立した Text Catalog V2。保存した組み合わせと seed 付き候補抽選を解決する。"""
 
 import hashlib
+import heapq
 import json
+import math
 import random
 
 from comfy_api.latest import io
@@ -66,6 +68,12 @@ def _integer(value, path, maximum):
     return value
 
 
+def _weight(value, path):
+    if type(value) not in (int, float) or not 0 <= value <= 1_000_000 or not math.isfinite(value):
+        _error(path, "0 から 1000000 までの有限数が必要です")
+    return value
+
+
 def iter_groups(groups):
     """保存順で全階層の構成要素を辿る。"""
     for group in groups:
@@ -89,6 +97,8 @@ def _validate_groups(groups, path, item_ids, seen, depth=1):
             _error(gp + ".mode", "all または random を指定してください")
         if type(group.get("on")) is not bool:
             _error(gp + ".on", "boolean が必要です")
+        if "weight" in group:
+            _weight(group["weight"], gp + ".weight")
         _integer(group.get("count"), gp + ".count", MAX_ITEMS)
         if "count_min" in group:
             count_min = _integer(group["count_min"], gp + ".count_min", MAX_ITEMS)
@@ -97,6 +107,8 @@ def _validate_groups(groups, path, item_ids, seen, depth=1):
         if group.get("kind") == "nested":
             if "item_ids" in group:
                 _error(gp, "ネスト型には item_ids を指定できません")
+            if "item_weights" in group:
+                _error(gp, "item_weights はアイテム型にのみ指定できます")
             children = _array(group.get("groups"), gp + ".groups", MAX_GROUPS)
             if children:
                 _validate_groups(children, gp + ".groups", item_ids, seen, depth + 1)
@@ -109,6 +121,32 @@ def _validate_groups(groups, path, item_ids, seen, depth=1):
                 _identifier(candidate, gp + ".item_ids", candidate_ids)
                 if candidate not in item_ids:
                     _error(gp + ".item_ids", "存在しない素材への参照があります")
+            if "item_weights" in group:
+                weights = _object(group["item_weights"], gp + ".item_weights")
+                for identifier, weight in weights.items():
+                    if identifier not in candidate_ids:
+                        _error(gp + ".item_weights", "候補に存在しない素材 ID があります")
+                    _weight(weight, gp + ".item_weights." + identifier)
+
+
+def _weighted_sample(rng, candidates, weights, count):
+    """Efraimidis weighted sampling without replacement, retaining only the best k keys."""
+    heap = []
+    for index, (candidate, weight) in enumerate(zip(candidates, weights)):
+        if weight <= 0:
+            continue
+        uniform = rng.random()
+        while uniform == 0:
+            uniform = rng.random()
+        # Log-transform the equivalent exponential-race key to avoid division
+        # overflow for valid subnormal weights.
+        key = math.log(weight) - math.log(-math.log(uniform))
+        entry = (key, -index, index, candidate)
+        if len(heap) < count:
+            heapq.heappush(heap, entry)
+        elif entry > heap[0]:
+            heapq.heapreplace(heap, entry)
+    return sorted((entry[2], entry[3]) for entry in heap)
 
 
 def parse_config(config_json, *, max_recipes=MAX_RECIPES):
@@ -164,15 +202,25 @@ def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item):
         chosen = []
         if effective_on:
             if group["mode"] == "random":
-                if group["count"] > len(candidates):
-                    _error("count", "選択数が候補数を超えています。候補を増やすか選択数を減らしてください")
                 # 親IDや位置を含めず、階層移動しても同じ構成要素の抽選を保つ。
                 material = json.dumps([seed, recipe_id, group["id"]], ensure_ascii=True, separators=(",", ":"))
                 rng = random.Random(int.from_bytes(hashlib.sha256(material.encode("utf-8")).digest(), "big"))
+                if nested:
+                    weights = [child.get("weight", 1) for child in group["groups"]]
+                else:
+                    item_weights = group.get("item_weights", {})
+                    weights = [item_weights.get(identifier, 1) for identifier in candidates]
+                positive_count = sum(weight > 0 for weight in weights)
+                if group["count"] > positive_count:
+                    _error("count", "選択数が正の重みを持つ候補数を超えています")
                 chosen_count = group["count"]
                 if "count_min" in group and group["count_min"] < group["count"]:
                     chosen_count = rng.randint(group["count_min"], group["count"])
-                chosen = [candidates[index] for index in sorted(rng.sample(range(len(candidates)), chosen_count))]
+                if chosen_count:
+                    if weights and all(weight == weights[0] and weight > 0 for weight in weights):
+                        chosen = [candidates[index] for index in sorted(rng.sample(range(len(candidates)), chosen_count))]
+                    else:
+                        chosen = [candidate for _, candidate in _weighted_sample(rng, candidates, weights, chosen_count)]
             else:
                 chosen = candidates
         chosen_count = len(chosen)
@@ -180,6 +228,10 @@ def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item):
                   "on": effective_on, "count": group["count"], "chosen_count": chosen_count}
         if "count_min" in group:
             report["count_min"] = group["count_min"]
+        if "weight" in group:
+            report["weight"] = group["weight"]
+        if "item_weights" in group:
+            report["item_weights"] = group["item_weights"]
         if nested:
             report.update({"kind": "nested", "candidate_group_ids": candidates, "selected_group_ids": chosen, "groups": []})
             chosen_ids = set(chosen)

@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { showDialog, showConfirmDialog, showPromptDialog, showAlertDialog, hideWidget } from "./sax_ui_base.js";
-import { sortedNamedOptions, LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, parseRandomCount, formatRandomCount } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, parseRandomCount, formatRandomCount, parseSelectionWeight, candidateWeight } from "./sax_text_catalog_v2_model.js";
 import { installQuickControls } from "./sax_text_catalog_v2_quick.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { installSharedControls, sharedController, flushCatalogNodes, flushCatalogPrompt, readReference } from "./sax_text_catalog_v2_shared.js";
@@ -155,6 +155,14 @@ function openCatalog(node) {
         }
     };
     const editGroup = (id, change, key = null, redraw = true) => commit(next => change(next.recipes.find(r => r.id === next.active_recipe_id).groups.find(g => g.id === id)), key, redraw);
+    const setGroupCandidates = (group, ids) => {
+        group.item_ids = ids;
+        const weights = group.item_weights, retained = new Set(ids);
+        if (weights) {
+            for (const id of Object.keys(weights)) if (!retained.has(id)) delete weights[id];
+            if (!Object.keys(weights).length) delete group.item_weights;
+        }
+    };
     const moveGroup = (id, delta) => commit(next => {
         const groups = next.recipes.find(r => r.id === next.active_recipe_id).groups;
         const at = groups.findIndex(g => g.id === id); const to = at + delta;
@@ -337,7 +345,7 @@ function openCatalog(node) {
                     editGroup(group.id, g => { g.count = count.count; if (Object.hasOwn(count, "count_min")) g.count_min = count.count_min; else delete g.count_min; }, `count:${group.id}`, false);
                 } catch (error) { report(`未反映: ${error.message}`, true); }
             }), hint("件を選ぶ"));
-            modeRow.append(menu("候補を変更", button("左の選択を候補に設定", () => editGroup(group.id, g => { g.item_ids = selectedIds(); }), { disabled: !selectedIds().length }), button("左で候補を選択", () => { state.selected = new Set(group.item_ids); state.query = ""; state.filterTags = []; state.mobilePane = "library"; state.libraryHidden = false; render(); })));
+            modeRow.append(menu("候補を変更", button("左の選択を候補に設定", () => editGroup(group.id, g => setGroupCandidates(g, selectedIds())), { disabled: !selectedIds().length }), button("左で候補を選択", () => { state.selected = new Set(group.item_ids); state.query = ""; state.filterTags = []; state.mobilePane = "library"; state.libraryHidden = false; render(); })));
             card.append(modeRow);
             const candidates = el("details"); candidates.dataset.group = group.id; candidates.open = state.openGroups.has(group.id) || group.item_ids.length === 1;
             candidates.addEventListener("toggle", () => {
@@ -355,7 +363,25 @@ function openCatalog(node) {
                     const at = page * 20 + offset;
                     const label = el("span", "", itemMap.get(id)?.name || "無題の素材"); label.dataset.itemname = id;
                     const candidate = el("div", "cv2-candidate"); candidate.dataset.candidate = id;
-                    candidate.append(label, menu("⋯", button("候補を上へ", () => editGroup(group.id, g => { [g.item_ids[at - 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at - 1]]; }), { disabled: !at }), button("候補を下へ", () => editGroup(group.id, g => { [g.item_ids[at + 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at + 1]]; }), { disabled: at === group.item_ids.length - 1 }), button("候補から外す", () => editGroup(group.id, g => { g.item_ids = g.item_ids.filter(value => value !== id); }))));
+                    if (group.mode === "random") {
+                        const weight = el("input", ""); weight.type = "text"; weight.inputMode = "decimal";
+                        weight.value = String(candidateWeight(group, id)); weight.placeholder = "1"; weight.setAttribute("aria-label", `${label.textContent}の抽選重み`); weight.style.width = "80px";
+                        weight.dataset.focus = `weight:${group.id}:${id}`;
+                        weight.addEventListener("input", () => {
+                            try {
+                                const value = parseSelectionWeight(weight.value);
+                                editGroup(group.id, g => {
+                                    if (value === 1) {
+                                        if (g.item_weights) delete g.item_weights[id];
+                                    } else g.item_weights = {...g.item_weights, [id]:value};
+                                    if (g.item_weights && !Object.keys(g.item_weights).length) delete g.item_weights;
+                                }, `weight:${group.id}:${id}`, false);
+                            } catch (error) { report(`未反映: ${error.message}`, true); weight.focus(); }
+                        });
+                        weight.addEventListener("keydown", event => { if (event.key === "Enter") weight.blur(); });
+                        candidate.append(label, weight);
+                    } else candidate.append(label);
+                    candidate.append(menu("⋯", button("候補を上へ", () => editGroup(group.id, g => { [g.item_ids[at - 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at - 1]]; }), { disabled: !at }), button("候補を下へ", () => editGroup(group.id, g => { [g.item_ids[at + 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at + 1]]; }), { disabled: at === group.item_ids.length - 1 }), button("候補から外す", () => editGroup(group.id, g => setGroupCandidates(g, g.item_ids.filter(value => value !== id))))));
                     candidates.append(candidate);
                 }
             }

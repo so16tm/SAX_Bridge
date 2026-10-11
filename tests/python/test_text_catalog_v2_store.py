@@ -85,8 +85,13 @@ def test_atomic_failure_preserves_previous_document(monkeypatch):
 
 def test_delete_item_removes_all_references():
     document = store.create(source())
-    result = store.update(document["id"], 1, [{"type": "item.delete", "id": "i0"}])
+    document["recipes"][0]["groups"][0]["item_weights"] = {"i0": 3, "i1": 1}
+    document = store.update(document["id"], 1, [
+        {"type": "recipe.put", "recipe": document["recipes"][0]},
+    ])
+    result = store.update(document["id"], 2, [{"type": "item.delete", "id": "i0"}])
     assert "i0" not in result["recipes"][0]["groups"][0]["item_ids"]
+    assert "i0" not in result["recipes"][0]["groups"][0]["item_weights"]
 
 
 def test_delete_last_set_and_execute_empty_rows():

@@ -172,6 +172,11 @@ def register_v1(payload: dict) -> dict:
                 copied_group["groups"] = [remap_group(child) for child in group["groups"]]
             else:
                 copied_group["item_ids"] = [item_ids[identifier] for identifier in group["item_ids"]]
+                if "item_weights" in group:
+                    copied_group["item_weights"] = {
+                        item_ids[identifier]: weight
+                        for identifier, weight in group["item_weights"].items()
+                    }
             return copied_group
         imported["groups"] = [remap_group(group) for group in recipe["groups"]]
         recipe_ids.append(imported["id"])

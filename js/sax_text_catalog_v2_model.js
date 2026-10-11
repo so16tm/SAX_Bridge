@@ -12,6 +12,23 @@ export function parseRandomCount(value) {
     return { count: second, count_min: first };
 }
 
+export function parseSelectionWeight(value) {
+    if (typeof value === "number") return validateWeight(value);
+    if (typeof value !== "string") fail("重みは0〜1000000の数値で指定してください");
+    const text = value.trim();
+    if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/u.test(text)) fail("重みは0〜1000000の数値で指定してください");
+    return validateWeight(Number(text));
+}
+
+export function candidateWeight(group, itemId) {
+    return group.item_weights && Object.hasOwn(group.item_weights, itemId) ? group.item_weights[itemId] : 1;
+}
+
+function validateWeight(value) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000) fail("重みは0〜1000000の有限数で指定してください");
+    return value;
+}
+
 export function formatRandomCount(group) {
     return Object.hasOwn(group, "count_min") ? `${group.count_min}～${group.count}` : String(group.count);
 }
@@ -91,7 +108,9 @@ export function validateGroups(groups, itemIds) {
             if (typeof group.on !== "boolean") fail("有効状態が不正です");
             if (!Number.isSafeInteger(group.count) || group.count < 0 || group.count > LIMITS.items) fail("抽選数は0〜10000の整数で指定してください");
             if (Object.hasOwn(group, "count_min") && (!Number.isSafeInteger(group.count_min) || group.count_min < 0 || group.count_min > group.count)) fail("抽選数の下限は0〜上限以下の整数で指定してください");
+            if (Object.hasOwn(group, "weight")) validateWeight(group.weight);
             if (group.kind === "nested") {
+                if (Object.hasOwn(group, "item_weights")) fail("ネスト構成要素にはアイテムの重みを指定できません");
                 if (Object.hasOwn(group, "item_ids")) fail("ネスト構成要素にはアイテム候補を指定できません");
                 visit(group.groups, depth + 1);
             } else {
@@ -100,6 +119,13 @@ export function validateGroups(groups, itemIds) {
                 array(group.item_ids, LIMITS.items, "item_ids");
                 if (new Set(group.item_ids).size !== group.item_ids.length) fail("同じグループに同じ候補を重複登録できません");
                 for (const id of group.item_ids) if (!itemIds.has(id)) fail("参照先の素材が見つかりません");
+                if (Object.hasOwn(group, "item_weights")) {
+                    object(group.item_weights, "item_weights");
+                    for (const [id, weight] of Object.entries(group.item_weights)) {
+                        if (!group.item_ids.includes(id)) fail("重みの参照先は候補アイテムに含めてください");
+                        validateWeight(weight);
+                    }
+                }
             }
         }
     }
@@ -162,7 +188,7 @@ export function recipeWarnings(config) {
     function visit(groups) {
         for (const group of groups) {
             if (!group.on) continue;
-            const candidates = group.kind === "nested" ? group.groups.length : group.item_ids.length;
+            const candidates = group.kind === "nested" ? group.groups.filter(child => (child.weight ?? 1) > 0).length : group.item_ids.filter(id => candidateWeight(group, id) > 0).length;
             if (group.mode === "random" && group.count > candidates) warnings.push(`${group.name || "無題のグループ"}: 候補${candidates}件に対して最大${group.count}件の抽選は実行できません`);
             if (group.kind === "nested" && (group.mode === "all" || group.count > 0)) visit(group.groups);
         }
@@ -174,7 +200,10 @@ export function recipeWarnings(config) {
 export function removeItems(config, ids) {
     const removed = new Set(ids);
     config.catalog.items = config.catalog.items.filter(item => !removed.has(item.id));
-    for (const recipe of config.recipes) for (const group of walkGroups(recipe.groups)) if (group.kind !== "nested") group.item_ids = group.item_ids.filter(id => !removed.has(id));
+    for (const recipe of config.recipes) for (const group of walkGroups(recipe.groups)) if (group.kind !== "nested") {
+        group.item_ids = group.item_ids.filter(id => !removed.has(id));
+        if (group.item_weights) for (const id of removed) delete group.item_weights[id];
+    }
 }
 
 // 入力フィールドへの連続入力は1操作としてまとめ、別フィールド/構造変更は独立して戻す。

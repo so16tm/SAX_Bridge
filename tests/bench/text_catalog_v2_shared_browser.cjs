@@ -131,6 +131,19 @@ const server=http.createServer(async(req,res)=>{
  assert.deepEqual(await page.evaluate(id=>{const g=shared().session.document.recipes[0].groups.find(g=>g.id===id);return [g.count_min,g.count];},nestedId),[0,2]);
  await nestedCard.getByRole('textbox',{name:/ランダム件数/}).fill('1');
  assert.equal(await page.evaluate(id=>Object.hasOwn(shared().session.document.recipes[0].groups.find(g=>g.id===id),'count_min'),nestedId),false);
+ await page.locator('[data-group-id="g1"]').getByRole('spinbutton',{name:'人物の抽選重み',exact:true}).fill('3');
+ await page.locator('[data-group-id="g2"]').getByRole('spinbutton',{name:'背景の抽選重み',exact:true}).fill('0');
+ assert.deepEqual(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups.map(g=>g.weight??1),nestedId),[3,0]);
+ await page.locator('[data-group-id="g1"]').getByRole('button',{name:'候補アイテムの重みを編集',exact:true}).click();
+ await page.getByRole('spinbutton',{name:'アイテム0の抽選重み',exact:true}).fill('4');
+ await page.getByRole('spinbutton',{name:'アイテム1の抽選重み',exact:true}).fill('0.5');
+ assert.deepEqual(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups[0].item_weights,nestedId),{i0:4,i1:0.5});
+ await page.locator('[data-group-id="g1"]').getByRole('button',{name:'候補を変更',exact:true}).click();
+ await page.locator('.se-candidate[data-item-id="i1"] input').click();
+ await page.getByRole('textbox',{name:'追加する構成要素のランダム件数',exact:true}).fill('0-1');
+ await page.getByRole('button',{name:'候補を更新',exact:true}).click();
+ assert.deepEqual(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups[0].item_weights,nestedId),{i0:4});
+
 
  assert.equal(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).mode,nestedId),'random');
  await nestedCard.getByRole('button',{name:'候補を変更',exact:true}).click();
@@ -198,7 +211,7 @@ const server=http.createServer(async(req,res)=>{
  const measurements=[];
  await page.setViewportSize({width:1280,height:950});
  for (const [count,size] of [[1000,100],[10000,100],[10000,2000]]) {
-  doc=fixture(count,size);const started=performance.now();
+  await page.evaluate(()=>shared().session.flush());doc=fixture(count,size);const started=performance.now();
   await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.waitForSelector('.se-record');
   await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('');
   const nodes=await page.locator('.se-record').count();assert.ok(nodes<40);
@@ -208,11 +221,16 @@ const server=http.createServer(async(req,res)=>{
   measurements.push({count,textChars:size,openMs:Math.round(opened-started),editAndQueueMs:Math.round(finished-opened),visibleRows:nodes,workflowReferenceBytes:referenceBytes,patchBytes:calls.at(-1).bytes});
   await page.getByRole('button',{name:'閉じる',exact:true}).click();
  }
- await page.evaluate(()=>{const legacy={...node,widgets:[{name:'config_json',value:JSON.stringify({version:2,catalog:{items:[{id:'a',name:'A',text:'本文',tags:['共通','背景']},{id:'b',name:'B',text:'別',tags:['共通']}]},recipes:[{id:'s',name:'セット',groups:[]}],active_recipe_id:'s'})},{name:'seed',value:1}]};Type.prototype.onNodeCreated.call(legacy);legacy.widgets.find(w=>w.name==='管理・編集'||w.name==='カタログを開く').callback();});
+ await page.evaluate(()=>{const legacy={...node,widgets:[{name:'config_json',value:JSON.stringify({version:2,catalog:{items:[{id:'a',name:'A',text:'本文',tags:['共通','背景']},{id:'b',name:'B',text:'別',tags:['共通']}]},recipes:[{id:'s',name:'セット',groups:[{id:'legacy-group',name:'候補',mode:'random',on:true,count:1,item_ids:['a','b']}]}],active_recipe_id:'s'})},{name:'seed',value:1}]};window.legacyNode=legacy;Type.prototype.onNodeCreated.call(legacy);legacy.widgets.find(w=>w.name==='管理・編集'||w.name==='カタログを開く').callback();});
  await page.locator('.cv2-filter summary').click();
  await page.getByRole('checkbox',{name:'共通で絞り込み',exact:true}).check();await page.getByRole('checkbox',{name:'背景で絞り込み',exact:true}).check();
  assert.equal(await page.locator('.cv2-item').count(),1);
  await page.getByPlaceholder('名前・本文・タグを検索').click();assert.equal(await page.locator('.cv2-filter').evaluate(n=>n.open),false);
+ await page.getByRole('button',{name:'組み合わせ',exact:true}).click();
+ await page.locator('.cv2-card>details').last().locator('summary').click();
+ await page.getByRole('textbox',{name:'Aの抽選重み',exact:true}).fill('3');
+ await page.waitForFunction(()=>JSON.parse(legacyNode.widgets.find(w=>w.name==='config_json').value).recipes[0].groups[0].item_weights?.a===3);
+
  await page.getByRole('button',{name:'閉じる',exact:true}).click();
  assert.deepEqual(errors,[]);console.log(JSON.stringify({browser:'Edge',checks:'inline/queue/filter/set/result/drag/failure/mobile/embedded-multi-tag',measurements,patchBytes:calls.map(c=>c.bytes),errors}));
  }finally{await browser?.close();server.close()}})().catch(e=>{console.error(e);process.exitCode=1});

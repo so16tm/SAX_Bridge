@@ -86,7 +86,10 @@ export function applyOperations(document, operations) {
         else if (operation.type === "recipe.delete") document.recipes = document.recipes.filter(recipe => recipe.id !== operation.id);
         else {
             document.catalog.items = document.catalog.items.filter(item => item.id !== operation.id);
-            for (const recipe of document.recipes) for (const group of walkGroups(recipe.groups)) if (group.kind !== "nested") group.item_ids = group.item_ids.filter(id => id !== operation.id);
+            for (const recipe of document.recipes) for (const group of walkGroups(recipe.groups)) if (group.kind !== "nested") {
+                group.item_ids = group.item_ids.filter(id => id !== operation.id);
+                if (group.item_weights) delete group.item_weights[operation.id];
+            }
         }
     }
     return document;
