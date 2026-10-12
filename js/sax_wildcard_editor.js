@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { showConfirmDialog } from "./sax_ui_base.js";
 import { buildWildcardTree, visibleWildcardTree } from "./sax_wildcard_editor_model.js";
+import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 const URL_BASE = "/sax/wildcards";
 export const FORMAT_HELP = [
   ["基本", "1行に1候補。空行と # で始まる行は選ばれない。"],
@@ -80,6 +81,7 @@ export function openWildcardEditor() {
   const remove = button("ファイルを削除", () => { void deleteSelected(); }); footer.append(state, remove, save);
   const pathLabel = node("div"); pathLabel.className = "sax-wc-path";
   right.append(selection, pathLabel, tools, content, notice, footer); grid.append(left, right); modal.append(header, grid); root.append(modal);
+  void attachAutoComplete(content);
   let roots = [], files = [], source = null, baseline = "", newline = "\n", busy = false, listingBusy = false, closed = false, searchTimer;
   let tree = [], visible = [], focusedKey = null;
   const expanded = new Set(), initializedRoots = new Set();
@@ -99,7 +101,7 @@ export function openWildcardEditor() {
     pathLabel.textContent = filename.value.trim() ? `__${normalizeName(filename.value)}__` : "ファイルを選択するか、新規作成してください";
   }
   async function leave() { return !modified() || await showConfirmDialog({title:"未保存の変更", message:"未保存の変更を破棄しますか？",danger:true,okLabel:"破棄する"}); }
-  async function close() { if (busy || !await leave()) return; closed = true; clearTimeout(searchTimer); viewportObserver.disconnect(); root.remove(); active = null; previousFocus?.focus?.(); }
+  async function close() { if (busy || !await leave()) return; closed = true; clearTimeout(searchTimer); viewportObserver.disconnect(); detachAutoComplete(content); root.remove(); active = null; previousFocus?.focus?.(); }
   async function blank() {
     if (busy || !await leave()) return;
     source = null; baseline = ""; newline = "\n"; content.value = ""; filename.value = ""; notice.textContent = ""; update(); render(); filename.focus();
@@ -246,7 +248,7 @@ export function openWildcardEditor() {
   content.addEventListener("input", update); folder.addEventListener("change", update); filename.addEventListener("input", update);
   filter.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { focusedKey = null; listing.scrollTop = 0; render(); }, 120); });
   root.addEventListener("keydown", event => {
-    if (event.isComposing || document.querySelector(".__sax_confirm_dlg")) return;
+    if (event.defaultPrevented || event.isComposing || document.querySelector(".__sax_confirm_dlg")) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void persist(); }
     else if (event.key === "Escape") { event.preventDefault(); void close(); }
   });

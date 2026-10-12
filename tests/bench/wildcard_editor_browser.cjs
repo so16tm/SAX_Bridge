@@ -8,6 +8,12 @@ files.push({root_id:'addon',name:'batch/dir99/item9999',shadowed:true});
 let text = 'alpha\r\nbeta\r\ngamma\r\ndelta', sha = '1', failSave = false, failDelete = false, writes = 0;
 const html = `<meta charset="utf-8"><style>body{background:#222;color:#ddd}</style><button id="launch">編集</button><script type="module">
 import {openWildcardEditor} from '/js/sax_wildcard_editor.js';document.querySelector('#launch').onclick=openWildcardEditor;
+// Autocomplete++ と同じく、後から挿入された本文欄をDOM observerで検出する。
+const popup=document.createElement('div');popup.id='tagcomplete-popup-container';popup.style.cssText='position:fixed;top:300px;left:650px;z-index:9999;background:#444';popup.hidden=true;
+const choice=document.createElement('button');choice.textContent='blue_hair';popup.append(choice);document.body.append(popup);
+window.tagCompleteEngine={target:null,hide(){popup.hidden=true;window.completionHides=(window.completionHides||0)+1;}};
+choice.onclick=()=>{const target=tagCompleteEngine.target;target.value='blue_hair';target.dispatchEvent(new Event('input',{bubbles:true}));tagCompleteEngine.hide();};
+new MutationObserver(()=>{for(const area of document.querySelectorAll('.sax-wc-text:not([data-autocomplete])')){area.dataset.autocomplete='true';area.addEventListener('input',()=>{tagCompleteEngine.target=area;popup.hidden=!area.value.startsWith('blue_h');});area.addEventListener('keydown',e=>{if(e.key==='Escape'&&!popup.hidden){e.preventDefault();tagCompleteEngine.hide();}});}}).observe(document.body,{childList:true,subtree:true});
 </script>`;
 const server = http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','text/javascript; charset=utf-8');
@@ -63,6 +69,11 @@ const server = http.createServer(async(req,res)=>{
     await page.waitForFunction(()=>document.querySelector('.sax-wc-text').value==='alpha\nbeta\ngamma\ndelta');
     assert.equal(await tree.locator('[data-key="file:comfy:batch/dir99/item9999"]').getAttribute('aria-selected'),'true');
     assert.equal(await page.getByRole('button',{name:'保存',exact:true}).isEnabled(),false);
+    await editor.fill('blue_h');await page.locator('#tagcomplete-popup-container').waitFor({state:'visible'});
+    assert.ok(await page.evaluate(()=>Number(getComputedStyle(document.querySelector('#tagcomplete-popup-container')).zIndex)>Number(getComputedStyle(document.querySelector('.sax-wc-root')).zIndex)));
+    await page.getByRole('button',{name:'blue_hair',exact:true}).click();assert.equal(await editor.inputValue(),'blue_hair');
+    await editor.fill('blue_h');await editor.press('Escape');assert.equal(await page.locator('#tagcomplete-popup-container').isVisible(),false);assert.equal(await page.locator('.sax-wc-modal').count(),1);
+    await editor.fill('alpha\nbeta\ngamma\ndelta');
     await editor.evaluate(n=>{n.focus();n.setSelectionRange(6,17);});
     await page.getByRole('button',{name:'選択行を上へ',exact:true}).click();assert.equal(await editor.inputValue(),'beta\ngamma\nalpha\ndelta');
     await page.getByRole('button',{name:'選択行を下へ',exact:true}).click();assert.equal(await editor.inputValue(),'alpha\nbeta\ngamma\ndelta');
@@ -92,6 +103,7 @@ const server = http.createServer(async(req,res)=>{
     await page.waitForFunction(()=>!document.querySelector('.sax-wc-text').disabled);
     await page.setViewportSize({width:600,height:800});assert.ok(await page.locator('.sax-wc-modal').evaluate(n=>n.scrollWidth<=n.clientWidth));
     await editor.press('Escape');await page.locator('.sax-wc-modal').waitFor({state:'detached'});
+    assert.ok(await page.evaluate(()=>window.completionHides>=3));
     assert.deepEqual(errors,[]);console.log('PASS: 10001ファイルの階層・開閉・検索・仮想表示・キー操作・複数行編集・保存・競合保持・狭幅');
   }finally{await browser?.close();server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
