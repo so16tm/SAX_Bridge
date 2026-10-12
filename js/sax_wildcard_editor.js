@@ -45,12 +45,16 @@ export function showWildcardHelp() {
   const close = button("閉じる", () => root.remove()); modal.append(link, close);
   root.append(modal); root.addEventListener("click", event => { if (event.target === root) root.remove(); }); close.focus();
 }
-export function openWildcardEditor() {
+export function openWildcardEditor(owner = null) {
   if (active) return;
   const previousFocus = document.activeElement;
   const root = shell(); active = root;
   const modal = node("div"); modal.className = "sax-wc-modal";
   modal.setAttribute("role", "dialog"); modal.setAttribute("aria-label", "Autocomplete++ ワイルドカード編集");
+  const graph = app.graph ?? app.rootGraph;
+  if (owner?.id == null) owner = graph?._nodes?.find(n => n.comfyClass === "SAX_Bridge_Wildcard_Editor" || n.type === "SAX_Bridge_Wildcard_Editor");
+  // ノードとの関連付けで補完対象にする。keep-underscores属性で整形設定を上書きしない。
+  if (owner?.id != null) modal.setAttribute("node-id", String(owner.id));
   const header = node("div"); header.className = "sax-wc-row";
   const title = node("strong", "Autocomplete++ ワイルドカードエディター"); title.className = "sax-wc-grow";
   header.append(title, button("？ 書式ヘルプ", showWildcardHelp), button("閉じる", () => { void close(); }));
@@ -73,8 +77,6 @@ export function openWildcardEditor() {
   selection.append(node("span", "保存先"), folder, filename);
   const tools = node("div"); tools.className = "sax-wc-row";
   const content = node("textarea"); content.className = "sax-wc-text"; content.spellcheck = false;
-  // Autocomplete++はダイアログ内の欄を標準で除外する。本文は明示的に補完対象にする。
-  content.dataset.acKeepUnderscores = "true";
   content.setAttribute("aria-label", "ワイルドカード本文");
   content.placeholder = "1行1候補で入力。コメント行は # から始める。";
   const notice = node("div"); notice.className = "sax-wc-alert"; notice.setAttribute("role", "alert");
@@ -258,7 +260,7 @@ export function openWildcardEditor() {
     button("↓", () => mutateLines((lines,start,end) => { if (end >= lines.length-1) return false; const next=lines.splice(end+1,1)[0]; lines.splice(start,0,next); return {start:start+1,end:end+1}; })),
   );
   tools.children[2].setAttribute("aria-label", "選択行を上へ"); tools.children[3].setAttribute("aria-label", "選択行を下へ");
-  content.addEventListener("input", update); folder.addEventListener("change", update); filename.addEventListener("input", update);
+  content.addEventListener("input", update, true); folder.addEventListener("change", update); filename.addEventListener("input", update);
   filter.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { focusedKey = null; listing.scrollTop = 0; render(); }, 120); });
   root.addEventListener("keydown", event => {
     if (event.defaultPrevented || event.isComposing || document.querySelector(".__sax_confirm_dlg")) return;
@@ -270,7 +272,7 @@ export function openWildcardEditor() {
 }
 app.registerExtension({name:"SAX.WildcardEditor", nodeCreated(node) {
   if (node.comfyClass !== "SAX_Bridge_Wildcard_Editor") return;
-  const edit = node.addWidget("button","ワイルドカードを編集",null,openWildcardEditor,{serialize:false});
+  const edit = node.addWidget("button","ワイルドカードを編集",null,()=>openWildcardEditor(node),{serialize:false});
   const help = node.addWidget("button","書式ヘルプ",null,showWildcardHelp,{serialize:false});
   edit.serialize = help.serialize = false;
 }});
