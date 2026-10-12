@@ -197,7 +197,69 @@ def parse_config(config_json, *, max_recipes=MAX_RECIPES):
     return config
 
 
-def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item, parent_prefix="", parent_suffix=""):
+class _OutputCollector:
+    def __init__(self, *, snapshot_items=False):
+        self.texts = []
+        self.total_bytes = 0
+        self.normalized_text = {}
+        self.output_items = [] if snapshot_items else None
+
+    @staticmethod
+    def _size(text):
+        try:
+            return len(text.encode("utf-8"))
+        except UnicodeError:
+            _error("text", "不正な Unicode 文字列です")
+
+    def _add_bytes(self, size):
+        self.total_bytes += size
+        if self.total_bytes > MAX_OUTPUT_BYTES:
+            _error("text", "結合出力が 32 MiB を超えています")
+
+    def append_item(self, item, group_report, prefix, suffix):
+        item_id = item["id"]
+        if item_id not in self.normalized_text:
+            text = item["text"].strip()
+            self.normalized_text[item_id] = (text, self._size(text))
+        text, size = self.normalized_text[item_id]
+        if self.output_items is not None:
+            item["output_position"] = len(self.texts) + 1 if text else None
+            group_report["items"].append(item)
+        if not text:
+            return
+        output_text = prefix + text + suffix
+        output_size = self._size(output_text) if prefix or suffix else size
+        self._add_bytes(output_size + bool(self.texts))
+        self.texts.append(output_text)
+        if self.output_items is not None:
+            self.output_items.append(item)
+            if prefix or suffix:
+                item["output_text"] = output_text
+
+    def mark(self):
+        return len(self.texts)
+
+    def _set_text(self, index, text):
+        self.texts[index] = text
+        if self.output_items is not None:
+            self.output_items[index]["output_text"] = text
+
+    def wrap_block(self, start, prefix, suffix):
+        if start == len(self.texts) or not (prefix or suffix):
+            return
+        # 下位ツリーを連結し直さず、直属の子の出力境界にだけ装飾を付ける。
+        self._add_bytes(self._size(prefix) + self._size(suffix))
+        end = len(self.texts) - 1
+        if start == end:
+            self._set_text(start, prefix + self.texts[start] + suffix)
+        else:
+            if prefix:
+                self._set_text(start, prefix + self.texts[start])
+            if suffix:
+                self._set_text(end, self.texts[end] + suffix)
+
+
+def _resolve_groups(groups, recipe_id, seed, parent_on, items, output):
     reports = []
     for group in groups:
         nested = group.get("kind") == "nested"
@@ -210,13 +272,13 @@ def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item, pare
                 material = json.dumps([seed, recipe_id, group["id"]], ensure_ascii=True, separators=(",", ":"))
                 rng = random.Random(int.from_bytes(hashlib.sha256(material.encode("utf-8")).digest(), "big"))
                 if nested:
-                    weights = [child.get("weight", 1) for child in group["groups"]]
+                    weights = [child.get("weight", 1) if child["on"] else 0 for child in group["groups"]]
                 else:
                     item_weights = group.get("item_weights", {})
                     weights = [item_weights.get(identifier, 1) for identifier in candidates]
                 positive_count = sum(weight > 0 for weight in weights)
                 if group["count"] > positive_count:
-                    _error("count", "選択数が正の重みを持つ候補数を超えています")
+                    _error("count", "選択数が有効かつ正の重みを持つ候補数を超えています")
                 chosen_count = group["count"]
                 if "count_min" in group and group["count_min"] < group["count"]:
                     chosen_count = rng.randint(group["count_min"], group["count"])
@@ -239,17 +301,19 @@ def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item, pare
         for field in ("prefix", "suffix"):
             if field in group:
                 report[field] = group[field]
-        prefix = parent_prefix + group.get("prefix", "")
-        suffix = group.get("suffix", "") + parent_suffix
+        prefix = group.get("prefix", "")
+        suffix = group.get("suffix", "")
         if nested:
             report.update({"kind": "nested", "candidate_group_ids": candidates, "selected_group_ids": chosen, "groups": []})
             chosen_ids = set(chosen)
             for child in group["groups"]:
-                report["groups"].extend(_resolve_groups([child], recipe_id, seed, effective_on and child["id"] in chosen_ids, items, append_item, prefix, suffix))
+                start = output.mark()
+                report["groups"].extend(_resolve_groups([child], recipe_id, seed, effective_on and child["id"] in chosen_ids, items, output))
+                output.wrap_block(start, prefix, suffix)
         else:
             report.update({"candidate_ids": candidates, "item_ids": chosen, "items": []})
             for identifier in chosen:
-                append_item(dict(items[identifier]), report, prefix, suffix)
+                output.append_item(dict(items[identifier]), report, prefix, suffix)
         reports.append(report)
     return reports
 
@@ -260,36 +324,13 @@ def _resolve_legacy(config_json=DEFAULT_CONFIG, seed=0):
     config = parse_config(config_json)
     recipe = next(r for r in config["recipes"] if r["id"] == config["active_recipe_id"])
     items = {entry["id"]: entry for entry in config["catalog"]["items"]}
-    texts = []
-    total_bytes = 0
-    normalized_text = {}
+    output = _OutputCollector()
     report = {"version": SCHEMA_VERSION, "seed": seed, "recipe_id": recipe["id"], "groups": []}
-    def append_item(item, group_report, prefix, suffix):
-        nonlocal total_bytes
-        item_id = item["id"]
-        if item_id not in normalized_text:
-            text = item["text"].strip()
-            try:
-                size = len(text.encode("utf-8"))
-            except UnicodeError:
-                _error("text", "不正な Unicode 文字列です")
-            normalized_text[item_id] = (text, size)
-        text, size = normalized_text[item_id]
-        if text:
-            output_text = prefix + text + suffix
-            try:
-                output_size = len(output_text.encode("utf-8")) if prefix or suffix else size
-            except UnicodeError:
-                _error("text", "不正な Unicode 文字列です")
-            total_bytes += output_size + bool(texts)
-            if total_bytes > MAX_OUTPUT_BYTES:
-                _error("text", "結合出力が 32 MiB を超えています")
-            texts.append(output_text)
-    report["groups"] = _resolve_groups(recipe["groups"], recipe["id"], seed, True, items, append_item)
+    report["groups"] = _resolve_groups(recipe["groups"], recipe["id"], seed, True, items, output)
     selection_json = json.dumps(report, ensure_ascii=True, separators=(",", ":"))
     if len(selection_json.encode("utf-8")) > MAX_OUTPUT_BYTES:
         _error("selection_json", "選択記録が 32 MiB を超えています")
-    return "\n".join(texts), selection_json
+    return "\n".join(output.texts), selection_json
 
 
 def parse_workflow(config_json):
@@ -342,8 +383,7 @@ def resolve_catalog(config_json=DEFAULT_CONFIG, seed=0):
     report["revision"] = document["revision"]
     recipes = {recipe["id"]: recipe for recipe in document["recipes"]}
     items = {item["id"]: item for item in document["catalog"]["items"]}
-    texts = []
-    output_bytes = 0
+    output = _OutputCollector(snapshot_items=True)
     for row in config["rows"]:
         recipe = recipes.get(row["recipe_id"])
         if recipe is None:
@@ -351,28 +391,11 @@ def resolve_catalog(config_json=DEFAULT_CONFIG, seed=0):
         row_report = {"id": row["id"], "recipe_id": recipe["id"], "name": recipe["name"],
                       "on": row["on"], "groups": []}
         report["rows"].append(row_report)
-        def append_item(item, group_report, prefix, suffix):
-            nonlocal output_bytes
-            text = item["text"].strip()
-            output_text = prefix + text + suffix if text else ""
-            item["output_position"] = len(texts) + 1 if text else None
-            if text and (prefix or suffix):
-                item["output_text"] = output_text
-            group_report["items"].append(item)
-            if text:
-                try:
-                    size = len(output_text.encode("utf-8"))
-                except UnicodeError:
-                    _error("text", "不正な Unicode 文字列です")
-                output_bytes += size + bool(texts)
-                if output_bytes > MAX_OUTPUT_BYTES:
-                    _error("text", "結合出力が32 MiBを超えています")
-                texts.append(output_text)
-        row_report["groups"] = _resolve_groups(recipe["groups"], recipe["id"], seed, row["on"], items, append_item)
+        row_report["groups"] = _resolve_groups(recipe["groups"], recipe["id"], seed, row["on"], items, output)
     selection_json = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
     if len(selection_json.encode("utf-8")) > MAX_OUTPUT_BYTES:
         _error("selection_json", "選択記録が32 MiBを超えています")
-    return "\n".join(texts), selection_json
+    return "\n".join(output.texts), selection_json
 
 
 class SAX_Bridge_Text_Catalog_V2(io.ComfyNode):

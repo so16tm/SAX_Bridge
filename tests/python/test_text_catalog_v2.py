@@ -435,16 +435,51 @@ def test_nested_all_and_random_resolve_whole_children_in_order():
     assert disabled["on"] is False
 
 
-def test_nested_disabled_children_remain_random_candidates():
+@pytest.mark.parametrize("depth", [2, 3, 4, 8])
+def test_nested_disabled_children_are_excluded_from_random_selection(depth):
     data = config(items=1, count=1)
     leaf = group(data)
+    active = {**copy.deepcopy(leaf), "id": "active", "mode": "all"}
     leaf["on"] = False
-    data["recipes"][0]["groups"] = [nested("outer", [leaf], "random", 1)]
+    branch = nested("outer", [leaf, active], "random", 1)
+    for level in range(depth - 2):
+        branch = nested(f"parent-{level}", [branch], "random", 1)
+    data["recipes"][0]["groups"] = [branch]
+    for seed in range(20):
+        text, report = resolve(data, seed)
+        assert text == "text 0"
+        outer = report["groups"][0]
+        for _ in range(depth - 2):
+            outer = outer["groups"][0]
+        assert outer["candidate_group_ids"] == ["g", "active"]
+        assert outer["selected_group_ids"] == ["active"]
+        assert outer["groups"][0]["item_ids"] == []
+
+
+def test_nested_all_disabled_children_allow_only_zero_random_count():
+    data = config(items=1, count=1)
+    group(data)["on"] = False
+    outer = nested("outer", [group(data)], "random", 1)
+    data["recipes"][0]["groups"] = [outer]
+    with pytest.raises(ValueError, match="count"):
+        resolve(data)
+    outer["count"] = 0
     text, report = resolve(data)
     assert text == ""
-    outer = report["groups"][0]
-    assert outer["candidate_group_ids"] == outer["selected_group_ids"] == ["g"]
-    assert outer["groups"][0]["item_ids"] == []
+    assert report["groups"][0]["selected_group_ids"] == []
+
+
+def test_nested_random_range_upper_bound_counts_only_enabled_positive_children():
+    data = config(items=1, count=1)
+    active = group(data)
+    disabled = {**copy.deepcopy(active), "id": "disabled", "on": False}
+    zero_weight = {**copy.deepcopy(active), "id": "zero", "weight": 0}
+    outer = nested("outer", [active, disabled, zero_weight], "random", 2)
+    outer["count_min"] = 0
+    data["recipes"][0]["groups"] = [outer]
+    for seed in range(10):
+        with pytest.raises(ValueError, match="count"):
+            resolve(data, seed)
 
 
 def test_leaf_random_draw_is_stable_after_hierarchy_move():
@@ -492,6 +527,33 @@ def test_leaf_rejects_explicit_null_kind_like_browser_validator():
         resolve(data)
 
 
+@pytest.mark.parametrize("depth", range(1, 9))
+def test_mixed_nested_all_and_positive_ranges_always_emit_valid_text(depth):
+    data = config(items=6, count=2)
+    branch = group(data)
+    branch["count_min"] = 1
+    for level in range(depth - 1):
+        side = {"id": f"side-{level}", "name": "本文のある枝", "on": True,
+                "mode": "all", "count": 1, "item_ids": ["i0"]}
+        branch = nested(f"parent-{level}", [branch, side], "all" if level % 2 else "random", 2)
+        if branch["mode"] == "random":
+            branch["count_min"] = 1
+    data["recipes"][0]["groups"] = [branch]
+    for seed in (0, 1, 2, 17, 123):
+        text, report = resolve(data, seed)
+        assert text
+        assert (text, report) == resolve(data, seed)
+
+
+def test_positive_parent_draw_can_select_an_empty_enabled_branch():
+    data = config(items=1, count=1)
+    data["recipes"][0]["groups"] = [nested("parent", [nested("empty", []), group(data)], "random", 1)]
+    results = [resolve(data, seed) for seed in range(20)]
+    empty = [(text, report) for text, report in results if report["groups"][0]["selected_group_ids"] == ["empty"]]
+    assert empty
+    assert all(text == "" and report["groups"][0]["chosen_count"] == 1 for text, report in empty)
+
+
 @pytest.mark.parametrize("mode", ["all", "random"])
 def test_group_affixes_apply_to_each_selected_item_and_preserve_whitespace(mode):
     data = config(items=3, count=3)
@@ -502,14 +564,78 @@ def test_group_affixes_apply_to_each_selected_item_and_preserve_whitespace(mode)
     assert report["groups"][0]["suffix"] == "\n]  "
 
 
+@pytest.mark.parametrize("mode", ["all", "random"])
+def test_nested_affixes_wrap_each_direct_child_block_once(mode):
+    data = config(items=3, count=3)
+    for item, text in zip(data["catalog"]["items"], ["a", "b", "c"]):
+        item["text"] = text
+    first = group(data)
+    first.update(mode="all", item_ids=["i0", "i1"])
+    second = {**copy.deepcopy(first), "id": "second", "item_ids": ["i2"]}
+    outer = nested("outer", [first, second], mode, 2)
+    outer.update(prefix="[", suffix="]")
+    data["recipes"][0]["groups"] = [outer]
+    assert resolve(data)[0] == "[a\nb]\n[c]"
+    assert all(child["items"] == [] for child in resolve(data)[1]["groups"][0]["groups"])
+    outer.update(mode="random", count=1)
+    for seed in range(10):
+        text, report = resolve(data, seed)
+        assert text == ("[a\nb]" if report["groups"][0]["selected_group_ids"] == ["g"] else "[c]")
+
+
 def test_nested_affixes_compose_outer_inner_and_body_order():
-    data = config(items=1, count=1)
+    data = config(items=3, count=3)
     leaf = group(data)
     leaf.update(mode="all", prefix="inner<", suffix=">inner")
     outer = nested("outer", [leaf])
     outer.update(prefix="outer<", suffix=">outer")
     data["recipes"][0]["groups"] = [outer]
-    assert resolve(data)[0] == "outer<inner<text 0>inner>outer"
+    assert resolve(data)[0] == "outer<inner<text 0>inner\ninner<text 1>inner\ninner<text 2>inner>outer"
+
+
+def test_two_nested_affix_levels_wrap_their_direct_child_blocks():
+    data = config(items=3, count=3)
+    for item, text in zip(data["catalog"]["items"], ["a", "b", "c"]):
+        item["text"] = text
+    leaf = group(data)
+    leaf.update(mode="all", item_ids=["i0", "i1"])
+    second = {**copy.deepcopy(leaf), "id": "second", "item_ids": ["i2"]}
+    inner = nested("inner", [leaf, second])
+    inner.update(prefix="[", suffix="]")
+    outer = nested("outer", [inner])
+    outer.update(prefix="{", suffix="}")
+    data["recipes"][0]["groups"] = [outer]
+    assert resolve(data)[0] == "{[a\nb]\n[c]}"
+
+
+def test_parent_affixes_wrap_mixed_leaf_and_nested_children_separately():
+    data = config(items=3, count=3)
+    leaf = group(data)
+    leaf.update(mode="all", item_ids=["i0", "i1"], prefix="L", suffix="l")
+    other = {**copy.deepcopy(leaf), "id": "other", "item_ids": ["i2"], "prefix": "I", "suffix": "i"}
+    inner = nested("inner", [other])
+    inner.update(prefix="[", suffix="]")
+    outer = nested("outer", [leaf, inner])
+    outer.update(prefix="{", suffix="}")
+    data["recipes"][0]["groups"] = [outer]
+    assert resolve(data)[0] == "{Ltext 0l\nLtext 1l}\n{[Itext 2i]}"
+
+
+@pytest.mark.parametrize("depth", [3, 4, 8])
+def test_deep_affixes_apply_once_per_block_without_changing_draw(depth):
+    data = config(items=8, count=3)
+    selected = resolve(data)[1]["groups"][0]["item_ids"]
+    branch = group(data)
+    for level in range(depth - 1):
+        branch = nested(f"parent-{level}", [branch], "random", 1)
+        branch.update(prefix="[", suffix="]")
+    data["recipes"][0]["groups"] = [branch]
+    text, report = resolve(data)
+    assert text == "[" * (depth - 1) + "\n".join(f"text {identifier[1:]}" for identifier in selected) + "]" * (depth - 1)
+    child = report["groups"][0]
+    for _ in range(depth - 1):
+        child = child["groups"][0]
+    assert child["item_ids"] == selected
 
 
 def test_affixes_do_not_emit_blank_body():
@@ -518,6 +644,22 @@ def test_affixes_do_not_emit_blank_body():
     data["catalog"]["items"][0]["text"] = " \n\t "
     text, _ = resolve(data)
     assert text == "Ptext 1S"
+
+
+def test_nested_affixes_do_not_emit_empty_or_disabled_child_blocks():
+    data = config(items=2, count=2)
+    first = group(data)
+    first.update(mode="all", item_ids=["i0"])
+    blank = {**copy.deepcopy(first), "id": "blank", "item_ids": ["i1"]}
+    disabled = {**copy.deepcopy(first), "id": "disabled", "on": False}
+    data["catalog"]["items"][1]["text"] = " \n\t "
+    empty = nested("empty", [])
+    outer = nested("outer", [empty, blank, disabled, first])
+    outer.update(prefix="[", suffix="]")
+    data["recipes"][0]["groups"] = [outer]
+    assert resolve(data)[0] == "[text 0]"
+    first["on"] = False
+    assert resolve(data)[0] == ""
 
 
 @pytest.mark.parametrize("field", ["prefix", "suffix"])
@@ -547,6 +689,81 @@ def test_affixes_participate_in_output_byte_limit(monkeypatch):
     monkeypatch.setattr(catalog, "MAX_OUTPUT_BYTES", 8)
     with pytest.raises(ValueError, match="結合出力"):
         resolve(data)
+
+
+def test_nested_block_output_limit_counts_utf8_affixes_once_and_newlines(monkeypatch):
+    data = config(items=2, count=2)
+    for item in data["catalog"]["items"]:
+        item["text"] = "x" * 2000
+    group(data)["mode"] = "all"
+    inner = nested("inner", [group(data)])
+    inner.update(prefix="界" * 10, suffix="終" * 10)
+    outer = nested("outer", [inner])
+    outer.update(prefix="{", suffix="}")
+    data["recipes"][0]["groups"] = [outer]
+    expected = "{" + "界" * 10 + "x" * 2000 + "\n" + "x" * 2000 + "終" * 10 + "}"
+    size = len(expected.encode("utf-8"))
+    monkeypatch.setattr(catalog, "MAX_OUTPUT_BYTES", size)
+    assert resolve(data)[0] == expected
+    monkeypatch.setattr(catalog, "MAX_OUTPUT_BYTES", size - 1)
+    with pytest.raises(ValueError, match="結合出力"):
+        resolve(data)
+
+
+def resolve_shared_snapshot(data, monkeypatch, rows=None):
+    from nodes import text_catalog_v2_store as store
+
+    document = {"id": "shared", "revision": 7, "catalog": data["catalog"], "recipes": data["recipes"]}
+    monkeypatch.setattr(store, "snapshot", lambda identifier: document)
+    workflow = {"version": 3, "catalog_id": "shared", "rows": rows or [{"id": "row", "recipe_id": "r", "on": True}]}
+    return resolve(workflow)
+
+
+def test_shared_nested_snapshot_records_block_boundaries_and_preserves_original_items(monkeypatch):
+    data = config(items=4, count=4)
+    for item, text in zip(data["catalog"]["items"], [" a ", " \n\t ", " b ", " c "]):
+        item["text"] = text
+    first = group(data)
+    first.update(mode="all", item_ids=["i0", "i1", "i2"], prefix="<", suffix=">")
+    second = {**copy.deepcopy(first), "id": "second", "item_ids": ["i3"], "prefix": "(", "suffix": ")"}
+    inner = nested("inner", [first, second])
+    inner.update(prefix="[", suffix="]")
+    outer = nested("outer", [inner])
+    outer.update(prefix="{", suffix="}")
+    data["recipes"][0]["groups"] = [outer]
+    text, report = resolve_shared_snapshot(data, monkeypatch)
+    assert text == "{[<a>\n<b>]\n[(c)]}"
+    first_report, second_report = report["rows"][0]["groups"][0]["groups"][0]["groups"]
+    assert [item["text"] for item in first_report["items"]] == [" a ", " \n\t ", " b "]
+    assert [item["output_position"] for item in first_report["items"]] == [1, None, 2]
+    assert first_report["items"][0]["output_text"] == "{[<a>"
+    assert "output_text" not in first_report["items"][1]
+    assert first_report["items"][2]["output_text"] == "<b>]"
+    assert second_report["items"][0]["output_position"] == 3
+    assert second_report["items"][0]["output_text"] == "[(c)]}"
+
+
+def test_shared_repeated_items_and_rows_keep_distinct_block_affixes_and_positions(monkeypatch):
+    data = config(items=2, count=2)
+    first = group(data)
+    first.update(mode="all")
+    second = {**copy.deepcopy(first), "id": "second"}
+    left = nested("left", [first])
+    left.update(prefix="[", suffix="]")
+    right = nested("right", [second])
+    right.update(prefix="{", suffix="}")
+    data["recipes"][0]["groups"] = [left, right]
+    rows = [{"id": "off", "recipe_id": "r", "on": False},
+            {"id": "a", "recipe_id": "r", "on": True},
+            {"id": "b", "recipe_id": "r", "on": True}]
+    text, report = resolve_shared_snapshot(data, monkeypatch, rows)
+    block = "[text 0\ntext 1]\n{text 0\ntext 1}"
+    assert text == block + "\n" + block
+    assert all(child["items"] == [] for parent in report["rows"][0]["groups"] for child in parent["groups"])
+    selected = [item for row in report["rows"][1:] for parent in row["groups"] for item in parent["groups"][0]["items"]]
+    assert [item["output_position"] for item in selected] == list(range(1, 9))
+    assert [item["output_text"] for item in selected] == ["[text 0", "text 1]", "{text 0", "text 1}"] * 2
+    assert all(item["text"] in (" text 0 ", " text 1 ") for item in selected)
 
 
 def test_same_shared_item_can_be_reused_with_distinct_affixes(monkeypatch, tmp_path):

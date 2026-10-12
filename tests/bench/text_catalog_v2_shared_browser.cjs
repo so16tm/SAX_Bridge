@@ -146,6 +146,18 @@ const server=http.createServer(async(req,res)=>{
  await page.locator('[data-group-id="g1"]').getByRole('spinbutton',{name:'人物の抽選重み',exact:true}).fill('3');
  await page.locator('[data-group-id="g2"]').getByRole('spinbutton',{name:'背景の抽選重み',exact:true}).fill('0');
  assert.deepEqual(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups.map(g=>g.weight??1),nestedId),[3,0]);
+ assert.equal(await nestedCard.getByText('1有効 / 2候補',{exact:true}).count(),1);
+ await nestedCard.getByRole('textbox',{name:/ランダム件数/}).fill('2');
+ assert.equal(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).count,nestedId),1);
+ await nestedCard.getByRole('textbox',{name:/ランダム件数/}).fill('1');
+ await page.locator('[data-group-id="g2"]').getByRole('checkbox',{name:/を使用/}).uncheck();
+ assert.equal(await nestedCard.getByText('1有効 / 2候補',{exact:true}).count(),1);
+ await page.locator('[data-group-id="g2"]').getByRole('checkbox',{name:/を使用/}).check();
+ await nestedCard.getByRole('button',{name:'Prefix / Suffixを編集',exact:true}).click();
+ await affixDialog.getByRole('textbox',{name:'Prefix（前）',exact:true}).fill('[');await affixDialog.getByRole('textbox',{name:'Suffix（後）',exact:true}).fill(']');
+ assert.equal(await affixDialog.locator('pre').textContent(),'[本文A\n本文B]');
+ assert.equal(await affixDialog.getByText('直下の各構成要素の出力全体に一度ずつ付与します。その下のアイテムへ個別には付与しません。',{exact:true}).count(),1);
+ await affixDialog.getByRole('button',{name:'閉じる',exact:true}).click();
  await page.locator('[data-group-id="g1"]').getByRole('button',{name:'候補アイテムの重みを編集',exact:true}).click();
  await page.getByRole('spinbutton',{name:'アイテム0の抽選重み',exact:true}).fill('4');
  await page.getByRole('spinbutton',{name:'アイテム1の抽選重み',exact:true}).fill('0.5');
@@ -164,11 +176,24 @@ const server=http.createServer(async(req,res)=>{
  await page.getByRole('button',{name:'＋ ネスト',exact:true}).click();
  const childId=await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups.at(-1).id,nestedId);
  assert.equal(await page.locator(`[data-group-id="${childId}"]`).getAttribute('data-depth'),'1');
+ assert.equal(await page.getByRole('combobox',{name:'構成要素の配置先',exact:true}).inputValue(),'');
+ // ここへ追加の対象は一度だけ。続けてセット直下、別のネストへ追加できる。
+ await nestedCard.getByRole('button',{name:'候補を変更',exact:true}).click();await page.getByRole('button',{name:'ここにアイテムを追加',exact:true}).click();
+ await page.getByPlaceholder('名前・本文・タグを検索').fill('アイテム0');
+ await page.locator('.se-candidate[data-item-id="i0"] input').check();await page.getByRole('button',{name:'選んだアイテムを追加',exact:true}).click();
+ assert.equal(await page.evaluate(id=>shared().session.document.recipes[0].groups.find(g=>g.id===id).groups.at(-1).item_ids[0],nestedId),'i0');
+ assert.equal(await page.getByRole('combobox',{name:'構成要素の配置先',exact:true}).inputValue(),'');
+ await page.locator('.se-candidate[data-item-id="i0"] input').check();await page.getByRole('button',{name:'選んだアイテムを追加',exact:true}).click();
+ assert.equal(await page.evaluate(()=>shared().session.document.recipes[0].groups.at(-1).item_ids[0]),'i0');
+ await page.locator(`[data-group-id="${childId}"]`).getByRole('button',{name:'候補を変更',exact:true}).click();await page.getByRole('button',{name:'ここにアイテムを追加',exact:true}).click();
+ await page.locator('.se-candidate[data-item-id="i0"] input').check();await page.getByRole('button',{name:'選んだアイテムを追加',exact:true}).click();
+ assert.equal(await page.evaluate(ids=>shared().session.document.recipes[0].groups.find(g=>g.id===ids[0]).groups.find(g=>g.id===ids[1]).groups.at(-1).item_ids[0],[nestedId,childId]),'i0');
+ assert.equal(await page.getByRole('combobox',{name:'構成要素の配置先',exact:true}).inputValue(),'');
  await nestedCard.getByRole('button',{name:'候補を変更',exact:true}).click();
  assert.equal(await page.getByRole('combobox',{name:'ネストの配置先',exact:true}).locator(`option[value="${childId}"]`).count(),0);
  await page.getByRole('button',{name:'閉じる',exact:true}).last().click();
  await page.screenshot({path:path.join(root,'work/shared-v2-nested-sets.png')});
- console.log('nested create/move/drag/collapse/random/cycle protection passed');
+ console.log('nested create/move/drag/collapse/random/OFF eligibility/direct block preview/one-shot destination/cycle protection passed');
 
  await page.evaluate(recipe=>shared().session.mutate([{type:'recipe.put',recipe}]),originalRecipe);await page.getByRole('button',{name:'閉じる',exact:true}).click();
  console.log('sets passed'); // 全行表示と並び替え、有効切替。

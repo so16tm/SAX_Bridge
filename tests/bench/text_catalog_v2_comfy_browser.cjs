@@ -57,7 +57,7 @@ let browser;
 
  assert.deepEqual(await page.evaluate(()=>testShared().result.selection.rows.find(r=>r.recipe_id==='portrait').groups[0].items.map(i=>i.output_text)),['(watercolor:1.2)','(a traveler, edited:1.2)']);
  await page.evaluate(async()=>testNode.widgets.find(w=>w.name==='前回の実行結果').callback());
- assert.equal(await page.getByText('Prefix / Suffix適用後の出力',{exact:true}).count(),2);
+ assert.equal(await page.getByText('出力中の該当部分（前後付与後）',{exact:true}).count(),2);
  await page.locator('.sax-shared-editor').getByRole('button',{name:'閉じる',exact:true}).click();
  // 同じSeedで追加・並び替えをせずOFF→ONを繰り返し、実送信と出力を確認する。
  for (const enabled of [true,false,true]) {
@@ -86,6 +86,13 @@ let browser;
   if (enabled) { assert.match(result.text.split('\n').at(-1),/^\[(?:\(a traveler, edited\)|<watercolor>)\]$/); assert.equal(result.text.split('\n').length,3); if (randomOutput) assert.equal(result.text,randomOutput); else randomOutput=result.text; }
   else assert.equal(result.text,'watercolor\nwatercolor');
   console.log('nested random toggle Queue',enabled,JSON.stringify(result.text));
+ }
+ // 深いall/rangeの混在でも、ランダム親のOFF候補を選ばず、直属childの出力を一度だけ包む。
+ for (const depth of [3,4]) {
+  await page.evaluate(async depth=>{const s=testShared().session,p=structuredClone(s.document.recipes.find(r=>r.id==='portrait'));let branch={id:'active-block',name:'本文2件',on:true,mode:'all',count:1,item_ids:['a','b']};for(let i=0;i<depth-1;i++)branch={id:`level-${i}`,name:'ネスト',kind:'nested',on:true,mode:i%2?'all':'random',count:1,...(i%2?{}:{count_min:1}),...(i===0?{prefix:'[',suffix:']'}:{}),groups:[branch,{id:`off-${i}`,name:'無効な枝',on:false,mode:'all',count:1,item_ids:['b']}]};p.groups=[branch];s.mutate([{type:'recipe.put',recipe:p}]);await s.flush();testShared().result=null;await testApp.queuePrompt(0,1)},depth);
+  await page.waitForFunction(()=>testShared()?.result!==null,null,{timeout:20000});
+  assert.equal(await page.evaluate(()=>testShared().result.text),'watercolor\nwatercolor\n[a traveler, edited\nwatercolor]');
+  console.log('nested OFF exclusion / direct block affix Queue',depth);
  }
  await page.evaluate(()=>testApp.canvas.setDirty(true,true));await page.screenshot({path:path.join(output,'comfy-widget-after.png')});
  await page.evaluate(()=>testNode.onConfigure({}));await page.waitForFunction(()=>testShared()?.session);assert.equal(await page.locator('.sax-shared-sets').count(),1);assert.equal(await page.locator('.ssw-entry').count(),3);

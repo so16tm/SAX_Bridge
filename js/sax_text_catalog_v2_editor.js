@@ -316,7 +316,7 @@ export function openSharedEditor(session, options = {}) {
         const textWrap = el("div"); textWrap.append(cell("text", shown?.text ?? ""));
         if (entry.candidate) textWrap.append(el("span", "se-badge", "未選択候補"));
         if (entry.snapshot) { textWrap.append(el("span", "se-badge", !current ? "削除済み・編集できません" : current.text !== entry.snapshot.text || current.name !== entry.snapshot.name ? "編集済み・次回実行に反映" : "実行時の内容")); const details = el("details"); details.append(el("summary", "se-muted", "実行時の本文"), el("div", "se-cell", entry.snapshot.text)); textWrap.append(details); }
-        if (entry.snapshot?.output_text !== undefined) { const details = el("details"); details.append(el("summary", "se-muted", "Prefix / Suffix適用後の出力"), el("div", "se-cell", entry.snapshot.output_text)); textWrap.append(details); }
+        if (entry.snapshot?.output_text !== undefined) { const details = el("details"); details.append(el("summary", "se-muted", "出力中の該当部分（前後付与後）"), el("div", "se-cell", entry.snapshot.output_text)); textWrap.append(details); }
         n.append(textWrap, cell("tags", shown?.tags?.join(", ") ?? "", "se-tags"));
         const tools = el("div", "se-tools"); if (current) {
             const expanded = btn("拡大", () => { releaseActive(); expandedEditor(entry.itemId); });
@@ -393,13 +393,21 @@ export function openSharedEditor(session, options = {}) {
         updateBulk();
     }
     function bulkTags(value, add) { try { const tags = parseTags(value); mutate([...selected].map(id => itemMap.get(id)).filter(Boolean).map(item => ({ type: "item.put", item: { ...item, tags: add ? [...new Set([...item.tags, ...tags])] : item.tags.filter(t => !tags.includes(t)) } }))); } catch (error) { localError = error.message; updateStatus(); } }
-    function editGroup(groupId, change, historyKey) { const r = recipe(); if (!r) return; const next = structuredClone(r); const g = [...walkGroups(next.groups)].find(g => g.id === groupId); if (!g) return; change(g, next); mutate([{type:"recipe.put",recipe:next}], historyKey); }
+    function eligibleCandidateCount(g) { return g.kind === "nested" ? g.groups.filter(child => child.on && (child.weight ?? 1) > 0).length : g.item_ids.filter(id => candidateWeight(g, id) > 0).length; }
+    function editGroup(groupId, change, historyKey) {
+        const r = recipe(); if (!r) return; const next = structuredClone(r); const g = [...walkGroups(next.groups)].find(g => g.id === groupId); if (!g) return; change(g, next);
+        if (mutate([{type:"recipe.put",recipe:next}], historyKey)) for (const label of content.querySelectorAll(".se-group-count")) {
+            const current = locateGroup(recipe().groups, label.dataset.countGroupId)?.group;
+            if (current) label.textContent = `${eligibleCandidateCount(current)}有効 / ${current.kind === "nested" ? current.groups.length : current.item_ids.length}候補`;
+        }
+    }
     function editAffixes(groupId) {
         const g = locateGroup(recipe().groups, groupId)?.group; if (!g) return;
         showDialog({title:`Prefix / Suffix — ${g.name || "構成要素"}`,width:580,className:"sax-shared-affix",build(dlg, close) {
-            dlg.append(el("span", "", "選ばれた各アイテムの本文へ個別に付与します。元の本文は変更しません。"));
+            const nested = g.kind === "nested";
+            dlg.append(el("span", "", nested ? "直下の各構成要素の出力全体に一度ずつ付与します。その下のアイテムへ個別には付与しません。" : "選ばれた各アイテムの本文へ個別に付与します。元の本文は変更しません。"));
             const preview = el("pre"), fields = {};
-            const updatePreview = () => { preview.textContent = (fields.prefix?.value ?? "") + "本文" + (fields.suffix?.value ?? ""); };
+            const updatePreview = () => { preview.textContent = (fields.prefix?.value ?? "") + (nested ? "本文A\n本文B" : "本文") + (fields.suffix?.value ?? ""); };
             for (const [key, title, placeholder] of [["prefix","Prefix（前）","例: ("],["suffix","Suffix（後）","例: :1.2)"]]) {
                 const field = el("input"), wrap = el("label", "", title), historyKey = newId(); field.value = g[key] ?? ""; field.maxLength = LIMITS.affix; field.placeholder = placeholder; field.setAttribute("aria-label", title); fields[key] = field;
                 const commit = () => { const current = locateGroup(recipe().groups, groupId)?.group; if (current && (current[key] ?? "") !== field.value) editGroup(groupId, next => { if (field.value) next[key] = field.value; else delete next[key]; }, historyKey); updatePreview(); };
@@ -480,9 +488,9 @@ export function openSharedEditor(session, options = {}) {
             for (const item of doc().catalog.items) if (candidateSelection.has(item.id) && !included.has(item.id)) ids.push(item.id);
             if (candidateGroup) { const g = [...walkGroups(next.groups)].find(g => g.id === candidateGroup); if (g) { Object.assign(g, { item_ids: ids, mode: chosenMode, ...bounds }); if (!Object.hasOwn(bounds,"count_min")) delete g.count_min; if (g.item_weights) { for (const id of Object.keys(g.item_weights)) if (!candidateSelection.has(id)) delete g.item_weights[id]; if (!Object.keys(g.item_weights).length) delete g.item_weights; } if (locateGroup(next.groups,g.id).parentId !== targetParent && !relocate(next, g.id, targetParent)) return; } }
             else for (const itemIds of separate() ? ids.map(id => [id]) : [ids]) groupChildren(next, targetParent).push({ id: newId(), name: itemMap.get(itemIds[0])?.name || "構成要素", on: true, mode: separate() ? "all" : chosenMode, ...bounds, item_ids: itemIds });
-            if (putRecipe(next)) { candidateSettings = null; candidateSelection.clear(); candidateGroup = null; candidatesOnly = false; candidateAnchor = null; render(); }
+            if (putRecipe(next)) { targetParent = ""; candidateSettings = null; candidateSelection.clear(); candidateGroup = null; candidatesOnly = false; candidateAnchor = null; render(); }
         }, "se-primary"), ...(candidateGroup ? [btn("キャンセル", () => { candidateGroup = null; candidateSelection.clear(); candidatesOnly = false; render(); })] : [])));
-        right.append(row(el("strong", "se-grow", `構成要素 ${[...walkGroups(r.groups)].length}件（上から出力）`), btn("＋ ネスト", () => { const next = structuredClone(recipe()); const g = {id:newId(),name:"ネスト",kind:"nested",mode:"all",count:1,on:true,groups:[]}; groupChildren(next,targetParent).push(g); if (putRecipe(next)) render(); }))); const groups = el("div", "se-scroll se-group-scroll"); right.append(groups);
+        right.append(row(el("strong", "se-grow", `構成要素 ${[...walkGroups(r.groups)].length}件（上から出力）`), btn("＋ ネスト", () => { const next = structuredClone(recipe()); const g = {id:newId(),name:"ネスト",kind:"nested",mode:"all",count:1,on:true,groups:[]}; groupChildren(next,targetParent).push(g); if (putRecipe(next)) { targetParent = ""; render(); } }))); const groups = el("div", "se-scroll se-group-scroll"); right.append(groups);
         let dragged = null;
         for (const [index, {group:g, depth}] of visibleGroups(r.groups, collapsedGroups).entries()) {
             const nested = g.kind === "nested";
@@ -498,7 +506,7 @@ export function openSharedEditor(session, options = {}) {
             card.dataset.editing = String(candidateGroup === g.id);
             groupName.setAttribute("aria-label", `構成要素 ${index + 1}の名前`);
             const icon = (text, title, fn) => { const control = btn(text, fn, "se-group-icon"); control.title = title; control.setAttribute("aria-label", title); return control; };
-            const enabled = check(g.on, yes => { editGroup(g.id, next => { next.on = yes; }); card.dataset.off = !yes; }); enabled.setAttribute("aria-label", `構成要素 ${index + 1}を使用`);
+            const enabled = check(g.on, yes => { editGroup(g.id, next => { next.on = yes; }); render(); }); enabled.setAttribute("aria-label", `構成要素 ${index + 1}を使用`);
             const changeCandidates = () => { if (nested) { editNested(g.id); return; } targetParent = locateGroup(recipe().groups,g.id).parentId; candidateSettings = null; candidateGroup = g.id; candidateSelection = new Set(g.item_ids); candidatesOnly = true; candidateAnchor = null; candidateQuery = ""; candidateTags = []; render(); };
             const single = !nested && g.item_ids.length === 1;
             card.dataset.single = String(single);
@@ -522,11 +530,13 @@ export function openSharedEditor(session, options = {}) {
             if (!single) {
                 const candidates = nested ? g.groups : g.item_ids;
                 const groupMode = select([["all", "すべて使う"], ["random", "ランダム"]], g.mode, value => { editGroup(g.id, next => { next.mode = value; }); render(); });
-                const amount = input(formatRandomCount(g), value => { try { const bounds = parseRandomCount(value); if (bounds.count > candidates.length) throw new Error("ランダム件数の上限は候補数以下にしてください"); editGroup(g.id, next => { Object.assign(next, bounds); if (!Object.hasOwn(bounds,"count_min")) delete next.count_min; }); localError = ""; updateStatus(); } catch (error) { localError = error.message; updateStatus(); } }); amount.style.width = "85px"; amount.placeholder = "0～2"; amount.title = "固定件数（2）または範囲（0～2）"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
+                const amount = input(formatRandomCount(g), value => { try { const bounds = parseRandomCount(value); if (bounds.count > eligibleCandidateCount(locateGroup(recipe().groups, g.id).group)) throw new Error("ランダム件数の上限は有効かつ正の重みの候補数以下にしてください"); editGroup(g.id, next => { Object.assign(next, bounds); if (!Object.hasOwn(bounds,"count_min")) delete next.count_min; }); localError = ""; updateStatus(); } catch (error) { localError = error.message; updateStatus(); } }); amount.style.width = "85px"; amount.placeholder = "0～2"; amount.title = "固定件数（2）または範囲（0～2）"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
                 const preview = el("span", "se-muted se-group-preview", nested ? g.groups.slice(0,4).map(child => child.name).join("、") : g.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name ?? "削除済み").join("、"));
                 preview.title = "編集アイコンで全候補を一覧表示";
                 const orderButton = btn("出力順", () => { orderGroup = orderGroup === g.id ? null : g.id; orderScroll = 0; render(); }); orderButton.setAttribute("aria-expanded", String(orderGroup === g.id)); orderButton.title = "候補アイテムの出力順を並び替え";
-                card.append(row(groupMode, amount, el("span", "se-muted", `${candidates.length}${nested ? "構成要素" : "候補"}`), preview, ...(nested ? [] : [orderButton])));
+                const countLabel = el("span", "se-muted", g.mode === "random" ? `${eligibleCandidateCount(g)}有効 / ${candidates.length}候補` : `${candidates.length}${nested ? "構成要素" : "候補"}`);
+                if (g.mode === "random") { countLabel.classList.add("se-group-count"); countLabel.dataset.countGroupId = g.id; }
+                card.append(row(groupMode, amount, countLabel, preview, ...(nested ? [] : [orderButton])));
             }
             if (!nested && orderGroup === g.id) renderOrder(card, g);
             card.setAttribute("aria-label", `構成要素 ${index + 1}`); groups.append(card);

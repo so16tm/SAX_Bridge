@@ -86,14 +86,14 @@ test("全階層IDの重複、混在形式、深さ・総数・兄弟数の超過
     many[0].groups.push(leaf("extra")); assert.throws(check(many), /256/);
 });
 
-test("ネスト抽選の候補数はOFFを含む直下の子で判定し、無効な親の配下は警告しない", () => {
+test("ネスト抽選の候補数はOFFの直下の子を除いて判定し、無効な親の配下は警告しない", () => {
     const config = fixture(1), child = { ...leaf("child"), mode: "random", count: 2 };
     const root = { ...nested("root", [child, { ...leaf("off"), on: false }]), mode: "random", count: 2 };
     config.recipes[0].groups = [root]; validateConfig(config);
-    assert.equal(recipeWarnings(config).length, 1);
+    assert.equal(recipeWarnings(config).length, 2);
     root.count = 3;
     assert.equal(recipeWarnings(config).length, 2);
-    assert.match(recipeWarnings(config)[0], /候補2件/);
+    assert.match(recipeWarnings(config)[0], /候補1件/);
     root.on = false; assert.deepEqual(recipeWarnings(config), []);
     root.on = true; root.count = 0; assert.deepEqual(recipeWarnings(config), []);
 });

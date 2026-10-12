@@ -189,7 +189,7 @@ export function recipeWarnings(config) {
     function visit(groups) {
         for (const group of groups) {
             if (!group.on) continue;
-            const candidates = group.kind === "nested" ? group.groups.filter(child => (child.weight ?? 1) > 0).length : group.item_ids.filter(id => candidateWeight(group, id) > 0).length;
+            const candidates = group.kind === "nested" ? group.groups.filter(child => child.on && (child.weight ?? 1) > 0).length : group.item_ids.filter(id => candidateWeight(group, id) > 0).length;
             if (group.mode === "random" && group.count > candidates) warnings.push(`${group.name || "無題のグループ"}: 候補${candidates}件に対して最大${group.count}件の抽選は実行できません`);
             if (group.kind === "nested" && (group.mode === "all" || group.count > 0)) visit(group.groups);
         }
