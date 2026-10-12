@@ -347,6 +347,20 @@ function openCatalog(node) {
             }), hint("件を選ぶ"));
             modeRow.append(menu("候補を変更", button("左の選択を候補に設定", () => editGroup(group.id, g => setGroupCandidates(g, selectedIds())), { disabled: !selectedIds().length }), button("左で候補を選択", () => { state.selected = new Set(group.item_ids); state.query = ""; state.filterTags = []; state.mobilePane = "library"; state.libraryHidden = false; render(); })));
             card.append(modeRow);
+            const affixes = el("details", "cv2-affixes");
+            const affixSummary = el("summary", "cv2-muted", group.prefix || group.suffix ? "前後の文字 · 設定済み" : "前後の文字");
+            affixes.append(affixSummary);
+            for (const [prop, label, placeholder] of [["prefix", "前に付ける文字", "例: （"], ["suffix", "後ろに付ける文字", "例: ）"]]) {
+                const input = field(group[prop] ?? "", label, `affix:${group.id}:${prop}`, value => {
+                    editGroup(group.id, g => { if (value) g[prop] = value; else delete g[prop]; }, `affix:${group.id}:${prop}`, false);
+                    const edited = config.recipes.find(r => r.id === config.active_recipe_id).groups.find(g => g.id === group.id);
+                    affixSummary.textContent = edited?.prefix || edited?.suffix ? "前後の文字 · 設定済み" : "前後の文字";
+                }, { max: LIMITS.affix });
+                input.placeholder = placeholder;
+                input.maxLength = LIMITS.affix * 2;
+                affixes.append(input);
+            }
+            card.append(affixes);
             const candidates = el("details"); candidates.dataset.group = group.id; candidates.open = state.openGroups.has(group.id) || group.item_ids.length === 1;
             candidates.addEventListener("toggle", () => {
                 if (!candidates.isConnected) return;

@@ -155,6 +155,26 @@ test("重みはmodeを問わず検証し、候補重み0を抽選候補数から
     config.recipes[0].groups[0].item_weights = {}; assert.throws(() => validateConfig(config), /ネスト.*重み/);
 });
 
+test("構成要素のprefix/suffixは全mode・全階層で省略または空文字を許し、文字列4096文字まで", () => {
+    const config = fixture(1);
+    const root = nested("parent", [leaf("child")]);
+    root.prefix = "";
+    root.groups[0].suffix = "後".repeat(4096);
+    config.recipes[0].groups = [root];
+    assert.equal(validateConfig(config), config);
+    assert.deepEqual(parseConfig(JSON.stringify(config)).recipes[0].groups, [root]);
+    root.mode = "random"; root.prefix = "前";
+    root.groups[0].mode = "random";
+    validateConfig(config);
+    for (const value of [null, 1, false, {}, "前".repeat(4097)]) {
+        root.prefix = value;
+        assert.throws(() => validateConfig(config), /group\.prefix/);
+    }
+    delete root.prefix;
+    root.groups[0].suffix = null;
+    assert.throws(() => validateConfig(config), /group\.suffix/);
+});
+
 test("素材削除は全組み合わせの参照を除去し、別グループの重複使用を許容", () => {
     const config = fixture(3);
     const group = { id: "g", name: "固定", mode: "all", item_ids: ["item-0", "item-1"], count: 0, on: true };

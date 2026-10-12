@@ -1,5 +1,5 @@
 // V2 の編集境界。壊れたデータを補正して保存しないため、検証と編集を分離する。
-export const LIMITS = Object.freeze({ items: 10000, recipes: 32, groups: 32, groupDepth: 8, totalGroups: 256, tags: 8, id: 128, name: 256, text: 65536, bytes: 32 * 1024 * 1024 });
+export const LIMITS = Object.freeze({ items: 10000, recipes: 32, groups: 32, groupDepth: 8, totalGroups: 256, tags: 8, id: 128, name: 256, text: 65536, affix: 4096, bytes: 32 * 1024 * 1024 });
 
 export function parseRandomCount(value) {
     if (typeof value !== "string") fail("抽選数は整数または範囲で指定してください");
@@ -104,6 +104,7 @@ export function validateGroups(groups, itemIds) {
             ids.add(group.id);
             if (++total > LIMITS.totalGroups) fail("セット内の構成要素は256件以内にしてください");
             string(group.name, LIMITS.name, "group.name");
+            for (const key of ["prefix", "suffix"]) if (Object.hasOwn(group, key)) string(group[key], LIMITS.affix, `group.${key}`);
             if (!["all", "random"].includes(group.mode)) fail("選択方式が不正です");
             if (typeof group.on !== "boolean") fail("有効状態が不正です");
             if (!Number.isSafeInteger(group.count) || group.count < 0 || group.count > LIMITS.items) fail("抽選数は0〜10000の整数で指定してください");

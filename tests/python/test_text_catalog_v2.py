@@ -490,3 +490,84 @@ def test_leaf_rejects_explicit_null_kind_like_browser_validator():
     group(data)["kind"] = None
     with pytest.raises(ValueError, match="アイテム型"):
         resolve(data)
+
+
+@pytest.mark.parametrize("mode", ["all", "random"])
+def test_group_affixes_apply_to_each_selected_item_and_preserve_whitespace(mode):
+    data = config(items=3, count=3)
+    group(data).update(mode=mode, prefix="  [\n", suffix="\n]  ")
+    text, report = resolve(data)
+    assert text == "  [\ntext 0\n]  \n  [\ntext 1\n]  \n  [\ntext 2\n]  "
+    assert report["groups"][0]["prefix"] == "  [\n"
+    assert report["groups"][0]["suffix"] == "\n]  "
+
+
+def test_nested_affixes_compose_outer_inner_and_body_order():
+    data = config(items=1, count=1)
+    leaf = group(data)
+    leaf.update(mode="all", prefix="inner<", suffix=">inner")
+    outer = nested("outer", [leaf])
+    outer.update(prefix="outer<", suffix=">outer")
+    data["recipes"][0]["groups"] = [outer]
+    assert resolve(data)[0] == "outer<inner<text 0>inner>outer"
+
+
+def test_affixes_do_not_emit_blank_body():
+    data = config(items=2, count=2)
+    group(data).update(mode="all", prefix="P", suffix="S")
+    data["catalog"]["items"][0]["text"] = " \n\t "
+    text, _ = resolve(data)
+    assert text == "Ptext 1S"
+
+
+@pytest.mark.parametrize("field", ["prefix", "suffix"])
+@pytest.mark.parametrize("value", [None, 1, [], "x" * 4097])
+def test_affix_validation_rejects_invalid_types_and_oversize(field, value):
+    data = config()
+    group(data)[field] = value
+    with pytest.raises(ValueError, match=field):
+        resolve(data)
+
+
+def test_affix_max_length_is_valid_and_group_report_omits_unconfigured_fields():
+    data = config(items=1, count=1)
+    group(data)["prefix"] = "x" * catalog.MAX_AFFIX_LENGTH
+    text, report = resolve(data)
+    assert text == "x" * catalog.MAX_AFFIX_LENGTH + "text 0"
+    assert report["groups"][0]["prefix"] == "x" * catalog.MAX_AFFIX_LENGTH
+    del group(data)["prefix"]
+    _, report = resolve(data)
+    assert "prefix" not in report["groups"][0]
+    assert "suffix" not in report["groups"][0]
+
+
+def test_affixes_participate_in_output_byte_limit(monkeypatch):
+    data = config(items=1, count=1)
+    group(data)["prefix"] = "éé"
+    monkeypatch.setattr(catalog, "MAX_OUTPUT_BYTES", 8)
+    with pytest.raises(ValueError, match="結合出力"):
+        resolve(data)
+
+
+def test_same_shared_item_can_be_reused_with_distinct_affixes(monkeypatch, tmp_path):
+    from nodes import text_catalog_v2_store as store
+
+    monkeypatch.setattr(store, "directory", lambda: tmp_path)
+    store._cache.clear()
+    document = store.create({
+        "name": "shared",
+        "catalog": {"items": [{"id": "i", "name": "item", "text": " body ", "tags": []}]},
+        "recipes": [{"id": "r", "name": "recipe", "groups": [
+            {"id": "a", "name": "a", "mode": "all", "on": True, "item_ids": ["i"], "count": 1, "prefix": "A"},
+            {"id": "b", "name": "b", "mode": "all", "on": True, "item_ids": ["i"], "count": 1, "suffix": "B"},
+        ]}],
+    })
+    config_v3 = {"version": 3, "catalog_id": document["id"], "rows": [{"id": "row", "recipe_id": "r", "on": True}]}
+    text, raw_report = catalog.resolve_catalog(json.dumps(config_v3))
+    report = json.loads(raw_report)
+    first, second = report["rows"][0]["groups"]
+    assert text == "Abody\nbodyB"
+    assert first["items"][0]["text"] == second["items"][0]["text"] == " body "
+    assert first["items"][0]["output_text"] == "Abody"
+    assert second["items"][0]["output_text"] == "bodyB"
+    assert [first["items"][0]["output_position"], second["items"][0]["output_position"]] == [1, 2]

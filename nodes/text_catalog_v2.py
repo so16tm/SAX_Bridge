@@ -19,6 +19,7 @@ MAX_TAGS = 8
 MAX_ID_LENGTH = 128
 MAX_NAME_LENGTH = 256
 MAX_TEXT_LENGTH = 65_536
+MAX_AFFIX_LENGTH = 4_096
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_OUTPUT_BYTES = 32 * 1024 * 1024
 MAX_SEED = 9_007_199_254_740_991  # フロントエンドで精度を失わない整数範囲。
@@ -99,6 +100,9 @@ def _validate_groups(groups, path, item_ids, seen, depth=1):
             _error(gp + ".on", "boolean が必要です")
         if "weight" in group:
             _weight(group["weight"], gp + ".weight")
+        for field in ("prefix", "suffix"):
+            if field in group:
+                _string(group[field], gp + "." + field, MAX_AFFIX_LENGTH)
         _integer(group.get("count"), gp + ".count", MAX_ITEMS)
         if "count_min" in group:
             count_min = _integer(group["count_min"], gp + ".count_min", MAX_ITEMS)
@@ -193,7 +197,7 @@ def parse_config(config_json, *, max_recipes=MAX_RECIPES):
     return config
 
 
-def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item):
+def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item, parent_prefix="", parent_suffix=""):
     reports = []
     for group in groups:
         nested = group.get("kind") == "nested"
@@ -232,15 +236,20 @@ def _resolve_groups(groups, recipe_id, seed, parent_on, items, append_item):
             report["weight"] = group["weight"]
         if "item_weights" in group:
             report["item_weights"] = group["item_weights"]
+        for field in ("prefix", "suffix"):
+            if field in group:
+                report[field] = group[field]
+        prefix = parent_prefix + group.get("prefix", "")
+        suffix = group.get("suffix", "") + parent_suffix
         if nested:
             report.update({"kind": "nested", "candidate_group_ids": candidates, "selected_group_ids": chosen, "groups": []})
             chosen_ids = set(chosen)
             for child in group["groups"]:
-                report["groups"].extend(_resolve_groups([child], recipe_id, seed, effective_on and child["id"] in chosen_ids, items, append_item))
+                report["groups"].extend(_resolve_groups([child], recipe_id, seed, effective_on and child["id"] in chosen_ids, items, append_item, prefix, suffix))
         else:
             report.update({"candidate_ids": candidates, "item_ids": chosen, "items": []})
             for identifier in chosen:
-                append_item(dict(items[identifier]), report)
+                append_item(dict(items[identifier]), report, prefix, suffix)
         reports.append(report)
     return reports
 
@@ -255,7 +264,7 @@ def _resolve_legacy(config_json=DEFAULT_CONFIG, seed=0):
     total_bytes = 0
     normalized_text = {}
     report = {"version": SCHEMA_VERSION, "seed": seed, "recipe_id": recipe["id"], "groups": []}
-    def append_item(item, group_report):
+    def append_item(item, group_report, prefix, suffix):
         nonlocal total_bytes
         item_id = item["id"]
         if item_id not in normalized_text:
@@ -267,13 +276,18 @@ def _resolve_legacy(config_json=DEFAULT_CONFIG, seed=0):
             normalized_text[item_id] = (text, size)
         text, size = normalized_text[item_id]
         if text:
-            total_bytes += size + bool(texts)
+            output_text = prefix + text + suffix
+            try:
+                output_size = len(output_text.encode("utf-8")) if prefix or suffix else size
+            except UnicodeError:
+                _error("text", "不正な Unicode 文字列です")
+            total_bytes += output_size + bool(texts)
             if total_bytes > MAX_OUTPUT_BYTES:
                 _error("text", "結合出力が 32 MiB を超えています")
-            texts.append(text)
+            texts.append(output_text)
     report["groups"] = _resolve_groups(recipe["groups"], recipe["id"], seed, True, items, append_item)
     selection_json = json.dumps(report, ensure_ascii=True, separators=(",", ":"))
-    if len(selection_json) > MAX_OUTPUT_BYTES:
+    if len(selection_json.encode("utf-8")) > MAX_OUTPUT_BYTES:
         _error("selection_json", "選択記録が 32 MiB を超えています")
     return "\n".join(texts), selection_json
 
@@ -337,16 +351,23 @@ def resolve_catalog(config_json=DEFAULT_CONFIG, seed=0):
         row_report = {"id": row["id"], "recipe_id": recipe["id"], "name": recipe["name"],
                       "on": row["on"], "groups": []}
         report["rows"].append(row_report)
-        def append_item(item, group_report):
+        def append_item(item, group_report, prefix, suffix):
             nonlocal output_bytes
             text = item["text"].strip()
+            output_text = prefix + text + suffix if text else ""
             item["output_position"] = len(texts) + 1 if text else None
+            if text and (prefix or suffix):
+                item["output_text"] = output_text
             group_report["items"].append(item)
             if text:
-                output_bytes += len(text.encode("utf-8")) + bool(texts)
+                try:
+                    size = len(output_text.encode("utf-8"))
+                except UnicodeError:
+                    _error("text", "不正な Unicode 文字列です")
+                output_bytes += size + bool(texts)
                 if output_bytes > MAX_OUTPUT_BYTES:
                     _error("text", "結合出力が32 MiBを超えています")
-                texts.append(text)
+                texts.append(output_text)
         row_report["groups"] = _resolve_groups(recipe["groups"], recipe["id"], seed, row["on"], items, append_item)
     selection_json = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
     if len(selection_json.encode("utf-8")) > MAX_OUTPUT_BYTES:

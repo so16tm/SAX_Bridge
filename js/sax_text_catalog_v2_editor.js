@@ -1,5 +1,5 @@
 import { showDialog, showConfirmDialog } from "./sax_ui_base.js";
-import { candidateWeight, parseSelectionWeight, parseRandomCount, formatRandomCount, sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "./sax_text_catalog_v2_model.js";
+import { LIMITS, candidateWeight, parseSelectionWeight, parseRandomCount, formatRandomCount, sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "./sax_text_catalog_v2_model.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { openWildcardPicker } from "./sax_text_catalog_v2_wildcards.js";
 
@@ -18,6 +18,7 @@ function visibleGroups(groups, collapsed = new Set(), depth = 0) {
     return groups.flatMap(group => [{ group, depth }, ...(group.kind === "nested" && !collapsed.has(group.id) ? visibleGroups(group.groups, collapsed, depth + 1) : [])]);
 }
 const STYLE = `
+.sax-shared-affix input{width:100%;font:inherit;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#242426);border:1px solid var(--border-color,#45454b);border-radius:6px;padding:6px 8px}.sax-shared-affix label{display:flex;flex-direction:column;gap:4px;font-size:12px}.sax-shared-affix pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:8px;border:1px solid var(--border-color,#45454b);border-radius:6px;max-height:140px;overflow:auto}
 .sax-shared-editor *{box-sizing:border-box}.sax-shared-editor [hidden]{display:none!important}.sax-shared-editor .se-mobile-tags{display:none}.sax-shared-editor>div{width:97vw!important;height:94vh;max-height:97vh!important;padding:16px!important;border-radius:12px!important;font-family:system-ui,sans-serif}
 .sax-shared-editor button,.sax-shared-editor input,.sax-shared-editor select,.sax-shared-editor textarea{font:inherit;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#242426);border:1px solid var(--border-color,#45454b);border-radius:6px;padding:7px 9px;min-width:0}.sax-shared-editor button{cursor:pointer}.sax-shared-editor button:disabled{opacity:.45;cursor:default}.sax-shared-editor :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:2px}.sax-shared-editor textarea{width:100%;resize:vertical;line-height:1.7;min-height:160px}.sax-shared-editor input[type=checkbox]{width:16px;height:16px;accent-color:var(--primary-background,#5686d6)}
 .sax-shared-editor .se-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sax-shared-editor .se-grow{flex:1;min-width:110px}.sax-shared-editor .se-muted{opacity:.68;font-size:12px}.sax-shared-editor .se-error{color:var(--error-text,#ed9494);white-space:pre-wrap}.sax-shared-editor .se-status{min-height:18px}.sax-shared-editor .se-scroll{flex:1;min-height:0;overflow:auto;position:relative;scrollbar-gutter:stable;overflow-anchor:none}.sax-shared-editor .se-canvas{position:relative}.sax-shared-editor .se-record{position:absolute;left:0;right:0;display:grid;grid-template-columns:24px minmax(130px,.8fr) minmax(260px,3fr) minmax(120px,.7fr) 72px;gap:12px;padding:10px 6px;border-bottom:1px solid var(--border-color,#45454b);align-items:start}.sax-shared-editor .se-cell{border:0;background:transparent;text-align:left;cursor:text;line-height:1.7;padding:3px;white-space:pre-wrap;overflow-wrap:anywhere;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:var(--se-lines,3)}.sax-shared-editor .se-cell:hover{background:color-mix(in srgb,var(--primary-background,#5686d6) 12%,transparent);border-radius:5px}.sax-shared-editor .se-cell:empty:before{content:attr(data-placeholder);opacity:.45}.sax-shared-editor .se-record input:not([type=checkbox]){width:100%}.sax-shared-editor .se-record textarea{resize:none;min-height:200px}.sax-shared-editor .se-record[data-editing=true]{background:color-mix(in srgb,var(--primary-background,#5686d6) 8%,transparent)}.sax-shared-editor .se-tools{display:flex;flex-direction:column;gap:6px}.sax-shared-editor .se-section{position:absolute;left:0;right:0;padding:12px 8px;background:var(--comfy-input-bg,#242426);border-radius:6px;display:flex;align-items:center;gap:12px;overflow:hidden}.sax-shared-editor .se-section strong{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sax-shared-editor .se-empty{padding:24px;opacity:.7}.sax-shared-editor .se-columns{display:grid;grid-template-columns:24px minmax(130px,.8fr) minmax(260px,3fr) minmax(120px,.7fr) 72px;gap:12px;padding:0 6px;font-size:12px;opacity:.65}.sax-shared-editor .se-layout{display:grid;grid-template-columns:minmax(240px,1fr) minmax(320px,1.4fr);gap:16px;flex:1;min-height:0}.sax-shared-editor .se-pane{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}.sax-shared-editor .se-card{padding:12px;border:1px solid var(--border-color,#45454b);border-radius:8px;margin-bottom:10px}.sax-shared-editor .se-card[data-off=true]{opacity:.55}.sax-shared-editor .se-card>.se-row{margin-bottom:8px}.sax-shared-editor .se-candidate{position:absolute;left:0;right:0;height:40px;display:flex;align-items:center;gap:10px;padding:6px;border-bottom:1px solid var(--border-color,#45454b)}.sax-shared-editor .se-candidate span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sax-shared-editor .se-primary{background:var(--primary-background,#386cb8);color:#fff}.sax-shared-editor .se-result-text{flex:1;min-height:0;resize:none!important}.sax-shared-editor .se-badge{font-size:11px;color:var(--primary-background,#80adf2);display:block}.sax-shared-editor .se-conflict{padding:8px;border:1px solid var(--error-text,#ed9494);border-radius:6px}.sax-shared-editor details>summary{cursor:pointer}
@@ -315,6 +316,7 @@ export function openSharedEditor(session, options = {}) {
         const textWrap = el("div"); textWrap.append(cell("text", shown?.text ?? ""));
         if (entry.candidate) textWrap.append(el("span", "se-badge", "未選択候補"));
         if (entry.snapshot) { textWrap.append(el("span", "se-badge", !current ? "削除済み・編集できません" : current.text !== entry.snapshot.text || current.name !== entry.snapshot.name ? "編集済み・次回実行に反映" : "実行時の内容")); const details = el("details"); details.append(el("summary", "se-muted", "実行時の本文"), el("div", "se-cell", entry.snapshot.text)); textWrap.append(details); }
+        if (entry.snapshot?.output_text !== undefined) { const details = el("details"); details.append(el("summary", "se-muted", "Prefix / Suffix適用後の出力"), el("div", "se-cell", entry.snapshot.output_text)); textWrap.append(details); }
         n.append(textWrap, cell("tags", shown?.tags?.join(", ") ?? "", "se-tags"));
         const tools = el("div", "se-tools"); if (current) {
             const expanded = btn("拡大", () => { releaseActive(); expandedEditor(entry.itemId); });
@@ -391,7 +393,22 @@ export function openSharedEditor(session, options = {}) {
         updateBulk();
     }
     function bulkTags(value, add) { try { const tags = parseTags(value); mutate([...selected].map(id => itemMap.get(id)).filter(Boolean).map(item => ({ type: "item.put", item: { ...item, tags: add ? [...new Set([...item.tags, ...tags])] : item.tags.filter(t => !tags.includes(t)) } }))); } catch (error) { localError = error.message; updateStatus(); } }
-    function editGroup(groupId, change) { const r = recipe(); if (!r) return; const next = structuredClone(r); const g = [...walkGroups(next.groups)].find(g => g.id === groupId); if (!g) return; change(g, next); putRecipe(next); }
+    function editGroup(groupId, change, historyKey) { const r = recipe(); if (!r) return; const next = structuredClone(r); const g = [...walkGroups(next.groups)].find(g => g.id === groupId); if (!g) return; change(g, next); mutate([{type:"recipe.put",recipe:next}], historyKey); }
+    function editAffixes(groupId) {
+        const g = locateGroup(recipe().groups, groupId)?.group; if (!g) return;
+        showDialog({title:`Prefix / Suffix — ${g.name || "構成要素"}`,width:580,className:"sax-shared-affix",build(dlg, close) {
+            dlg.append(el("span", "", "選ばれた各アイテムの本文へ個別に付与します。元の本文は変更しません。"));
+            const preview = el("pre"), fields = {};
+            const updatePreview = () => { preview.textContent = (fields.prefix?.value ?? "") + "本文" + (fields.suffix?.value ?? ""); };
+            for (const [key, title, placeholder] of [["prefix","Prefix（前）","例: ("],["suffix","Suffix（後）","例: :1.2)"]]) {
+                const field = el("input"), wrap = el("label", "", title), historyKey = newId(); field.value = g[key] ?? ""; field.maxLength = LIMITS.affix; field.placeholder = placeholder; field.setAttribute("aria-label", title); fields[key] = field;
+                const commit = () => { const current = locateGroup(recipe().groups, groupId)?.group; if (current && (current[key] ?? "") !== field.value) editGroup(groupId, next => { if (field.value) next[key] = field.value; else delete next[key]; }, historyKey); updatePreview(); };
+                let composing = false; field.addEventListener("compositionstart", () => { composing = true; }); field.addEventListener("compositionend", () => { composing = false; commit(); }); field.addEventListener("input", () => { updatePreview(); if (!composing) commit(); }); field.addEventListener("blur", commit);
+                wrap.append(field); dlg.append(wrap);
+            }
+            updatePreview(); dlg.append(el("span", "", "出力例（空白・記号は入力したとおり付与）"), preview, btn("閉じる", close));
+        },onClose(){render();}});
+    }
     function renderSets() {
         const r = recipe(); if (r) pref.recipeId = r.id;
         const setSelect = select(sortedNamedOptions(doc().recipes).map(s => [s.id, s.name]), r?.id ?? "", value => { pref.recipeId = value; candidateGroup = null; targetParent = ""; candidateSelection.clear(); candidatesOnly = false; candidateAnchor = null; render(); });
@@ -499,6 +516,7 @@ export function openSharedEditor(session, options = {}) {
                 if (g.mode === "random") header.append(el("span", "se-muted se-single-mode", `ランダム${formatRandomCount(g)}件`));
             }
             header.append(icon("✎", "候補を変更", changeCandidates), icon("↑", "構成要素を上へ", () => moveGroup(g.id, -1)), icon("↓", "構成要素を下へ", () => moveGroup(g.id, 1)), icon("×", "構成要素を削除", () => { const next = structuredClone(recipe()); const found=locateGroup(next.groups,g.id); found.siblings.splice(found.index,1); putRecipe(next); render(); }));
+            const affix = icon("前後", "Prefix / Suffixを編集", () => editAffixes(g.id)); if (g.prefix || g.suffix) { affix.classList.add("se-primary"); affix.title = `Prefix: ${g.prefix ?? ""}\nSuffix: ${g.suffix ?? ""}`; } header.append(affix);
             if (!nested && g.mode === "random") header.append(icon("重", "候補アイテムの重みを編集", () => { orderGroup = orderGroup === g.id ? null : g.id; orderScroll = 0; render(); }));
             card.append(header);
             if (!single) {

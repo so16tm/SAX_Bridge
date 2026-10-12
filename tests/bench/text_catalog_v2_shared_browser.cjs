@@ -63,6 +63,18 @@ const server=http.createServer(async(req,res)=>{
  const cardSize=await page.locator('.se-card').first().evaluate(e=>({height:e.offsetHeight,overflow:e.scrollWidth>e.clientWidth}));assert.ok(cardSize.height<=80&&!cardSize.overflow,JSON.stringify(cardSize));
  assert.ok(await page.locator('.se-candidate').count()<30);assert.equal(await page.locator('.se-candidate-copy>.se-muted').first().textContent(),doc.catalog.items[0].text);
  const originalRecipe=await page.evaluate(()=>structuredClone(shared().session.document.recipes[0]));
+ const originalAffixText=await page.evaluate(()=>shared().session.document.catalog.items[0].text);
+ await page.locator('[data-group-id="g1"]').getByRole('button',{name:'Prefix / Suffixを編集',exact:true}).click();
+ const affixDialog=page.locator('.sax-shared-affix');
+ await affixDialog.getByRole('textbox',{name:'Prefix（前）',exact:true}).fill('(');await affixDialog.getByRole('textbox',{name:'Suffix（後）',exact:true}).fill(':1.2)');
+ assert.equal(await affixDialog.locator('pre').textContent(),'(本文:1.2)');
+ await affixDialog.getByRole('button',{name:'閉じる',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>{const g=shared().session.document.recipes[0].groups[0];return [g.prefix,g.suffix];}),['(',':1.2)']);
+ assert.equal(await page.evaluate(()=>shared().session.document.catalog.items[0].text),originalAffixText);
+ await page.getByRole('button',{name:'元に戻す',exact:true}).click();assert.equal(await page.evaluate(()=>shared().session.document.recipes[0].groups[0].suffix),undefined);
+ await page.getByRole('button',{name:'やり直す',exact:true}).click();assert.equal(await page.evaluate(()=>shared().session.document.recipes[0].groups[0].suffix),':1.2)');
+ await page.evaluate(recipe=>shared().session.mutate([{type:'recipe.put',recipe}]),originalRecipe);
+
  await page.getByRole('combobox',{name:'構成要素の追加方法',exact:true}).selectOption('separate');
  await page.getByPlaceholder('名前・本文・タグを検索').fill('アイテム99');
  await page.getByRole('button',{name:'一覧を全選択',exact:true}).click();
@@ -229,6 +241,10 @@ const server=http.createServer(async(req,res)=>{
  await page.getByRole('button',{name:'組み合わせ',exact:true}).click();
  await page.locator('.cv2-card>details').last().locator('summary').click();
  await page.getByRole('textbox',{name:'Aの抽選重み',exact:true}).fill('3');
+ await page.locator('.cv2-affixes summary').click();
+ await page.getByPlaceholder('例: （').fill('[');await page.getByPlaceholder('例: ）').fill(']');
+ await page.waitForFunction(()=>{const g=JSON.parse(legacyNode.widgets.find(w=>w.name==='config_json').value).recipes[0].groups[0];return g.prefix==='['&&g.suffix===']';});
+
  await page.waitForFunction(()=>JSON.parse(legacyNode.widgets.find(w=>w.name==='config_json').value).recipes[0].groups[0].item_weights?.a===3);
 
  await page.getByRole('button',{name:'閉じる',exact:true}).click();
