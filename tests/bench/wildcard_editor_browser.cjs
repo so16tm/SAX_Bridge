@@ -2,18 +2,24 @@
 const { chromium } = require(process.env.SAX_PLAYWRIGHT_PATH || 'playwright');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..');
+const expanderPath = process.env.SAX_AUTOCOMPLETE_EXPANDER_PATH;
+const autocompleteMainPath = process.env.SAX_AUTOCOMPLETE_MAIN_PATH;
+const mainSource = autocompleteMainPath ? fs.readFileSync(autocompleteMainPath,'utf8') : null;
+const exclusionSource = mainSource ? mainSource.slice(mainSource.indexOf('function isExcludedTarget('),mainSource.indexOf('function syncWidgetValue(')) : "function isExcludedTarget(area){return !!area.closest('[role=dialog]')&&area.dataset.acKeepUnderscores!=='true';}";
 const roots = [{id:'comfy',label:'ComfyUI/wildcards'},{id:'addon',label:'custom_nodes/addon/wildcards'},{id:'empty',label:'empty/wildcards'}];
 const files = Array.from({length:10000},(_,i)=>({root_id:'comfy',name:`batch/dir${Math.floor(i/100)}/item${i}`}));
 files.push({root_id:'addon',name:'batch/dir99/item9999',shadowed:true});
-let text = 'alpha\r\nbeta\r\ngamma\r\ndelta', sha = '1', failSave = false, failDelete = false, writes = 0;
+let text = 'alpha\r\nbeta\r\ngamma\r\ndelta', sha = '1', failSave = false, failDelete = false, failReload = false, writes = 0;
 const html = `<meta charset="utf-8"><style>body{background:#222;color:#ddd}</style><button id="launch">編集</button><script type="module">
 import {openWildcardEditor} from '/js/sax_wildcard_editor.js';document.querySelector('#launch').onclick=openWildcardEditor;
+const isDictionariesControllerTextarea=()=>false,getNodeForElement=()=>null,isOverriddenTarget=()=>false,isNodeOverridden=()=>false,isNodeEffectivelyExcluded=()=>false;
+${exclusionSource}
 // Autocomplete++ と同じく、後から挿入された本文欄をDOM observerで検出する。
 const popup=document.createElement('div');popup.id='tagcomplete-popup-container';popup.style.cssText='position:fixed;top:300px;left:650px;z-index:9999;background:#444';popup.hidden=true;
 const choice=document.createElement('button');choice.textContent='blue_hair';popup.append(choice);document.body.append(popup);
-window.tagCompleteEngine={target:null,hide(){popup.hidden=true;window.completionHides=(window.completionHides||0)+1;}};
+window.tagCompleteEngine={target:null,wildcards:['legacy'],wildcardCache:new Map([['legacy',['old']]]),hide(){popup.hidden=true;window.completionHides=(window.completionHides||0)+1;}};
 choice.onclick=()=>{const target=tagCompleteEngine.target;target.value='blue_hair';target.dispatchEvent(new Event('input',{bubbles:true}));tagCompleteEngine.hide();};
-new MutationObserver(()=>{for(const area of document.querySelectorAll('.sax-wc-text:not([data-autocomplete])')){area.dataset.autocomplete='true';area.addEventListener('input',()=>{tagCompleteEngine.target=area;popup.hidden=!area.value.startsWith('blue_h');});area.addEventListener('keydown',e=>{if(e.key==='Escape'&&!popup.hidden){e.preventDefault();tagCompleteEngine.hide();}});}}).observe(document.body,{childList:true,subtree:true});
+new MutationObserver(()=>{for(const area of document.querySelectorAll('.sax-wc-text:not([data-autocomplete])')){area.dataset.autocomplete='true';area.addEventListener('input',()=>{tagCompleteEngine.target=area;popup.hidden=isExcludedTarget(area)||!area.value.startsWith('blue_h');});area.addEventListener('keydown',e=>{if(e.key==='Escape'&&!popup.hidden){e.preventDefault();tagCompleteEngine.hide();}});}}).observe(document.body,{childList:true,subtree:true});
 </script>`;
 const server = http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','text/javascript; charset=utf-8');
@@ -21,6 +27,15 @@ const server = http.createServer(async(req,res)=>{
   if(url.pathname==='/'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end(html);return;}
   if(url.pathname==='/scripts/app.js'){res.end('export const app={registerExtension(){}};');return;}
   if(url.pathname==='/scripts/api.js'){res.end('export const api={fetchApi:(url,options)=>fetch(url,options)};');return;}
+  if(url.pathname==='/extensions'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(['/extensions/ComfyUI-Autocomplete-Plus-Plus/js/prompt-expander.js?v=test']));return;}
+  if(url.pathname==='/extensions/ComfyUI-Autocomplete-Plus-Plus/js/prompt-expander.js'){res.end(expanderPath?fs.readFileSync(expanderPath,'utf8')+'\nwindow.expansionCache=wildcardContentMap;':"export const wildcardContentMap=new Map([['legacy',['old']]]);window.expansionCache=wildcardContentMap;");return;}
+  if(url.pathname==='/extensions/ComfyUI-Autocomplete-Plus-Plus/js/settings.js'){res.end('export const settingValues={};export const logDebug=()=>{};');return;}
+  if(url.pathname==='/extensions/ComfyUI-Autocomplete-Plus-Plus/js/main.js'){res.end('export const getActiveControllerNode=()=>null;');return;}
+  if(url.pathname==='/autocomplete-plus-plus/wildcards/all-data'){
+    res.setHeader('Content-Type','application/json');if(failReload){res.statusCode=500;res.end(JSON.stringify({error:'取得失敗'}));return;}
+    const wildcards={};for(const file of files)if(!Object.hasOwn(wildcards,file.name))wildcards[file.name]=text.split(/\r?\n/);
+    res.end(JSON.stringify({success:true,wildcards}));return;
+  }
   if(url.pathname==='/sax/wildcards'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({roots,files}));return;}
   if(url.pathname==='/sax/wildcards/file'){
     res.setHeader('Content-Type','application/json');
@@ -33,7 +48,7 @@ const server = http.createServer(async(req,res)=>{
       let body='';for await(const chunk of req)body+=chunk;
       const value=JSON.parse(body);await new Promise(resolve=>setTimeout(resolve,100));
       if(failSave){res.statusCode=409;res.end(JSON.stringify({error:'他の編集による競合'}));return;}
-      writes++;text=value.content;sha=String(Number(sha)+1);res.end(JSON.stringify({...value,sha}));return;
+      writes++;text=value.content;sha=String(Number(sha)+1);if(!files.some(f=>f.root_id===value.root_id&&f.name===value.name))files.push({root_id:value.root_id,name:value.name});res.end(JSON.stringify({...value,sha}));return;
     }
     res.end(JSON.stringify({root_id:url.searchParams.get('root_id'),name:url.searchParams.get('name'),content:text,sha}));return;
   }
@@ -69,6 +84,9 @@ const server = http.createServer(async(req,res)=>{
     await page.waitForFunction(()=>document.querySelector('.sax-wc-text').value==='alpha\nbeta\ngamma\ndelta');
     assert.equal(await tree.locator('[data-key="file:comfy:batch/dir99/item9999"]').getAttribute('aria-selected'),'true');
     assert.equal(await page.getByRole('button',{name:'保存',exact:true}).isEnabled(),false);
+    assert.equal(await editor.getAttribute('data-ac-keep-underscores'),'true');
+    await editor.evaluate(n=>{delete n.dataset.acKeepUnderscores;});await editor.fill('blue_h');assert.equal(await page.locator('#tagcomplete-popup-container').isVisible(),false);
+    await editor.evaluate(n=>{n.dataset.acKeepUnderscores='true';});
     await editor.fill('blue_h');await page.locator('#tagcomplete-popup-container').waitFor({state:'visible'});
     assert.ok(await page.evaluate(()=>Number(getComputedStyle(document.querySelector('#tagcomplete-popup-container')).zIndex)>Number(getComputedStyle(document.querySelector('.sax-wc-root')).zIndex)));
     await page.getByRole('button',{name:'blue_hair',exact:true}).click();assert.equal(await editor.inputValue(),'blue_hair');
@@ -82,9 +100,15 @@ const server = http.createServer(async(req,res)=>{
     await editor.fill('変更した本文\n2行目');await editor.press('Control+s');
     await page.waitForFunction(()=>document.querySelector('.sax-wc-text').disabled);
     await page.waitForFunction(()=>!document.querySelector('.sax-wc-text').disabled);assert.equal(writes,1);assert.equal(text,'変更した本文\r\n2行目');
+    assert.deepEqual(await page.evaluate(()=>expansionCache.get('batch/dir99/item9999')),['変更した本文','2行目']);
+    assert.equal(await page.evaluate(()=>tagCompleteEngine.wildcardCache.size),0);assert.equal(await page.evaluate(()=>tagCompleteEngine.wildcards.includes('batch/dir99/item9999')),true);
     failSave=true;await editor.fill('未保存の内容');await editor.press('Control+s');await page.getByRole('alert').filter({hasText:'競合'}).waitFor();
     assert.equal(await editor.inputValue(),'未保存の内容');assert.equal(await page.getByRole('button',{name:'保存',exact:true}).isEnabled(),true);
     failSave=false;await editor.press('Control+s');await page.waitForFunction(()=>document.querySelector('.sax-wc-tip').textContent.includes('保存済み'));
+    await page.waitForFunction(()=>!document.querySelector('.sax-wc-text').disabled);
+    failReload=true;await editor.fill('展開未更新の本文');await editor.press('Control+s');await page.getByRole('alert').filter({hasText:'展開データを更新できませんでした'}).waitFor();
+    assert.equal(text,'展開未更新の本文');assert.deepEqual(await page.evaluate(()=>expansionCache.get('batch/dir99/item9999')),['未保存の内容']);
+    failReload=false;await page.getByRole('button',{name:'一覧更新',exact:true}).click();await page.waitForFunction(()=>window.expansionCache.get('batch/dir99/item9999')?.[0]==='展開未更新の本文');
     await search.fill('');await page.getByRole('button',{name:'一覧更新',exact:true}).click();
     await page.waitForFunction(()=>!document.querySelector('.sax-wc-files').textContent.includes('item9999') || document.querySelectorAll('.sax-wc-tree-item').length>8);
     await page.screenshot({path:path.join(root,'work/wildcard-editor-tree.png')});
@@ -101,6 +125,15 @@ const server = http.createServer(async(req,res)=>{
     assert.equal(await editor.inputValue(),'');assert.equal(await page.getByRole('button',{name:'ファイルを削除',exact:true}).isEnabled(),false);
     assert.equal(await tree.locator('[data-key="file:comfy:batch/dir99/item9999"]').count(),1);
     await page.waitForFunction(()=>!document.querySelector('.sax-wc-text').disabled);
+    await page.getByRole('button',{name:'＋ 新規作成',exact:true}).click();await page.getByRole('combobox',{name:'保存先',exact:true}).selectOption('comfy');
+    await page.getByRole('textbox',{name:'ファイル名',exact:true}).fill('newly/created');await editor.fill('new content');await editor.press('Control+s');
+    await page.waitForFunction(()=>!document.querySelector('.sax-wc-text').disabled&&window.expansionCache.has('newly/created'));
+    assert.deepEqual(await page.evaluate(()=>expansionCache.get('newly/created')),['new content']);assert.equal(await page.evaluate(()=>tagCompleteEngine.wildcards.includes('newly/created')),true);
+    if(expanderPath)assert.equal(await page.evaluate(async()=>{const m=await import('/extensions/ComfyUI-Autocomplete-Plus-Plus/js/prompt-expander.js');return m.expandPromptString('__newly/created__',{rng:()=>0});}),'new content');
+    await page.getByRole('button',{name:'ファイルを削除',exact:true}).click();await confirm.getByRole('button',{name:'削除する',exact:true}).click();
+    await page.waitForFunction(()=>!document.querySelector('.sax-wc-text').disabled&&!window.expansionCache.has('newly/created'));
+    assert.equal(await page.evaluate(()=>tagCompleteEngine.wildcards.includes('newly/created')),false);
+    if(expanderPath)assert.equal(await page.evaluate(async()=>{const m=await import('/extensions/ComfyUI-Autocomplete-Plus-Plus/js/prompt-expander.js');return m.expandPromptString('__newly/created__',{rng:()=>0});}),'');
     await page.setViewportSize({width:600,height:800});assert.ok(await page.locator('.sax-wc-modal').evaluate(n=>n.scrollWidth<=n.clientWidth));
     await editor.press('Escape');await page.locator('.sax-wc-modal').waitFor({state:'detached'});
     assert.ok(await page.evaluate(()=>window.completionHides>=3));

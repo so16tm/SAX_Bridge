@@ -2403,6 +2403,8 @@ export function makeJsonWidgetAccessor(widgetName, fallback = [], { fireCallback
 
 let _wildcardListCache = null;
 
+export function invalidateWildcardListCache() { _wildcardListCache = null; }
+
 /** Wildcard 名の最大長 (DoS / プロトタイプ汚染防止の上限) */
 const WILDCARD_NAME_MAX_LENGTH_DEFAULT = 200;
 /** Wildcard リストの最大件数 */

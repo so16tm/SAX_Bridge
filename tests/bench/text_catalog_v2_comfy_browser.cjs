@@ -51,6 +51,34 @@ let browser;
  await page.evaluate(async()=>{const debug=LiteGraph.createNode('SAX_Bridge_Debug_Text');testApp.graph.add(debug);debug.pos=[700,180];testNode.connect(0,debug,0);testNode.widgets.find(w=>w.name==='control_after_generate').value='fixed';await testApp.queuePrompt(0,1)});
  await page.waitForFunction(()=>testShared()?.result?.text?.includes('a traveler, edited'),null,{timeout:20000});
  assert.equal(await page.evaluate(()=>testShared().result.text),'watercolor\nwatercolor\na traveler, edited');
+ // 同じSeedで追加・並び替えをせずOFF→ONを繰り返し、実送信と出力を確認する。
+ for (const enabled of [true,false,true]) {
+  await page.locator('[data-row-id="r1"] input').setChecked(enabled);
+  assert.equal(await page.evaluate(()=>JSON.parse(testNode.widgets.find(w=>w.name==='config_json').value).rows.find(r=>r.id==='r1').on),enabled);
+  const submitted = page.waitForRequest(r=>new URL(r.url()).pathname.endsWith('/prompt')&&r.method()==='POST');
+  await page.evaluate(async()=>{testShared().result=null;await testApp.queuePrompt(0,1)});
+  const request=await submitted, payload=request.postDataJSON();
+  const sentInputs=payload.prompt[String(await page.evaluate(()=>testNode.id))].inputs;
+  const sentConfig=sentInputs.config_json ?? sentInputs._sax_ac_transfer.inputs.config_json.raw;
+  assert.equal(JSON.parse(sentConfig).rows.find(r=>r.id==='r1').on,enabled);
+  await page.waitForFunction(()=>testShared()?.result!==null,null,{timeout:20000});
+  const actual=await page.evaluate(()=>testShared().result.text);
+  console.log('toggle Queue',enabled,JSON.stringify(actual));
+  assert.equal(actual,enabled?'watercolor\nwatercolor\nwatercolor\na traveler, edited':'watercolor\nwatercolor\na traveler, edited');
+ }
+ // 親と子がすべてランダム1件のセットでも、再有効化だけで出力を復帰する。
+ await page.evaluate(async()=>{const s=testShared().session,p=structuredClone(s.document.recipes.find(r=>r.id==='portrait'));p.groups=[{id:'parent',name:'ランダム親',kind:'nested',on:true,mode:'random',count:1,groups:[{id:'left',name:'人物',on:true,mode:'random',count:1,item_ids:['a']},{id:'right',name:'画風',on:true,mode:'random',count:1,item_ids:['b']}]}];s.mutate([{type:'recipe.put',recipe:p}]);await s.flush();});
+ let randomOutput;
+ for (const enabled of [true,false,true]) {
+  await page.locator(`[data-row-id="${added.id}"] input`).setChecked(enabled);
+  await page.evaluate(async()=>{testShared().result=null;await testApp.queuePrompt(0,1)});
+  await page.waitForFunction(()=>testShared()?.result!==null,null,{timeout:20000});
+  const result=await page.evaluate(()=>testShared().result);
+  assert.equal(result.selection.rows.find(r=>r.id===added.id).on,enabled);
+  if (enabled) { assert.equal(result.text.split('\n').length,3); if (randomOutput) assert.equal(result.text,randomOutput); else randomOutput=result.text; }
+  else assert.equal(result.text,'watercolor\nwatercolor');
+  console.log('nested random toggle Queue',enabled,JSON.stringify(result.text));
+ }
  await page.evaluate(()=>testApp.canvas.setDirty(true,true));await page.screenshot({path:path.join(output,'comfy-widget-after.png')});
  await page.evaluate(()=>testNode.onConfigure({}));await page.waitForFunction(()=>testShared()?.session);assert.equal(await page.locator('.sax-shared-sets').count(),1);assert.equal(await page.locator('.ssw-entry').count(),3);
  await page.locator('.ssw-entry').last().locator('.ssw-remove').click();assert.equal(await page.locator('.ssw-entry').count(),2);

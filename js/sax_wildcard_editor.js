@@ -3,6 +3,7 @@ import { api } from "../../scripts/api.js";
 import { showConfirmDialog } from "./sax_ui_base.js";
 import { buildWildcardTree, visibleWildcardTree } from "./sax_wildcard_editor_model.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
+import { refreshAutocompleteWildcards } from "./sax_wildcard_refresh.js";
 const URL_BASE = "/sax/wildcards";
 export const FORMAT_HELP = [
   ["基本", "1行に1候補。空行と # で始まる行は選ばれない。"],
@@ -60,7 +61,7 @@ export function openWildcardEditor() {
   listing.setAttribute("role", "tree"); listing.setAttribute("aria-label", "ワイルドカードファイル");
   const listTitle = node("strong", "ファイル一覧"), listTools = node("div"); listTools.className = "sax-wc-row sax-wc-left-tools";
   listTools.append(button("すべて開く", () => { visitFolders(tree, item => expanded.add(item.key)); render(); }), button("折りたたむ", () => { expanded.clear(); render(); }));
-  const refreshButton = button("一覧更新", () => { void refresh(); });
+  const refreshButton = button("一覧更新", async () => { await refresh(); await syncExpansion(); });
   const createButton = button("＋ 新規作成", () => { void blank(); });
   const bottomTools = node("div"); bottomTools.className = "sax-wc-row sax-wc-left-tools"; bottomTools.append(createButton, refreshButton);
   left.append(listTitle, filter, listTools, listing, bottomTools);
@@ -72,6 +73,8 @@ export function openWildcardEditor() {
   selection.append(node("span", "保存先"), folder, filename);
   const tools = node("div"); tools.className = "sax-wc-row";
   const content = node("textarea"); content.className = "sax-wc-text"; content.spellcheck = false;
+  // Autocomplete++はダイアログ内の欄を標準で除外する。本文は明示的に補完対象にする。
+  content.dataset.acKeepUnderscores = "true";
   content.setAttribute("aria-label", "ワイルドカード本文");
   content.placeholder = "1行1候補で入力。コメント行は # から始める。";
   const notice = node("div"); notice.className = "sax-wc-alert"; notice.setAttribute("role", "alert");
@@ -83,6 +86,7 @@ export function openWildcardEditor() {
   right.append(selection, pathLabel, tools, content, notice, footer); grid.append(left, right); modal.append(header, grid); root.append(modal);
   void attachAutoComplete(content);
   let roots = [], files = [], source = null, baseline = "", newline = "\n", busy = false, listingBusy = false, closed = false, searchTimer;
+  let expansionState = "", expansionWarning = "";
   let tree = [], visible = [], focusedKey = null;
   const expanded = new Set(), initializedRoots = new Set();
   const canvas = node("div"); canvas.className = "sax-wc-tree-canvas"; listing.append(canvas);
@@ -93,7 +97,7 @@ export function openWildcardEditor() {
     return content.value !== baseline || (source ? folder.value !== source.root_id || normalizeName(filename.value) !== source.name : Boolean(filename.value.trim() || content.value));
   }
   function update() {
-    state.textContent = wildcardCount(content.value) + "候補" + (modified() ? " · 未保存" : " · 保存済み");
+    state.textContent = wildcardCount(content.value) + "候補" + (modified() ? " · 未保存" : " · 保存済み") + (expansionState ? ` · ${expansionState}` : "");
     save.disabled = busy || !modified() || !folder.value || !filename.value.trim();
     content.disabled = folder.disabled = filename.disabled = createButton.disabled = busy;
     refreshButton.disabled = busy || listingBusy;
@@ -192,6 +196,13 @@ export function openWildcardEditor() {
     } catch (error) { notice.textContent = error.message; }
     finally { busy = false; update(); }
   }
+  async function syncExpansion() {
+    if (!closed && expansionWarning) notice.textContent = notice.textContent.replace(expansionWarning, "").trim(); expansionWarning = "";
+    expansionState = "展開データ更新中…"; if (!closed) update();
+    try { await refreshAutocompleteWildcards(); expansionState = "展開更新済み"; }
+    catch (error) { expansionState = "展開未更新"; expansionWarning = `展開データを更新できませんでした：${error.message}。「一覧更新」で再試行するか、ブラウザーを再読み込みしてください。`; if (!closed) notice.textContent += `${notice.textContent ? "\n" : ""}${expansionWarning}`; }
+    finally { if (!closed) update(); }
+  }
   async function deleteSelected() {
     if (busy || !source) return;
     const target = {...source};
@@ -204,6 +215,7 @@ export function openWildcardEditor() {
       source = null; baseline = ""; newline = "\n"; content.value = ""; filename.value = "";
       files = files.filter(entry => identity(entry) !== identity(target)); tree = buildWildcardTree(roots, files); render();
       await refresh();
+      await syncExpansion();
     } catch (error) { notice.textContent = error.message; }
     finally { busy = false; update(); }
   }
@@ -218,6 +230,7 @@ export function openWildcardEditor() {
       if (data.shadowed) notice.textContent = "注意: 同名の別ファイルが優先されるため、この内容は展開に使われません。";
       await refresh();
       reveal(source);
+      await syncExpansion();
     } catch (error) { notice.textContent = error.message; }
     finally { busy = false; update(); }
   }
