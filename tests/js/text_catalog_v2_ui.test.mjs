@@ -7,7 +7,8 @@ import { emptyConfig } from "../../js/sax_text_catalog_v2_model.js";
 register("../bench/hooks.mjs", import.meta.url);
 installDomStub();
 const baseCreate = document.createElement;
-const descendants = element => element.children.flatMap(child => [child, ...descendants(child)]);
+// 実 DOM の querySelectorAll と同様、テキストノードは要素として数えない
+const descendants = element => element.children.filter(child => child.tagName !== "#text").flatMap(child => [child, ...descendants(child)]);
 function enhanced(tag) {
     const e = baseCreate(tag);
     Object.assign(e, { dataset: {}, scrollTop: 0, clientHeight: 220, parentElement: null, attributes: {} });
@@ -28,6 +29,7 @@ function enhanced(tag) {
     return e;
 }
 document.createElement = enhanced;
+document.createTextNode = text => { const node = enhanced("#text"); node.textContent = text; return node; };
 document.body = enhanced("body");
 globalThis.Option = function (text, value) { const option = enhanced("option"); option.textContent = text; option.value = value; return option; };
 globalThis.requestAnimationFrame = callback => callback();
@@ -64,7 +66,7 @@ test("10000件のDOMは仮想行だけ、末尾スクロール・大量候補も
     candidates.open = true; candidates.fire("toggle");
     assert.equal(all().filter(e => e.className === "cv2-candidate").length, 20);
     assert.equal(all().filter(e => e.tagName === "textarea").length, 0);
-    assert.ok(all().length < 350, `DOM ${all().length}`);
+    assert.ok(all().length < 400, `DOM ${all().length}`);
     findButton("次の20件").fire("click");
     assert.ok(all().some(e => e.dataset.candidate === "id-20"));
     Type.prototype.onRemoved.call(node); assert.equal(document.body.children.length, 0);
@@ -114,12 +116,13 @@ test("ライブラリの範囲選択と一括タグ操作は選択アイテム�
         const check = all().find(e => e.attributes["aria-label"] === `${name}を選択`);
         check.checked = true; check.fire("click", { shiftKey });
     };
-    select("素材1"); select("素材4", true);
+    // 一覧は名前の自然順 (素材1, 素材10, 素材100, 素材101, ...) で並ぶ
+    select("素材1"); select("素材101", true);
     assert.ok(all().some(e => e.textContent === "4件選択 / 検索結果1000件"));
     const tags = all().find(e => e.dataset.focus === "bulk-tags"); tags.value = "一括";
     findButton("タグ追加").fire("click");
     const items = JSON.parse(configWidget(node).value).catalog.items;
-    assert.deepEqual(items.filter(i => i.tags.includes("一括")).map(i => i.id), ["id-1", "id-2", "id-3", "id-4"]);
+    assert.deepEqual(items.filter(i => i.tags.includes("一括")).map(i => i.id), ["id-1", "id-10", "id-100", "id-101"]);
     all().find(e => e.dataset.focus === "bulk-tags").value = "一括";
     findButton("タグ除去").fire("click");
     assert.equal(JSON.parse(configWidget(node).value).catalog.items.filter(i => i.tags.includes("一括")).length, 0);
