@@ -4,7 +4,9 @@
 テンプレート・画像スロット・参照 latent の組み立てはモデル固有で細かく、
 自前で複製すると本体の修正に追従できなくなるため。
 このノードが足すのは Pipe 方式の入出力、Wildcard / LoRA 構文、
-参照画像サイズに合わせた空 latent の batch 対応だけ。
+参照画像サイズに合わせた空 latent の batch 対応、
+および ComfyUI 本体の QwenImage21Cache / ModelAttentionBackend を
+Pipe の model にかけるだけの薄い橋渡し（kv_cache_* / attention）。
 """
 
 from typing import Any
@@ -17,6 +19,22 @@ from .prompt import _apply_loras, _get_impact_wildcards
 
 # Qwen-Image 2.1 が公式に受け付ける参照画像の上限
 MAX_REFERENCE_IMAGES = 10
+
+# 参照画像ありのときの出力サイズの決め方。loader は t2i と同じく Loader の width / height、
+# image_1 は image_1 を resolution に縮小した寸法（本体 TextEncodeQwenImage21 の既定の挙動）
+OUTPUT_SIZE_LOADER = "loader"
+OUTPUT_SIZE_IMAGE_1 = "image_1"
+OUTPUT_SIZES = [OUTPUT_SIZE_LOADER, OUTPUT_SIZE_IMAGE_1]
+
+# ComfyUI 本体 QwenImage21Cache の選択肢と既定値（既定のままなら本体ノードは呼ばない）
+KV_CACHE_DEVICES = ["auto", "gpu", "cpu", "off"]
+KV_CACHE_DTYPES = ["default", "int8", "int4"]
+
+# ComfyUI 本体 ModelAttentionBackend の選択肢。本体側は環境に無い選択肢を
+# 実行時に隠すため、保存済みワークフローの検証で落ちないよう固定リストで持つ。
+# "default" は本体ノードを呼ばない（起動オプションや他ノードの設定を尊重する）。
+ATTENTION_DEFAULT = "default"
+ATTENTION_BACKENDS = [ATTENTION_DEFAULT, "pytorch attention", "comfy kitchen attention"]
 
 
 def _get_upstream_encoder():
@@ -33,6 +51,44 @@ def _get_upstream_encoder():
             "Qwen-Image 2.1 support (TextEncodeQwenImage21). Please update ComfyUI."
         ) from exc
     return TextEncodeQwenImage21
+
+
+def _apply_core_model_node(node_id: str, display: str, model: Any, **kwargs: Any) -> Any:
+    """ComfyUI 本体の「MODEL → MODEL」ノードを名前で取得して model にかける。
+
+    本体の実装（モデルの複製と model_options への書き込み）に委ね、このリポジトリでは
+    内部キーを持たない。ComfyUI のバージョンによっては存在しないため、実行時に
+    探して原因が分かるエラーにする。
+    """
+    import nodes
+
+    node_cls = nodes.NODE_CLASS_MAPPINGS.get(node_id)
+    if node_cls is None:
+        raise ValueError(
+            f"[SAX_Bridge] Qwen Image Prompt: {display} ({node_id}) is not available in "
+            "this ComfyUI version. Please update ComfyUI, or leave the option at its default."
+        )
+    if hasattr(node_cls, "GET_SCHEMA"):  # V3
+        out = node_cls.execute(model=model, **kwargs)
+    else:  # V1
+        out = getattr(node_cls(), node_cls.FUNCTION)(model=model, **kwargs)
+    return out.args[0] if hasattr(out, "args") else out[0]
+
+
+def _apply_model_options(
+    model: Any, kv_cache_device: str, kv_cache_dtype: str, attention: str
+) -> Any:
+    """kv_cache_* / attention が既定値以外のときだけ本体ノードをかける。"""
+    if kv_cache_device != KV_CACHE_DEVICES[0] or kv_cache_dtype != KV_CACHE_DTYPES[0]:
+        model = _apply_core_model_node(
+            "QwenImage21Cache", "Qwen Image 2.1 Cache", model,
+            device=kv_cache_device, dtype=kv_cache_dtype,
+        )
+    if attention != ATTENTION_DEFAULT:
+        model = _apply_core_model_node(
+            "ModelAttentionBackend", "Model Attention Backend", model, attention=attention,
+        )
+    return model
 
 
 def _expand_text(wildcards: Any, text: str, seed: int) -> tuple[str, str, list]:
@@ -56,9 +112,12 @@ class SAX_Bridge_Prompt_Qwen_Image(io.ComfyNode):
     """
     Qwen-Image 2.1 用の Pipe 対応プロンプトノード。
     - 参照画像なし: t2i（latent は Loader の width / height のまま）
-    - 参照画像あり: i2i / 複数画像編集（最大 10 枚。latent は image_1 のサイズに合わせる）
+    - 参照画像あり: i2i / 複数画像編集（最大 10 枚。出力サイズは output_size で
+      Loader の width / height か image_1 のサイズを選ぶ）
     - positive / negative を同時にエンコードして Pipe に載せる
     - Wildcard 構文と LoRA 構文（positive 側のみ）をサポート
+    - KV キャッシュ（参照画像・プロンプト部分の再利用）とアテンションバックエンドを
+      Pipe の model に設定できる（どちらも ComfyUI 本体の機能。既定では何もしない）
     """
 
     @classmethod
@@ -98,7 +157,38 @@ class SAX_Bridge_Prompt_Qwen_Image(io.ComfyNode):
                     step=32,
                     tooltip="Reference images are resized to about resolution x resolution pixels "
                             "(aspect ratio kept, multiples of 32). 0 keeps each image at its own size. "
-                            "The output size follows image_1.",
+                            "With reference images this only sets how they are resized, not the output size "
+                            "(see output_size).",
+                ),
+                io.Combo.Input(
+                    "output_size",
+                    options=OUTPUT_SIZES,
+                    default=OUTPUT_SIZE_LOADER,
+                    tooltip="Output size when reference images are connected. loader uses the Loader's "
+                            "width / height (same as text-to-image). image_1 uses image_1 resized by "
+                            "resolution, which keeps a single-image edit aligned with its source.",
+                ),
+                io.Combo.Input(
+                    "kv_cache_device",
+                    options=KV_CACHE_DEVICES,
+                    default=KV_CACHE_DEVICES[0],
+                    tooltip="Where the prefix KV cache (prompt and reference images) is kept. "
+                            "auto uses spare VRAM first, then RAM; cpu saves VRAM at little speed cost; "
+                            "off recomputes every step. Leave at auto/default to use ComfyUI's own default.",
+                ),
+                io.Combo.Input(
+                    "kv_cache_dtype",
+                    options=KV_CACHE_DTYPES,
+                    default=KV_CACHE_DTYPES[0],
+                    tooltip="Precision of the KV cache. default is lossless; int8 halves it with "
+                            "near-bf16 accuracy; int4 quarters it at a higher error.",
+                ),
+                io.Combo.Input(
+                    "attention",
+                    options=ATTENTION_BACKENDS,
+                    default=ATTENTION_DEFAULT,
+                    tooltip="Attention backend for the model. default leaves ComfyUI's setting untouched. "
+                            "An unavailable backend falls back to PyTorch attention.",
                 ),
                 io.Autogrow.Input(
                     "images",
@@ -120,6 +210,10 @@ class SAX_Bridge_Prompt_Qwen_Image(io.ComfyNode):
         wildcard_text: str,
         negative_text: str = "",
         resolution: int = 1024,
+        output_size: str = OUTPUT_SIZE_LOADER,
+        kv_cache_device: str = KV_CACHE_DEVICES[0],
+        kv_cache_dtype: str = KV_CACHE_DTYPES[0],
+        attention: str = ATTENTION_DEFAULT,
         images: io.Autogrow.Type = None,
     ) -> io.NodeOutput:
         require_pipe(pipe, "SAX Qwen Image Prompt")
@@ -145,6 +239,7 @@ class SAX_Bridge_Prompt_Qwen_Image(io.ComfyNode):
         new_loras = filter_new_loras(pipe, loras)
         if new_loras:
             model, clip, applied_names = _apply_loras(model, clip, new_loras)
+        model = _apply_model_options(model, kv_cache_device, kv_cache_dtype, attention)
 
         encoder = _get_upstream_encoder()
         out = encoder.execute(
@@ -170,8 +265,8 @@ class SAX_Bridge_Prompt_Qwen_Image(io.ComfyNode):
         settings["positive"] = positive_text
         settings["negative"] = negative_text
 
-        if ref_images:
-            # 出力サイズは image_1 に合わせる（他のサイズだと編集結果がずれる）。
+        if ref_images and output_size == OUTPUT_SIZE_IMAGE_1:
+            # image_1 の縮小後サイズに合わせる（単一画像の編集では元画像とずれにくい）。
             # 本体は batch 1 で返すので Loader の batch_size まで広げる。
             samples = ref_latent["samples"]
             batch_size = max(1, int(settings.get("batch_size", 1) or 1))

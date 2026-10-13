@@ -45,13 +45,13 @@
         1,
         42,
         "fixed",
-        25,
+        40,
         1,
         "euler",
         "simple",
         1,
-        1024,
-        1024,
+        2048,
+        2048,
         1
       ]
     },
@@ -98,7 +98,11 @@
       "widgets_values": [
         "A neon shop sign that reads \"QWEN IMAGE 2.1\", rainy night, reflections on wet pavement",
         "",
-        1024
+        1024,
+        "loader",
+        "auto",
+        "default",
+        "default"
       ]
     },
     {

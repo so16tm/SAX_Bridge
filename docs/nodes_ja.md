@@ -346,7 +346,11 @@ Loader の `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` を Director 
 | `pipe` | PIPE_LINE | SAX Diffusion Loader で Qwen-Image 2.1 を読み込んだ Pipe |
 | `wildcard_text` | String | プロンプト／編集指示。参照画像は `<image1>`, `<image2>` … で指す。Wildcard・LoRA 構文対応 |
 | `negative_text` | String | ネガティブプロンプト（cfg=1 の公式設定では効果なし） |
-| `resolution` | Int (0〜4096, 32 刻み) | 参照画像を約 resolution × resolution ピクセルへ縮小（縦横比維持・32 の倍数）。0 は元サイズのまま |
+| `resolution` | Int (0〜4096, 32 刻み) | 参照画像を約 resolution × resolution ピクセルへ縮小（縦横比維持・32 の倍数）。0 は元サイズのまま。出力サイズは決めない（`output_size` を参照） |
+| `output_size` | Combo | 参照画像があるときの出力サイズ: `loader`（既定。Loader の `width` / `height`。t2i と同じ）/ `image_1`（`image_1` を `resolution` で縮小した寸法。単一画像の編集で元画像とずれにくい） |
+| `kv_cache_device` | Combo | prefix KV キャッシュ（プロンプト・参照画像部分）の置き場所: `auto`（既定。空き VRAM 優先、足りなければ RAM）/ `gpu` / `cpu` / `off`（毎ステップ再計算） |
+| `kv_cache_dtype` | Combo | KV キャッシュの精度: `default`（無劣化）/ `int8`（容量半分、bf16 並みの精度）/ `int4`（容量 1/4、誤差増） |
+| `attention` | Combo | アテンションバックエンド: `default`（ComfyUI の設定をそのまま）/ `pytorch attention` / `comfy kitchen attention`（INT8。NVIDIA / AMD のみ。使えない環境では PyTorch attention に戻る） |
 | `images` | Autogrow | 参照画像（`image_1` から最大 10 ポートまで自動増減）。`image_1` が編集対象 |
 
 **出力**: `PIPE`, `POPULATED_TEXT`
@@ -354,10 +358,14 @@ Loader の `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` を Director 
 **動作**:
 - エンコードは ComfyUI 本体の `TextEncodeQwenImage21` に委ねる（Qwen-Image 2.1 対応版の ComfyUI が必要）
 - 参照画像なし: latent は Loader の `width` / `height` のまま（t2i）
-- 参照画像あり: latent を `image_1` の縮小後サイズに置き換え、Loader の `batch_size` 枚ぶん用意する（別サイズだと編集結果がずれるため）
+- 参照画像あり・`output_size=loader`: latent も Loader の `width` / `height` のままなので、出力サイズを 1 か所で決められる。参照画像は個別に `resolution` で縮小され、参照にだけ使われる
+- `output_size=image_1`: latent を `image_1` の縮小後サイズ（約 `resolution` × `resolution` ピクセル）に置き換え、Loader の `batch_size` 枚ぶん用意する。別サイズだと結果がずれる単一画像の編集向け
 - LoRA 構文は `wildcard_text` 側だけを適用する（`negative_text` 内の LoRA タグは除去のみ）
+- `kv_cache_*` と `attention` は、ComfyUI 本体の `QwenImage21Cache` / `ModelAttentionBackend` を Pipe の model にかける。既定値（`auto` + `default`、`default`）のままなら何も適用しないため、これらのノードが無い旧版の ComfyUI でもそのまま動く。既定以外を選んでノードが無い版では原因が分かるエラーになる
 
-**推奨設定**（公式ワークフロー準拠）: SAX Diffusion Loader で `cfg=1`、`sampler_name=euler`、`scheduler_name=simple`、`steps=25`〜`50`。
+**推奨設定**（公式モデルカード・Comfy-Org の README 準拠）: SAX Diffusion Loader で `cfg=1`、`sampler_name=euler`、`scheduler_name=simple`。
+- Quality: `steps=40`、ネイティブ 2K（`width` / `height` は 2048×2048・2400×1792・2752×1536 など。VAE が 1/16 なので 16 の倍数にする）。1024 級でも動作し、時間は約 1/4
+- Turbo（steps が約 1/5）: `lora_name` に Comfy-Org の `qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors`（強度 1.0）を指定し `steps=8`。`qwen_image_2.1_turbo_*` のモデル本体を `unet_name` に読み込んでもよい
 
 ```
 t2i: SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output

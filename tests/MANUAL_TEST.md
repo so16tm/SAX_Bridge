@@ -449,8 +449,11 @@
 
 事前準備: [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1) の `qwen_image_2.1_*.safetensors`（diffusion_models）・`qwen3vl_8b_*.safetensors`（text_encoders）・`qwen_image_2.1_vae_bf16.safetensors`（vae）を配置し、`CHANGE_ME_*` を差し替える。Qwen-Image 2.1 対応版の ComfyUI が必要。
 
-- [ ] **t2i**: そのまま実行 → 1024×1024 の画像が生成される（2048×2048 にならない）
-- [ ] **i2i**: `SAX Qwen Image Prompt` の `image_1` に LoadImage を接続し編集指示で実行 → 出力サイズが image_1 の縮小後サイズになり、編集結果が得られる
+- [ ] **t2i**: そのまま実行（Quality: 40 steps・2048×2048）→ 指定どおり 2048×2048 の画像が生成される（4096×4096 にならない）
+- [ ] **turbo**: `workflows/23_qwen_image_21_turbo.json`（LoRA 欄に Turbo LoRA・8 steps・1024×1024）で実行 → 1024×1024 の画像が生成され、Quality より大幅に短時間で終わる
+- [ ] **kv_cache**: i2i で `kv_cache_device` を `cpu` / `off`、`kv_cache_dtype` を `int8` に変えて実行 → エラーなく生成される（`off` は遅くなる）。旧版 ComfyUI では既定値のままなら動作し、既定以外はノード未提供のエラーになる
+- [ ] **attention**: `attention` を `pytorch attention` / `comfy kitchen attention` に変えて実行 → エラーなく生成される（Comfy Kitchen が使えない環境でも PyTorch attention に戻って動く）
+- [ ] **i2i**: `SAX Qwen Image Prompt` の `image_1` に LoadImage を接続し編集指示で実行 → 出力サイズが Loader の幅・高さになり、編集結果が得られる。`output_size=image_1` にすると出力サイズが image_1 の縮小後サイズ（約 resolution²）になる
 - [ ] **multi**: `image_2` 以降にも画像を接続し `<image1>` `<image2>` を含む指示で実行 → 複数画像を参照した結果になる
 - [ ] **batch**: Loader の `batch_size=2` で i2i → 2 枚生成される
 - [ ] **rgba**: 「This is an RGBA format image with transparency. ... transparent background.」形式のプロンプトで t2i、PNG 保存 → アルファ付きで保存される
