@@ -1,5 +1,4 @@
 """独立ワイルドカードエディター: 書式非破壊と安全な保存。"""
-import hashlib
 
 import pytest
 
