@@ -26,6 +26,9 @@ import {
     partitionLiveSources,
     mergeSourceAnchors,
     adoptSourceIdentity,
+    remapSlotIdentity,
+    translateGlobalSlotIdx,
+    resolveLocalSlotBySlotName,
 } from "../../js/sax_collector_link.js";
 
 // ---------------------------------------------------------------------------
@@ -333,19 +336,19 @@ describe("mergeSourceAnchors", () => {
         assert.equal(merged.inputAnchors[0].name, "a");  // 既存分は旧保持
     });
 
-    it("NodeCollector slotNames/slotTypes も同規則で引き継ぐ", () => {
+    it("NodeCollector slotNames/slotTypes は index マージせず fresh のまま (identity 引継ぎは buildSource の責務)", () => {
+        // 上流の出力が途中で増減すると index がずれるため、旧名を index で温存してはならない。
         const oldSrc = {
             slotNames: ["latent", "image"],
             slotTypes: ["LATENT", "IMAGE"],
         };
         const fresh = {
-            slotNames: ["latent_renamed", "image_renamed", "mask"],
-            slotTypes: ["LATENT", "IMAGE", "MASK"],
+            slotNames: ["mask", "latent", "image"],
+            slotTypes: ["MASK", "LATENT", "IMAGE"],
         };
         const merged = mergeSourceAnchors(oldSrc, fresh);
-        // 既存分は旧名保持、増分は fresh
-        assert.deepEqual(merged.slotNames, ["latent", "image", "mask"]);
-        assert.deepEqual(merged.slotTypes, ["LATENT", "IMAGE", "MASK"]);
+        assert.deepEqual(merged.slotNames, ["mask", "latent", "image"]);
+        assert.deepEqual(merged.slotTypes, ["MASK", "LATENT", "IMAGE"]);
     });
 
     it("newSource を in-place 更新して返す (Coordinator entity identity 維持)", () => {
@@ -428,21 +431,23 @@ describe("adoptSourceIdentity", () => {
         assert.deepEqual(adopted.enabledSlots, [0, 2]);
     });
 
-    it("アンカー系フィールドは mergeSourceAnchors 規則で旧を保持し増分のみ fresh", () => {
+    it("入力アンカーは mergeSourceAnchors 規則で旧を保持し増分のみ fresh", () => {
         const oldSource = {
-            sourceId: 7, slotCount: 2,
-            slotNames: ["OldA", "OldB"], slotTypes: ["STRING", "STRING"],
+            sourceId: 7, slotCount: 1,
+            inputAnchors: [{ name: "old", type: "IMAGE", originalSlotIndex: 0 }],
         };
         const fresh = {
-            sourceId: 7, slotCount: 3,
-            slotNames: ["NewA", "NewB", "NewC"], slotTypes: ["STRING", "STRING", "INT"],
+            sourceId: 7, slotCount: 2,
+            inputAnchors: [
+                { name: "new0", type: "IMAGE", originalSlotIndex: 0 },
+                { name: "new1", type: "IMAGE", originalSlotIndex: 1 },
+            ],
         };
 
         const adopted = adoptSourceIdentity(oldSource, fresh);
 
-        assert.deepEqual(adopted.slotNames, ["OldA", "OldB", "NewC"],
+        assert.deepEqual(adopted.inputAnchors.map(a => a.name), ["old", "new1"],
             "既存 index は旧アンカーを保持し、増分だけ fresh を採用するべき");
-        assert.deepEqual(adopted.slotTypes, ["STRING", "STRING", "INT"]);
     });
 
     it("fresh が持たないキーは削除され、旧状態が残留しない", () => {
@@ -466,5 +471,89 @@ describe("adoptSourceIdentity", () => {
         const adopted = adoptSourceIdentity(src, src);
         assert.equal(adopted, src);
         assert.deepEqual(adopted.slotNames, ["A", "B"]);
+    });
+});
+
+// ===========================================================================
+// 上流の出力が途中で増減/並べ替えされたときの identity 対応付け
+// ===========================================================================
+
+describe("remapSlotIdentity", () => {
+    const S = (names) => [...names].map(() => "STRING");
+    const old3 = { names: ["A", "B", "C"], types: S("ABC"), enabledSlots: [0, 1, 2] };
+
+    it("構造が不変なら恒等", () => {
+        const r = remapSlotIdentity(old3, ["A", "B", "C"], S("ABC"));
+        assert.deepEqual(r.remap, [0, 1, 2]);
+        assert.deepEqual(r.slotNames, ["A", "B", "C"]);
+        assert.deepEqual(r.enabledSlots, [0, 1, 2]);
+    });
+
+    it("途中の出力が除去されると、後続は新しい位置へ対応付き除去分は -1", () => {
+        const r = remapSlotIdentity(old3, ["A", "C"], S("AC"));
+        assert.deepEqual(r.remap, [0, -1, 1]);
+        assert.deepEqual(r.slotNames, ["A", "C"]);
+        assert.deepEqual(r.enabledSlots, [0, 1]);
+    });
+
+    it("先頭/途中への挿入では既存スロットが後ろへずれ、新規出力は既定で有効", () => {
+        const front = remapSlotIdentity(old3, ["X", "A", "B", "C"], S("XABC"));
+        assert.deepEqual(front.remap, [1, 2, 3]);
+        assert.deepEqual(front.slotNames, ["X", "A", "B", "C"]);
+        assert.deepEqual(front.enabledSlots, [0, 1, 2, 3]);
+
+        const mid = remapSlotIdentity(old3, ["A", "X", "B", "C"], S("AXBC"));
+        assert.deepEqual(mid.remap, [0, 2, 3]);
+    });
+
+    it("無効にしていたスロットは、位置が動いても無効のまま", () => {
+        const old = { ...old3, enabledSlots: [0, 2] };   // B は無効
+        const r = remapSlotIdentity(old, ["X", "A", "B", "C"], S("XABC"));
+        assert.deepEqual(r.enabledSlots, [0, 1, 3], "X は新規で有効・A/C は有効・B(新 index 2) は無効のまま");
+    });
+
+    it("改名は同一位置として旧 identity を保つ", () => {
+        const r = remapSlotIdentity(old3, ["A", "B_renamed", "C"], S("ABC"));
+        assert.deepEqual(r.remap, [0, 1, 2]);
+        assert.deepEqual(r.slotNames, ["A", "B", "C"], "旧名 B を identity として保持する");
+    });
+
+    it("除去と改名が同時に起きても、他と一致済みの位置は改名扱いにしない", () => {
+        // B が除去され C が 2 番目へ詰まる。位置 1 は C と一致済みなので B の改名先にならない。
+        const r = remapSlotIdentity(old3, ["A", "C"], S("AC"));
+        assert.equal(r.remap[1], -1);
+    });
+
+    it("同名出力は近い位置へ 1 対 1 で対応付く", () => {
+        const old = { names: ["IMAGE", "IMAGE"], types: ["IMAGE", "IMAGE"], enabledSlots: [0, 1] };
+        const r = remapSlotIdentity(old, ["X", "IMAGE", "IMAGE"], ["STRING", "IMAGE", "IMAGE"]);
+        assert.deepEqual(r.remap, [1, 2]);
+    });
+});
+
+describe("translateGlobalSlotIdx / resolveLocalSlotBySlotName の index 写像", () => {
+    it("_slotRemap が無ければ恒等、null は null", () => {
+        assert.equal(translateGlobalSlotIdx({}, 2), 2);
+        assert.equal(translateGlobalSlotIdx({ _slotRemap: [0, 1] }, null), null);
+    });
+
+    it("_slotRemap で写し、除去は -1", () => {
+        const e = { _slotRemap: [0, -1, 1] };
+        assert.equal(translateGlobalSlotIdx(e, 2), 1);
+        assert.equal(translateGlobalSlotIdx(e, 1), -1);
+    });
+
+    it("除去された出力は同名の別出力へ寄せず解決失敗にする", () => {
+        // 同名 IMAGE が 2 つあった上流で 2 つ目が除去された (capture 時 gi=1)。
+        const e = { slotNames: ["IMAGE"], enabledSlots: [0], _slotRemap: [0, -1] };
+        assert.equal(resolveLocalSlotBySlotName(e, "IMAGE", 1), null);
+        assert.equal(resolveLocalSlotBySlotName(e, "IMAGE", 0), 0);
+    });
+
+    it("同名出力は写した index に最も近いものを選ぶ", () => {
+        // [IMAGE, IMAGE] の前に X が挿入された。capture 時 gi=1 の IMAGE は新 index 2。
+        const e = { slotNames: ["X", "IMAGE", "IMAGE"], enabledSlots: [0, 1, 2], _slotRemap: [1, 2] };
+        assert.equal(resolveLocalSlotBySlotName(e, "IMAGE", 1), 2);
+        assert.equal(resolveLocalSlotBySlotName(e, "IMAGE", 0), 1);
     });
 });

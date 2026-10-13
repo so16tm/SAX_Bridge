@@ -27,7 +27,9 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { DynamicSlotCoordinator } from "../../js/sax_dynamic_slot_coordinator.js";
-import { rebuildLiveSources, resolveLocalSlotBySlotName } from "../../js/sax_collector_link.js";
+import {
+    rebuildLiveSources, resolveLocalSlotBySlotName, remapSlotIdentity, translateGlobalSlotIdx,
+} from "../../js/sax_collector_link.js";
 
 // ---------------------------------------------------------------------------
 // LiteGraph モック
@@ -139,18 +141,20 @@ function collectorBuildSource(srcNode, collectorNode) {
     const allCount = srcOutputs.length;
     if (allCount === 0) return null;
 
+    const slotNames = srcOutputs.map((o, i) => o.label || o.name || o.type || `out_${i}`);
+    const slotTypes = srcOutputs.map(o => o.type || "*");
+
     const hint = collectorNode._rebuildHints?.get(srcNode.id);
     let enabledSlots;
-    if (hint?.enabledSlots) {
-        const oldEnabled = hint.enabledSlots;
-        const oldCount = hint.slotCount ?? oldEnabled.length;
-        if (allCount > oldCount) {
-            enabledSlots = [...oldEnabled, ...Array.from({ length: allCount - oldCount }, (_, i) => oldCount + i)];
-        } else if (allCount < oldCount) {
-            enabledSlots = oldEnabled.filter(i => i < allCount);
-        } else {
-            enabledSlots = [...oldEnabled];
-        }
+    let slotRemap;
+    if (hint?.enabledSlots && Array.isArray(hint.slotNames) && hint.slotNames.length > 0) {
+        const r = remapSlotIdentity(
+            { names: hint.slotNames, types: hint.slotTypes ?? [], enabledSlots: hint.enabledSlots },
+            slotNames, slotTypes);
+        enabledSlots = r.enabledSlots;
+        slotNames.splice(0, slotNames.length, ...r.slotNames);
+        slotTypes.splice(0, slotTypes.length, ...r.slotTypes);
+        if (r.remap.some((j, i) => j !== i)) slotRemap = r.remap;
     } else {
         enabledSlots = Array.from({ length: allCount }, (_, i) => i);
     }
@@ -159,8 +163,9 @@ function collectorBuildSource(srcNode, collectorNode) {
         sourceId: srcNode.id,
         slotCount: allCount,
         enabledSlots,
-        slotNames: srcOutputs.map((o, i) => o.label || o.name || o.type || `out_${i}`),
-        slotTypes: srcOutputs.map(o => o.type || "*"),
+        slotNames,
+        slotTypes,
+        ...(slotRemap ? { _slotRemap: slotRemap } : {}),
     };
 }
 
@@ -182,7 +187,7 @@ function buildNodeCollectorSpec(node) {
         syncSlotStructure: () => {},
         resolveLocalSlotBySlotName,
         resolveLocalSlotByGlobalIdx: (entity, globalSlotIdx) => {
-            const localIdx = entity?.enabledSlots?.indexOf(globalSlotIdx) ?? -1;
+            const localIdx = entity?.enabledSlots?.indexOf(translateGlobalSlotIdx(entity, globalSlotIdx)) ?? -1;
             return localIdx >= 0 ? localIdx : null;
         },
     };
@@ -197,7 +202,10 @@ function rebuildAllSources(node, graph, coordinator, beforeRebuild = null) {
         beforeRebuild?.();
         const saved = [...entities];
         node._rebuildHints = new Map(
-            saved.map(s => [s.sourceId, { enabledSlots: s.enabledSlots, slotCount: s.slotCount }]),
+            saved.map(s => [s.sourceId, {
+                enabledSlots: s.enabledSlots, slotCount: s.slotCount,
+                slotNames: [...s.slotNames], slotTypes: [...s.slotTypes],
+            }]),
         );
         for (let i = (node.outputs?.length ?? 0) - 1; i >= 0; i--) node.removeOutput(i);
         node._remoteSources = [];
@@ -216,6 +224,7 @@ function rebuildAllSources(node, graph, coordinator, beforeRebuild = null) {
         }
         node._rebuildHints = null;
     });
+    for (const src of node._remoteSources) delete src._slotRemap;
 }
 
 // ---------------------------------------------------------------------------
@@ -433,6 +442,94 @@ describe("Node Collector → 下流ノード: rebuild を挟んでも接続が�
             assert.equal(imageLink.id, keptId, "残した 2 つ目の IMAGE の link が先頭ピンへ追従する");
             assert.equal(imageLink.targetSlot, 1);
             assertGraphIntegrity(graph, node, target, "dup-deselect");
+        });
+    });
+
+    // 回帰: 上流ノードの出力が途中で増減すると、旧 identity を index で温存していたため
+    // 後続スロット (増減位置より後ろ) の名前と下流リンクがずれて切れた / 別スロットへ寄った。
+    describe("上流の出力増減 (途中への挿入・途中の除去)", () => {
+        function setupThree(downstream) {
+            const node = makeCollectorNode(graph);
+            graph.registerNode(node);
+            graph.registerNode(downstream);
+            const up = makeUpstreamNode(10, [
+                { name: "A", type: "STRING" }, { name: "B", type: "STRING" }, { name: "C", type: "STRING" },
+            ]);
+            const tail = makeUpstreamNode(20, [{ name: "D", type: "STRING" }]);
+            graph.registerNode(up);
+            graph.registerNode(tail);
+            node._remoteSources = [];
+            for (const u of [up, tail]) {
+                const src = collectorBuildSource(u, node);
+                for (const gi of src.enabledSlots) node.addOutput(src.slotNames[gi], src.slotTypes[gi]);
+                node._remoteSources.push(src);
+            }
+            for (let i = 0; i < 4; i++) node.connect(i, downstream, i);
+            const coordinator = new DynamicSlotCoordinator(node, buildNodeCollectorSpec(node));
+            return { node, up, coordinator };
+        }
+        const mkTarget = (id) => ({
+            id, outputs: [],
+            inputs: Array.from({ length: 4 }, (_, i) => ({ name: `in${i}`, type: "*", link: null })),
+        });
+
+        it("途中の出力が除去されても、後続スロット (と後続ソース) の link は切れず、除去分だけ切れる", () => {
+            const target = mkTarget(920);
+            const { node, up, coordinator } = setupThree(target);
+
+            up.outputs.splice(1, 1);   // B を除去 → [A, C]
+            rebuildAllSources(node, graph, coordinator);
+
+            const after = downstreamLinks(graph, node, target.id);
+            assert.deepEqual(after.map(l => [l.pinName, l.targetSlot]), [["A", 0], ["C", 2], ["D", 3]],
+                "A / C / D の link は元の下流端を保ち、B の link だけが切れるべき");
+            assert.deepEqual(node.outputs.map(o => o.name), ["A", "C", "D"]);
+            assertGraphIntegrity(graph, node, target, "upstream-remove-middle");
+        });
+
+        it("先頭への挿入でも、既存スロットの link は新しい位置へ追従し、新規出力が公開される", () => {
+            const target = mkTarget(921);
+            const { node, up, coordinator } = setupThree(target);
+            const before = downstreamLinks(graph, node, target.id);
+
+            up.outputs.unshift({ name: "X", type: "STRING", links: [] });   // [X, A, B, C]
+            rebuildAllSources(node, graph, coordinator);
+
+            const after = downstreamLinks(graph, node, target.id);
+            assert.deepEqual(node.outputs.map(o => o.name), ["X", "A", "B", "C", "D"],
+                "新規出力 X が公開され、既存の名前は別スロットへずれない");
+            assert.deepEqual(after.map(l => [l.pinName, l.targetSlot]), [["A", 0], ["B", 1], ["C", 2], ["D", 3]]);
+            assert.deepEqual(after.map(l => l.id), before.map(l => l.id), "link は作り直されない");
+            assertGraphIntegrity(graph, node, target, "upstream-insert-front");
+        });
+
+        it("無効にしたスロットは、挿入で位置が動いても無効のまま (復活して link を奪わない)", () => {
+            const target = mkTarget(922);
+            const { node, up, coordinator } = setupThree(target);
+            // B を無効化 (link は 1 本切れる) → 残りは [A, C, D]
+            rebuildAllSources(node, graph, coordinator, () => { node._remoteSources[0].enabledSlots = [0, 2]; });
+            assert.equal(downstreamLinks(graph, node, target.id).length, 3);
+
+            up.outputs.unshift({ name: "X", type: "STRING", links: [] });   // [X, A, B, C]
+            rebuildAllSources(node, graph, coordinator);
+
+            const after = downstreamLinks(graph, node, target.id);
+            assert.deepEqual(node.outputs.map(o => o.name), ["X", "A", "C", "D"], "B は無効のまま");
+            assert.deepEqual(after.map(l => l.pinName), ["A", "C", "D"], "既存 3 本はそのまま維持される");
+            assertGraphIntegrity(graph, node, target, "upstream-insert-disabled");
+        });
+
+        it("rebuild 後の一時 index 写像は復元完了後に残らない前提で、続く無関係な rebuild でも link が維持される", () => {
+            const target = mkTarget(923);
+            const { node, up, coordinator } = setupThree(target);
+            up.outputs.splice(1, 1);
+            rebuildAllSources(node, graph, coordinator);
+            const mid = downstreamLinks(graph, node, target.id);
+
+            rebuildAllSources(node, graph, coordinator);   // 構造不変の rebuild
+
+            assert.deepEqual(downstreamLinks(graph, node, target.id), mid);
+            assertGraphIntegrity(graph, node, target, "upstream-then-noop");
         });
     });
 

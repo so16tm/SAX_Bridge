@@ -1818,7 +1818,13 @@ export function makeSourceListWidget(spec, coordinator) {
         const autoHints = hasOutputSlots && !node._rebuildHints;
         if (autoHints) {
             node._rebuildHints = new Map(
-                savedSources.map(s => [s.sourceId, { enabledSlots: s.enabledSlots, slotCount: s.slotCount }])
+                savedSources.map(s => [s.sourceId, {
+                    enabledSlots: s.enabledSlots,
+                    slotCount:    s.slotCount,
+                    // 上流の出力増減/並べ替え後に旧スロットを新しい出力へ対応付けるための旧 identity。
+                    slotNames:    Array.isArray(s.slotNames) ? [...s.slotNames] : undefined,
+                    slotTypes:    Array.isArray(s.slotTypes) ? [...s.slotTypes] : undefined,
+                }])
             );
         }
 
@@ -1860,6 +1866,12 @@ export function makeSourceListWidget(spec, coordinator) {
         }
     }
 
+    // buildSource が rebuild 中だけ付ける一時 index 写像 (_slotRemap) を、復元完了後に消す。
+    // 残すと次の無関係な mutate の下流リンク復元が古い写像で index を誤って写す。
+    function _clearSlotRemap(node) {
+        for (const src of _getSources(node)) delete src._slotRemap;
+    }
+
     /**
      * 全ソースを rebuild する。
      *
@@ -1876,6 +1888,7 @@ export function makeSourceListWidget(spec, coordinator) {
     function rebuildAllSources(node, beforeRebuild = null) {
         _triggerReconcileIfMissing(node);
         // Coordinator が capture/restore を内蔵するため preDownstream 引数は撤廃。
+        try {
         coordinator.mutate(() => {
             if (beforeRebuild) {
                 try {
@@ -1889,6 +1902,9 @@ export function makeSourceListWidget(spec, coordinator) {
             }
             _rebuildInner(node, [..._getSources(node)]);
         });
+        } finally {
+            _clearSlotRemap(node);
+        }
     }
 
     function swapSources(node, si, sj) {
@@ -1896,11 +1912,15 @@ export function makeSourceListWidget(spec, coordinator) {
         // (rebuildAllSources と同じ「消さない」責務を swap 経路にも適用する)。
         _triggerReconcileIfMissing(node);
         // Coordinator 経由で capture → swap + rebuild → restore。二重 capture を解消。
-        coordinator.mutate(() => {
-            const sources = _getSources(node);
-            [sources[si], sources[sj]] = [sources[sj], sources[si]];
-            _rebuildInner(node, [...sources]);
-        });
+        try {
+            coordinator.mutate(() => {
+                const sources = _getSources(node);
+                [sources[si], sources[sj]] = [sources[sj], sources[si]];
+                _rebuildInner(node, [...sources]);
+            });
+        } finally {
+            _clearSlotRemap(node);
+        }
 
         applyLinkVisibility(node);
         autoResize(node);
@@ -2178,7 +2198,7 @@ export function makeSourceListWidget(spec, coordinator) {
 
     function onSerialize(data) {
         data[serializeKey] = {
-            sources:      _getSources(this).map(({ _connectRetries, ...rest }) => rest),
+            sources:      _getSources(this).map(({ _connectRetries, _slotRemap, ...rest }) => rest),
             linksVisible: this._remoteLinksVisible ?? false,
         };
     }
