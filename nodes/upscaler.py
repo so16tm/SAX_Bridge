@@ -17,6 +17,9 @@ logger = logging.getLogger("SAX_Bridge")
 # comfy.utils.common_upscale が受け付けるメソッド名
 _PIXEL_METHODS = ["lanczos", "bilinear", "bicubic", "nearest-exact", "area"]
 
+# アップスケール + i2i を繰り返せる最大サイクル数
+_MAX_CYCLES = 10
+
 
 def _pixel_upscale(images: torch.Tensor, target_h: int, target_w: int, method: str) -> torch.Tensor:
     """
@@ -59,6 +62,8 @@ class SAX_Bridge_Upscaler(io.ComfyNode):
     未接続の場合は method で指定したピクセル補間を使用する。
     denoise > 0 のとき、アップスケール後に KSampler (i2i) を実行してテクスチャを補完する。
     steps_override = 0 の場合は loader_settings から steps を継承する。
+    cycle > 1 のとき、scale_by を総倍率として等比で分割し、アップスケール + i2i を cycle 回繰り返す
+    （denoise > 0 かつ i2i 可能な pipe のときのみ有効。それ以外は 1 回扱い）。
     """
 
     @classmethod
@@ -95,6 +100,8 @@ class SAX_Bridge_Upscaler(io.ComfyNode):
                                tooltip="Perturbed Attention Guidance. Works at any CFG. 0.5=standard. Adds one extra forward pass per step."),
                 io.String.Input("positive_prompt", multiline=True, force_input=True, optional=True,
                                 tooltip="Overrides the positive prompt for the img2img pass. Only effective when denoise > 0."),
+                io.Int.Input("cycle", default=1, min=1, max=_MAX_CYCLES, optional=True,
+                             tooltip="Number of upscale + img2img cycles. scale_by is the total factor, split geometrically across cycles. Only effective when denoise > 0 (otherwise treated as 1)."),
             ],
             outputs=[
                 PipeLine.Output("PIPE"),
@@ -116,37 +123,18 @@ class SAX_Bridge_Upscaler(io.ComfyNode):
         guidance_strength: float = 0.5,
         pag_strength: float = 0.0,
         positive_prompt: str | None = None,
+        cycle: int = 1,
     ) -> io.NodeOutput:
         images = pipe.get("images")
         if images is None:
             raise ValueError("[SAX_Bridge] Pipe does not contain images. Run SAX Loader → KSampler → VAEDecode first.")
+        if not 1 <= cycle <= _MAX_CYCLES:
+            raise ValueError(f"[SAX_Bridge] Upscaler: cycle must be between 1 and {_MAX_CYCLES} (got {cycle}).")
 
         b, h, w, c = images.shape
-        target_h = max(8, int(h * scale_by))
-        target_w = max(8, int(w * scale_by))
-        # VAE ダウンサンプリングに合わせて 8px アライメント
-        target_h = (target_h // 8) * 8
-        target_w = (target_w // 8) * 8
 
-        if upscale_model_name != "None":
-            logger.info("[SAX_Bridge] Upscaler: ESRGAN mode / model=%s / %dx%d -> %dx%d",
-                        upscale_model_name, w, h, target_w, target_h)
-            from comfy_extras.nodes_upscale_model import UpscaleModelLoader
-            upscale_model = UpscaleModelLoader().load_model(upscale_model_name)[0]
-            upscaled = _esrgan_upscale(upscale_model, images, target_h, target_w, method)
-            logger.info("[SAX_Bridge] Upscaler: ESRGAN done / output size %dx%d",
-                        upscaled.shape[2], upscaled.shape[1])
-        elif target_h == h and target_w == w:
-            logger.info("[SAX_Bridge] Upscaler: no size change / skipping")
-            upscaled = images
-        else:
-            logger.info("[SAX_Bridge] Upscaler: pixel interpolation (%s) / %dx%d -> %dx%d",
-                        method, w, h, target_w, target_h)
-            upscaled = _pixel_upscale(images, target_h, target_w, method)
-
-        upscaled = torch.clamp(upscaled, 0.0, 1.0)
-
-        positive_out = pipe.get("positive")
+        # i2i が実行可能かを先に判定する（欠落時は従来どおりアップスケールのみ）
+        i2i_pipe = None
         if denoise > 0:
             p = _extract_pipe(pipe)
             if p["model"] is None or p["vae"] is None or p["positive"] is None:
@@ -155,64 +143,104 @@ class SAX_Bridge_Upscaler(io.ComfyNode):
                     "Upscaling only."
                 )
             else:
-                _ensure_negative(p)
-                steps_eff = steps_override if steps_override > 0 else p["steps"]
-                cfg_eff   = cfg_override   if cfg_override   > 0 else p["cfg"]
+                i2i_pipe = p
 
-                positive = p["positive"]
-                if positive_prompt and p["clip"] is not None:
-                    positive = nodes.CLIPTextEncode().encode(p["clip"], positive_prompt)[0]
-                negative = p["negative"]
-                # prompt 上書き済み・CN 未パッチの positive のみ下流へ伝播する
-                # （Detailer と同様、CN パッチは i2i ローカル限定とし二重適用を防ぐ）。
-                positive_out = positive
+        # 中間サイクルは i2i で補完する意味があるときのみ。i2i なしなら 1 回で最終サイズへ。
+        cycles_eff = cycle if i2i_pipe is not None else 1
+        if cycle > 1 and cycles_eff == 1:
+            logger.info("[SAX_Bridge] Upscaler: cycle=%d ignored (requires denoise > 0 and a complete pipe)", cycle)
 
-                guided = apply_guidance_to_model(
-                    p["model"], guidance_mode, guidance_strength, pag_strength
-                )
-                sample_model = guided if guided is not None else p["model"]
+        positive_out = pipe.get("positive")
+        upscale_model = None
+        sample_model_base = positive = negative = None
+        steps_eff = cfg_eff = None
+        if i2i_pipe is not None:
+            p = i2i_pipe
+            _ensure_negative(p)
+            steps_eff = steps_override if steps_override > 0 else p["steps"]
+            cfg_eff   = cfg_override   if cfg_override   > 0 else p["cfg"]
 
-                # ControlNet 構造拘束はフル画像 i2i 対象なので encode 前に適用する。
-                # パッチ済み conditioning は ksampler ローカルに留め、pipe へは書き戻さない。
-                # model は standard_cn では素通しだが、将来の lllite 用の seam を通す。
-                structure_result = apply_structure_control_cfg(
-                    pipe.get(STRUCTURE_CONTROL_KEY), positive, negative,
-                    upscaled[:, :, :, :3], sample_model,
-                )
-                cn_positive = structure_result.positive
-                cn_negative = structure_result.negative
-                sample_model = structure_result.model
+            positive = p["positive"]
+            if positive_prompt and p["clip"] is not None:
+                positive = nodes.CLIPTextEncode().encode(p["clip"], positive_prompt)[0]
+            negative = p["negative"]
+            # prompt 上書き済み・CN 未パッチの positive のみ下流へ伝播する
+            # （Detailer と同様、CN パッチは i2i ローカル限定とし二重適用を防ぐ）。
+            positive_out = positive
 
-                latent = p["vae"].encode(upscaled[:, :, :, :3])
-                samples_dict = {"samples": latent}
+            guided = apply_guidance_to_model(
+                p["model"], guidance_mode, guidance_strength, pag_strength
+            )
+            sample_model_base = guided if guided is not None else p["model"]
 
-                sampler_result = nodes.common_ksampler(
-                    sample_model,
-                    p["seed"],
-                    steps_eff,
-                    cfg_eff,
-                    p["sampler_name"],
-                    p["scheduler"],
-                    cn_positive,
-                    cn_negative,
-                    samples_dict,
-                    denoise=denoise,
-                )
-                decoded = decode_image(p["vae"], sampler_result[0]["samples"])
-                if upscaled.shape[-1] > decoded.shape[-1]:
-                    extra_channels = upscaled[..., decoded.shape[-1]:]
-                    if extra_channels.shape[1:3] != decoded.shape[1:3]:
-                        extra_channels = _pixel_upscale(
-                            extra_channels, decoded.shape[1], decoded.shape[2], method
-                        )
-                    decoded = torch.cat([decoded, extra_channels.to(decoded)], dim=-1)
-                upscaled = decoded
-                upscaled = torch.clamp(upscaled, 0.0, 1.0)
+        upscaled = images
+        for i in range(cycles_eff):
+            # scale_by を総倍率とし、サイクルごとに等比で段階的に拡大する（最終サイクルで scale_by に到達）
+            factor = scale_by ** ((i + 1) / cycles_eff)
+            cur_h, cur_w = upscaled.shape[1], upscaled.shape[2]
+            # VAE ダウンサンプリングに合わせて 8px アライメント
+            target_h = (max(8, int(h * factor)) // 8) * 8
+            target_w = (max(8, int(w * factor)) // 8) * 8
 
-                logger.info(
-                    "[SAX_Bridge] Upscaler i2i: %dx%d -> %dx%d, steps=%d, cfg=%s, denoise=%s",
-                    w, h, target_w, target_h, steps_eff, cfg_eff, denoise,
-                )
+            if upscale_model_name != "None":
+                logger.info("[SAX_Bridge] Upscaler: ESRGAN mode / model=%s / cycle %d/%d / %dx%d -> %dx%d",
+                            upscale_model_name, i + 1, cycles_eff, cur_w, cur_h, target_w, target_h)
+                if upscale_model is None:
+                    from comfy_extras.nodes_upscale_model import UpscaleModelLoader
+                    upscale_model = UpscaleModelLoader().load_model(upscale_model_name)[0]
+                upscaled = _esrgan_upscale(upscale_model, upscaled, target_h, target_w, method)
+                logger.info("[SAX_Bridge] Upscaler: ESRGAN done / output size %dx%d",
+                            upscaled.shape[2], upscaled.shape[1])
+            elif target_h == cur_h and target_w == cur_w:
+                logger.info("[SAX_Bridge] Upscaler: no size change / skipping")
+            else:
+                logger.info("[SAX_Bridge] Upscaler: pixel interpolation (%s) / cycle %d/%d / %dx%d -> %dx%d",
+                            method, i + 1, cycles_eff, cur_w, cur_h, target_w, target_h)
+                upscaled = _pixel_upscale(upscaled, target_h, target_w, method)
+
+            upscaled = torch.clamp(upscaled, 0.0, 1.0)
+
+            if i2i_pipe is None:
+                continue
+            p = i2i_pipe
+
+            # ControlNet 構造拘束はフル画像 i2i 対象なので encode 前に適用する。
+            # パッチ済み conditioning は ksampler ローカルに留め、pipe へは書き戻さない。
+            # model は standard_cn では素通しだが、将来の lllite 用の seam を通す。
+            structure_result = apply_structure_control_cfg(
+                pipe.get(STRUCTURE_CONTROL_KEY), positive, negative,
+                upscaled[:, :, :, :3], sample_model_base,
+            )
+
+            latent = p["vae"].encode(upscaled[:, :, :, :3])
+            samples_dict = {"samples": latent}
+
+            sampler_result = nodes.common_ksampler(
+                structure_result.model,
+                p["seed"] + i,
+                steps_eff,
+                cfg_eff,
+                p["sampler_name"],
+                p["scheduler"],
+                structure_result.positive,
+                structure_result.negative,
+                samples_dict,
+                denoise=denoise,
+            )
+            decoded = decode_image(p["vae"], sampler_result[0]["samples"])
+            if upscaled.shape[-1] > decoded.shape[-1]:
+                extra_channels = upscaled[..., decoded.shape[-1]:]
+                if extra_channels.shape[1:3] != decoded.shape[1:3]:
+                    extra_channels = _pixel_upscale(
+                        extra_channels, decoded.shape[1], decoded.shape[2], method
+                    )
+                decoded = torch.cat([decoded, extra_channels.to(decoded)], dim=-1)
+            upscaled = torch.clamp(decoded, 0.0, 1.0)
+
+            logger.info(
+                "[SAX_Bridge] Upscaler i2i: cycle %d/%d -> %dx%d, steps=%d, cfg=%s, denoise=%s",
+                i + 1, cycles_eff, upscaled.shape[2], upscaled.shape[1], steps_eff, cfg_eff, denoise,
+            )
 
         new_pipe = {**pipe, "images": upscaled, "positive": positive_out}
         return io.NodeOutput(new_pipe, upscaled)
