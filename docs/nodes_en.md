@@ -1074,6 +1074,8 @@ Downloads are checked against the published hash and validated as compatible CSV
 
 `SEED` in `random` mode draws a value from `0` to `Max` on each queued execution, including jobs submitted together. To reproduce a result, use `fixed` mode with the seed used for that result.
 
+`SEED` in `increment` mode adds 1 to the stored value on each queue (never above `Max`), like ComfyUI's control after generate. `Before` increments just before queueing, so the first run uses the incremented value. `After` increments right after queueing, so the first run uses the current value and the next queued run uses the next one. Click the `SED` badge to cycle `fixed` → `random` → `increment`, or choose Mode in the value dialog; the node shows `inc:bef` / `inc:aft`. Existing workflows keep `fixed` / `random` unchanged.
+
 > Renaming is not supported. To rename, delete and re-add the item.
 
 [↑ Back to top](#top)

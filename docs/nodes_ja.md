@@ -1074,6 +1074,8 @@ ComfyUI の system user directory 配下の `sax_tag_dictionary/sax_danbooru.csv
 
 `SEED` の `random` はキューの実行ごとに `0`〜`Max` の範囲で抽選します。まとめて登録したキューでも同じ保存値を繰り返し使いません。生成結果を再現する場合は `fixed` にして使用した seed を指定します。
 
+`SEED` の `increment` はキューを登録するたびに保存値へ 1 を加算します（`Max` を超えません。ComfyUI の control after generate と同様）。`Before` は登録の直前に加算するため、初回は加算後の値で実行します。`After` は登録の直後に加算するため、初回は現在の値で実行し、続けて登録した次の実行が次の値になります。`SED` バッジのクリックで `fixed` → `random` → `increment` の順に切り替わり、値ダイアログの Mode でも選べます。ノード上には `inc:bef` / `inc:aft` と表示します。既存のワークフローの `fixed` / `random` の挙動は変わりません。
+
 > 名前変更は非対応です。名前を変えたい場合は削除して再追加してください。
 
 [↑ トップへ](#top)

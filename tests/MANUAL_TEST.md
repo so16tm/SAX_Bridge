@@ -381,6 +381,7 @@
 - [ ] **edit**: item 名変更 → 接続維持 (P1-08〜P1-09)
 - [ ] **drag**: param drag (数値ドラッグ) → 接続維持 (P1-10〜P1-11、Phase 1.2 で解消予定の既知バグ経路)
 - [ ] **popup**: param popup (ピッカー) → 接続維持 (P1-12〜P1-13、Phase 1.2 で解消予定の既知バグ経路)
+- [ ] **seed increment**: SEED を Mode=Increment にして Queue を連続実行 → Before は登録ごとに +1 (初回も加算後)、After は初回が現在値で以後 +1。SED バッジのクリックで fixed → random → increment と巡回し、保存・再読込後もモードと値が維持される
 
 ### K-2. Text Catalog mutation (workflows/12_text_catalog.json)
 
