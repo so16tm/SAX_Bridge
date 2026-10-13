@@ -516,12 +516,14 @@ effective_noise_intensity(i) = latent_noise_intensity * decay_factor(i)
 | `guidance_strength` | Float (0.0〜1.0) | ガイダンス効果強度 |
 | `pag_strength` | Float (0.0〜1.0) | Perturbed Attention Guidance 強度（任意 CFG で動作。1 ステップ毎に追加 forward pass） |
 | `positive_prompt` | String (optional) | i2i パスの Positive プロンプト上書き（`denoise > 0` 時のみ有効） |
+| `cycle` | Int (1〜10) | アップスケール + i2i のサイクル数（既定 1）。`scale_by` を総倍率として等比で分割（例: `scale_by=2`, `cycle=2` → ×1.41 を 2 回）。`denoise > 0` かつ Pipe に model / VAE / positive がある場合のみ有効。それ以外は 1 回扱い |
 
 **出力**: `PIPE`, `IMAGE`
 
 **動作**:
 - `upscale_model_name` が `None` 以外の場合、ESRGAN 系モデルでアップスケール後、`scale_by` の目標サイズへリサイズ
 - `denoise > 0` の場合、アップスケール後に KSampler (i2i) を実行してテクスチャを補完
+- `cycle > 1` の場合、アップスケール + i2i を指定回数繰り返し、`scale_by` へ段階的に近づける（seed はサイクルごとに +1）。`cycle=1` は従来どおり
 - `negative` が Pipe に存在しない場合、CLIP で空文字列をエンコードして自動補完
 
 > ESRGAN 系モデルは実写・圧縮画像の復元に効果的。AI 生成アニメ調画像には `4x-AnimeSharp` 等のアニメ特化モデルを推奨。

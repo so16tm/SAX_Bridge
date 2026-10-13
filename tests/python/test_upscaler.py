@@ -340,6 +340,83 @@ class TestUpscalerExecute:
         assert args[2] == expected_size  # target_h
 
 
+class TestUpscalerCycle:
+    def _make_pipe(self, h: int = 16, w: int = 16) -> dict:
+        return {
+            "model": MagicMock(), "clip": MagicMock(), "vae": MagicMock(),
+            "images": _make_images(1, h, w, 3),
+            "positive": MagicMock(), "negative": MagicMock(), "seed": 42,
+            "loader_settings": {"steps": 20, "cfg": 7.0, "sampler_name": "euler", "scheduler": "normal"},
+        }
+
+    def _run(self, pipe, cycle, scale_by=4.0, denoise=0.5, **kw):
+        sizes: list[tuple[int, int]] = []
+
+        def fake_upscale(bchw, w, h, method, crop):
+            sizes.append((h, w))
+            return torch.rand(bchw.shape[0], bchw.shape[1], h, w)
+
+        pipe["vae"].encode.side_effect = lambda img: torch.rand(1, 4, 2, 2)
+        sampler_result = ({"samples": torch.rand(1, 4, 2, 2)},)
+        with patch("comfy.utils.common_upscale", side_effect=fake_upscale), \
+             patch("nodes.common_ksampler", return_value=sampler_result) as mock_ksampler, \
+             patch("nodes.upscaler.decode_image",
+                   side_effect=lambda vae, s: torch.rand(1, *sizes[-1], 3)):
+            result = SAX_Bridge_Upscaler.execute(
+                pipe, upscale_model_name="None", method="lanczos",
+                scale_by=scale_by, denoise=denoise, cycle=cycle, **kw,
+            )
+        return result, sizes, mock_ksampler
+
+    def test_default_cycle_is_single_pass(self):
+        result, sizes, ks = self._run(self._make_pipe(), cycle=1)
+        assert sizes == [(64, 64)]
+        assert ks.call_count == 1
+        assert result[1].shape == (1, 64, 64, 3)
+
+    def test_cycles_split_scale_geometrically_and_reach_final_size(self):
+        # 16px × 4.0 を 2 サイクル → 16×2=32 → 64
+        result, sizes, ks = self._run(self._make_pipe(), cycle=2)
+        assert sizes == [(32, 32), (64, 64)]
+        assert ks.call_count == 2
+        assert result[1].shape == (1, 64, 64, 3)
+
+    def test_each_cycle_samples_with_incremented_seed(self):
+        _, _, ks = self._run(self._make_pipe(), cycle=3, scale_by=4.0)
+        seeds = [c.args[1] for c in ks.call_args_list]
+        assert seeds == [42, 43, 44]
+
+    def test_each_cycle_encodes_previous_cycle_output(self):
+        pipe = self._make_pipe()
+        self._run(pipe, cycle=2)
+        shapes = [c.args[0].shape[1:3] for c in pipe["vae"].encode.call_args_list]
+        assert shapes == [(32, 32), (64, 64)]
+
+    def test_cycle_ignored_without_denoise(self):
+        result, sizes, ks = self._run(self._make_pipe(), cycle=4, denoise=0.0)
+        assert sizes == [(64, 64)]
+        ks.assert_not_called()
+
+    def test_cycle_ignored_when_pipe_incomplete(self):
+        pipe = self._make_pipe()
+        pipe["model"] = None
+        result, sizes, ks = self._run(pipe, cycle=4)
+        assert sizes == [(64, 64)]
+        ks.assert_not_called()
+
+    @pytest.mark.parametrize("bad", [0, -1, 11])
+    def test_out_of_range_cycle_raises(self, bad):
+        with pytest.raises(ValueError, match="cycle must be between"):
+            SAX_Bridge_Upscaler.execute(
+                self._make_pipe(), upscale_model_name="None", method="lanczos",
+                scale_by=2.0, denoise=0.5, cycle=bad,
+            )
+
+    def test_schema_exposes_cycle_with_compat_default(self):
+        inp = next(i for i in SAX_Bridge_Upscaler.GET_SCHEMA().inputs if i.id == "cycle")
+        assert inp.default == 1 and inp.min == 1 and inp.max == 10
+
+
 class TestUpscalerAlphaRegression:
     def test_img2img_preserves_alpha(self):
         images = torch.rand(1, 16, 16, 4)
