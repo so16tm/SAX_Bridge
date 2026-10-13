@@ -6,9 +6,13 @@
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
 #   pip install -r tests/requirements.txt
 #
-# ComfyUI の venv で動かす場合は torch/numpy/Pillow は既に入っているので
+# aiohttp は HTTP ルート登録のテスト (web.RouteTableDef) が実物を使うため要る
+# (ComfyUI 本体が同梱しているが、CI には入っていない)。
+#
+# ComfyUI の venv で動かす場合は torch/numpy/Pillow/aiohttp は既に入っているので
 # pytest だけが追加で入る。
 pytest>=8.0
 torch>=2.4
 numpy>=1.24
 Pillow>=10.0
+aiohttp>=3.9
