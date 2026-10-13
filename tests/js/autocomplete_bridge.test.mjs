@@ -64,3 +64,11 @@ test("旧V2は本文を分離、無効JSONは元のValidatorへ、空カタロ�
     assert.equal(result[3].inputs._sax_ac_text_0, undefined);
     assert.equal(result[4].inputs.wildcard_text, output[4].inputs.wildcard_text);
 });
+
+test("structuredClone できない値（Proxy・関数）を含む output でも複製できる", async () => {
+    const inputs = new Proxy({ text: "a", fn() {} }, {});
+    assert.throws(() => structuredClone(inputs), { name: "DataCloneError" });
+    const output = { 1: { class_type: "SAX_Bridge_Prompt_Qwen_Image", inputs } };
+    const prepared = await prepareAutocompletePrompt(output);
+    assert.deepEqual(prepared[1], { class_type: "SAX_Bridge_Prompt_Qwen_Image", inputs: { text: "a" } });
+});

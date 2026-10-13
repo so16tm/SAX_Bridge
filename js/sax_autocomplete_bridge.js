@@ -3,8 +3,12 @@
 export const TRANSFER = "_sax_ac_transfer";
 const PREFIX = "_sax_ac_text_";
 
+// graphToPrompt の output には Vue の reactive Proxy 等が混ざり得て structuredClone が
+// DataCloneError になる。output は最終的に JSON で送信されるため、JSON 経由で複製する。
+const cloneJson = value => JSON.parse(JSON.stringify(value));
+
 export async function prepareAutocompletePrompt(output, loadCatalog) {
-    const result = structuredClone(output);
+    const result = cloneJson(output);
     const catalogs = new Map();
     for (const node of Object.values(result ?? {})) {
         if (!node?.class_type?.startsWith("SAX_Bridge_") || !node.inputs) continue;
@@ -25,7 +29,7 @@ export async function prepareAutocompletePrompt(output, loadCatalog) {
             let data = protectedInput.data;
             if (node.class_type === "SAX_Bridge_Text_Catalog_V2" && data.version === 3 && data.catalog_id) {
                 if (!catalogs.has(data.catalog_id)) catalogs.set(data.catalog_id, await loadCatalog(data.catalog_id));
-                data._sax_queued_catalog = structuredClone(catalogs.get(data.catalog_id));
+                data._sax_queued_catalog = cloneJson(catalogs.get(data.catalog_id));
                 data = data._sax_queued_catalog;
                 protectedInput.changed = true;
             }
