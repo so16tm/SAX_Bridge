@@ -1,0 +1,618 @@
+import { app } from "../../scripts/app.js";
+import { showDialog, showConfirmDialog, showPromptDialog, showAlertDialog, hideWidget } from "./sax_ui_base.js";
+import { sortedNamedOptions, LIMITS, newId, parseConfig, validateConfig, parseTags, filteredItems, recipeWarnings, removeItems, EditHistory, BufferedJson, visibleWindow, itemTagSortKeys, compareItemTagKeys, parseRandomCount, formatRandomCount, parseSelectionWeight, candidateWeight } from "./sax_text_catalog_v2_model.js";
+import { installQuickControls } from "./sax_text_catalog_v2_quick.js";
+import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
+import { installSharedControls, sharedController, flushCatalogNodes, flushCatalogPrompt, readReference } from "./sax_text_catalog_v2_shared.js";
+import { importCatalog } from "./sax_text_catalog_v2_client.js";
+
+const NODE_TYPE = "SAX_Bridge_Text_Catalog_V2";
+const states = new WeakMap();
+const STYLE = `
+.sax-catalog-v2 *{box-sizing:border-box}.sax-catalog-v2>div{width:98vw!important;height:96vh;max-height:98vh!important;padding:14px!important;border-radius:12px!important}
+.sax-catalog-v2 button,.sax-catalog-v2 input,.sax-catalog-v2 select,.sax-catalog-v2 textarea{font:inherit;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#222);border:1px solid var(--border-color,#45454b);border-radius:7px;padding:7px 9px;min-width:0}
+.sax-catalog-v2 button{cursor:pointer;white-space:nowrap}.sax-catalog-v2 button:hover{border-color:var(--primary-background,#5686d6)}.sax-catalog-v2 button:disabled{opacity:.4;cursor:default}.sax-catalog-v2 :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:2px}
+.sax-catalog-v2 input[type=checkbox]{accent-color:var(--primary-background,#5686d6);width:16px;height:16px;flex-shrink:0}.sax-catalog-v2 textarea{resize:vertical;min-height:92px;line-height:1.65;width:100%}.sax-catalog-v2 input[type=number]{width:76px}
+.sax-catalog-v2 .cv2-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sax-catalog-v2 .cv2-grow{min-width:100px}.sax-catalog-v2 .cv2-row>.cv2-grow{flex:1}.sax-catalog-v2 .cv2-pane>input,.sax-catalog-v2 .cv2-editor>input{flex:none;height:36px}.sax-catalog-v2 .cv2-pane>.cv2-row,.sax-catalog-v2 .cv2-pane>.cv2-muted{flex-shrink:0}.sax-catalog-v2 .cv2-row>input[type=number]{flex:none;min-width:76px;width:76px}.sax-catalog-v2 .cv2-muted{opacity:.68;font-size:12px}.sax-catalog-v2 .cv2-primary{background:var(--primary-background,#386cb8);color:white;border-color:transparent}
+.sax-catalog-v2 .cv2-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px;min-height:0;flex:1;overflow:hidden}.sax-catalog-v2 .cv2-layout[data-hidden=true],.sax-catalog-v2 .cv2-layout[data-mode=library]{grid-template-columns:minmax(0,1fr)}.sax-catalog-v2 .cv2-layout[data-hidden=true]>.cv2-library{display:none}.sax-catalog-v2 .cv2-pane{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}.sax-catalog-v2 .cv2-work{border-left:1px solid var(--border-color,#45454b);padding-left:16px}.sax-catalog-v2 .cv2-layout[data-hidden=true]>.cv2-work{border-left:0;padding-left:0}
+.sax-catalog-v2 .cv2-scroll{overflow:auto;min-height:0;flex:1;scrollbar-gutter:stable}.sax-catalog-v2 .cv2-list{min-height:0}.sax-catalog-v2 .cv2-item{display:flex;align-items:center;gap:8px;padding:7px 5px;border-bottom:1px solid var(--border-color,#45454b)}.sax-catalog-v2 .cv2-item[data-active=true]{background:color-mix(in srgb,var(--primary-background,#5686d6) 16%,transparent);border-radius:7px}.sax-catalog-v2 .cv2-item button{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;border:0;background:transparent}.sax-catalog-v2 .cv2-item .cv2-muted{white-space:nowrap}
+.sax-catalog-v2 .cv2-card{border:1px solid var(--border-color,#45454b);border-radius:9px;padding:10px;margin-bottom:10px;display:flex;flex-direction:column;gap:8px}.sax-catalog-v2 .cv2-card[data-off=true]{opacity:.55}.sax-catalog-v2 .cv2-editor{display:flex;flex-direction:column;gap:10px;min-height:0;flex:1}.sax-catalog-v2 .cv2-editor>textarea{flex:1;min-height:320px;resize:none;padding:16px;line-height:1.8}.sax-catalog-v2 .cv2-candidate{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border-color,#45454b)}.sax-catalog-v2 .cv2-candidate>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.sax-catalog-v2 .cv2-error{color:var(--error-text,#ed9494);white-space:pre-wrap}.sax-catalog-v2 .cv2-status{min-height:16px;flex-shrink:0}.sax-catalog-v2 summary{cursor:pointer}.sax-catalog-v2 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 monospace;max-height:180px;overflow:auto;margin:6px 0}.sax-catalog-v2 label{display:flex;align-items:center;gap:6px}.sax-catalog-v2 .cv2-empty{padding:24px 8px;opacity:.65;line-height:1.8}.sax-catalog-v2 .cv2-warning{font-size:12px;color:var(--error-text,#ed9494)}.sax-catalog-v2 .cv2-menu{position:relative;flex:none}.sax-catalog-v2 .cv2-menu>summary{list-style:none;border:1px solid var(--border-color,#45454b);border-radius:7px;padding:7px 10px}.sax-catalog-v2 .cv2-menu>div{position:absolute;right:0;top:100%;z-index:2;display:flex;flex-direction:column;gap:6px;min-width:170px;padding:10px;border:1px solid var(--border-color,#45454b);border-radius:8px;background:var(--comfy-menu-bg,#222)}.sax-catalog-v2 .cv2-filter>div,.sax-catalog-v2 .cv2-tags>input{margin-top:8px}.sax-catalog-v2 .cv2-tabs{flex-wrap:nowrap}.sax-catalog-v2 .cv2-tabs>strong{margin-right:auto}.sax-catalog-v2 .cv2-tabs button[aria-pressed=true]{background:var(--primary-background,#386cb8);color:white;border-color:transparent}.sax-catalog-v2 .cv2-preview{flex:none;max-height:26vh;overflow:auto}.sax-catalog-v2 .cv2-filter,.sax-catalog-v2 .cv2-tags{flex:none}.sax-catalog-v2 .cv2-work>.cv2-row{flex-shrink:0}
+@media(max-width:760px){.sax-catalog-v2>div{padding:10px!important}.sax-catalog-v2 .cv2-tabs{gap:5px;flex-wrap:wrap}.sax-catalog-v2 .cv2-tabs>strong{display:none}.sax-catalog-v2 .cv2-tabs button{padding:6px 8px}.sax-catalog-v2 .cv2-layout{display:flex;gap:0}.sax-catalog-v2 .cv2-pane{flex:1;width:100%;min-height:0}.sax-catalog-v2 .cv2-layout[data-mobile=work]>.cv2-library{display:none}.sax-catalog-v2 .cv2-layout[data-mobile=library]>.cv2-work{display:none}.sax-catalog-v2 .cv2-work{padding-left:0;border-left:0}.sax-catalog-v2 .cv2-editor>textarea{min-height:0}.sax-catalog-v2 .cv2-list{max-height:none}}
+.sax-catalog-v2 .cv2-table .cv2-item,.sax-catalog-v2 .cv2-columns{display:grid;grid-template-columns:20px minmax(160px,1fr) minmax(120px,.7fr) minmax(180px,1.4fr) 80px;gap:12px}.sax-catalog-v2 .cv2-table .cv2-item>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sax-catalog-v2 .cv2-columns{padding:0 5px}.sax-catalog-v2 .cv2-table .cv2-item button{min-width:0}.sax-catalog-v2 .cv2-table .cv2-filter{max-width:560px}
+.sax-catalog-v2 .cv2-card .cv2-menu>div{position:static;margin-top:6px}.sax-catalog-v2 .cv2-card>details>summary,.sax-catalog-v2 .cv2-tags>summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sax-catalog-v2 .cv2-filter>summary{max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sax-catalog-v2 .cv2-tag-options{max-height:240px;overflow:auto}.sax-catalog-v2 .cv2-tag-options label{height:24px;margin:0;padding:2px 3px;gap:6px;flex-wrap:nowrap;font-size:12px;line-height:16px;overflow:hidden;white-space:nowrap}.sax-catalog-v2 .cv2-tag-options input[type=checkbox]{width:14px;height:14px;margin:0;padding:0}
+@media(max-width:1000px){.sax-catalog-v2 .cv2-tabs>strong{display:none}}
+@media(max-width:760px){.sax-catalog-v2 .cv2-table .cv2-item,.sax-catalog-v2 .cv2-columns{grid-template-columns:20px minmax(120px,1fr) minmax(80px,.6fr) 60px;gap:8px}.sax-catalog-v2 .cv2-excerpt{display:none}.sax-catalog-v2 .cv2-layout[data-mode=library]>.cv2-library{display:flex}}
+`;
+
+function el(tag, className = "", text = "") {
+    const node = document.createElement(tag); node.className = className;
+    if (text) node.textContent = text;
+    return node;
+}
+function button(text, callback, options = {}) {
+    const b = el("button", options.primary ? "cv2-primary" : "", text);
+    b.type = "button"; b.disabled = Boolean(options.disabled);
+    b.addEventListener("click", callback); return b;
+}
+function row(...children) { const r = el("div", "cv2-row"); r.append(...children); return r; }
+function hint(text) { return el("span", "cv2-muted", text); }
+function widget(node) { return node.widgets?.find(w => w.name === "config_json"); }
+function seed(node) { return node.widgets?.find(w => w.name === "seed")?.value; }
+function stateFor(node) {
+    let state = states.get(node);
+    if (!state) {
+        state = { mode: "library", sort: "name", selectionAnchor: null, libraryHidden: false, mobilePane: "work", filtersOpen: false, tagsOpen: false, previewOpen: false, selected: new Set(), activeItem: null, query: "", filterTags: [], tagQuery: "", openGroups: new Set(), pages: new Map(), scroll: new Map(), history: null, result: null, close: null, refresh: null, status: null, flush: null, getConfig: null, quickCommit: null };
+        states.set(node, state);
+    }
+    return state;
+}
+
+function openCatalog(node) {
+    if (node._saxCatalogMigrating) return;
+    const state = stateFor(node);
+    if (state.close) { state.close.show(); return; }
+    let config;
+    try { config = parseConfig(widget(node)?.value); }
+    catch (error) {
+        state.close = showDialog({ title: "SAX Text Catalog V2", className: "sax-catalog-v2", width: 700, onClose: () => { state.close = null; }, build(dlg, close) {
+            dlg.append(el("p", "cv2-error", `${error.message}\nデータを保護するため編集を停止しました。config_json またはワークフローの元データを修正して再度開いてください。`), button("閉じる", close));
+        } });
+        return;
+    }
+    if (config.recipes.some(r => r.groups.some(g => g.kind === "nested"))) {
+        state.close = showDialog({ title: "ネスト構成要素の編集", className: "sax-catalog-v2", width: 700, onClose: () => { state.close = null; }, build(dlg, close) {
+            dlg.append(el("p", "", "この埋め込みカタログはそのまま実行できます。階層の編集には共有カタログへ移行してください。"), button("共有カタログへ移行", () => { close(); node.widgets.find(w => w.name === "共有カタログへ移行")?.callback(); }), button("閉じる", close));
+        } });
+        return;
+    }
+    if (!state.history || state.history.current !== widget(node).value) state.history = new EditHistory(widget(node).value);
+    const recipe = () => config.recipes.find(r => r.id === config.active_recipe_id);
+    let content, status, preview, undoButton, redoButton, paneButton;
+    const modeButtons = new Map();
+    let referenceCounts = new Map();
+    let itemMap = new Map(config.catalog.items.map(item => [item.id, item]));
+    let listObserver = null;
+    let pendingKey = null;
+    const report = (message, error = false) => { status.textContent = message; status.classList.toggle("cv2-error", error); };
+    const buffer = new BufferedJson(widget(node), () => {
+        try { validateConfig(config); }
+        catch (error) {
+            config = parseConfig(widget(node).value); report(`未反映: ${error.message}`, true);
+            queueMicrotask(() => { if (state.close) render(); });
+            return config;
+        }
+        return config;
+    }, raw => { state.history.record(raw, pendingKey); updateHistory(); renderPreview(); });
+    state.flush = () => buffer.flush();
+    const serializeValue = widget(node).serializeValue;
+    widget(node).serializeValue = () => buffer.flush();
+    const commit = (change, key = null, redraw = true) => {
+        if (!redraw) {
+            if (pendingKey !== key) buffer.flush();
+            pendingKey = key;
+            change(config); buffer.changed(); syncFields();
+            report("ノードに自動反映 · ワークフローの保存は別途必要です");
+            node.graph?.change?.(); node.setDirtyCanvas?.(true, true);
+            return true;
+        }
+        buffer.flush(); pendingKey = null;
+        const next = structuredClone(config);
+        try { change(next); validateConfig(next); }
+        catch (error) { report(`未反映: ${error.message}`, true); return false; }
+        const raw = JSON.stringify(next);
+        state.history.record(raw, key);
+        config = next;
+        widget(node).value = raw;
+        node.graph?.change?.(); node.setDirtyCanvas?.(true, true);
+        report("ノードに反映済み · ワークフローの保存は別途必要です");
+        if (redraw) render(); else { syncFields(); renderPreview(); updateHistory(); }
+        return true;
+    };
+    state.getConfig = () => config;
+    state.quickCommit = change => commit(change);
+    const updateHistory = () => { undoButton.disabled = !state.history.undoStack.length; redoButton.disabled = !state.history.redoStack.length; };
+    const restore = direction => {
+        buffer.flush(); pendingKey = null;
+        const raw = state.history[direction](); if (raw === null) return;
+        config = parseConfig(raw); widget(node).value = raw;
+        node.graph?.change?.(); node.setDirtyCanvas?.(true, true);
+        report(direction === "undo" ? "元に戻しました" : "やり直しました"); render();
+    };
+    const field = (value, label, focusKey, onInput, { area = false, type = "text", max = LIMITS.name, bind, search = false } = {}) => {
+        const input = el(area ? "textarea" : "input", "cv2-grow");
+        if (!area) input.type = type;
+        input.value = value; input.setAttribute("aria-label", label); input.placeholder = label;
+        input.dataset.focus = focusKey;
+        if (type === "number") { input.min = "0"; input.max = String(LIMITS.items); input.step = "1"; }
+        else input.maxLength = max;
+        if (bind) input.dataset.bind = bind;
+        input.addEventListener("input", event => { if (!search || !event.isComposing) onInput(input.value); });
+        if (search) input.addEventListener("compositionend", () => onInput(input.value));
+        input.addEventListener("blur", () => { buffer.flush(); state.history.boundary(); pendingKey = null; });
+        if (area) attachAutoComplete(input);
+        return input;
+    };
+    const itemField = (item, prop, where, area = false) => field(item[prop], prop === "text" ? "本文" : "素材名", `${where}:${item.id}:${prop}`,
+        value => commit(next => { next.catalog.items.find(i => i.id === item.id)[prop] = value; }, `${where}:${item.id}:${prop}`, false),
+        { area, max: area ? LIMITS.text : LIMITS.name, bind: `${item.id}:${prop}` });
+    const syncFields = () => {
+        for (const input of content.querySelectorAll("[data-bind]")) {
+            if (input === document.activeElement) continue;
+            const at = input.dataset.bind.lastIndexOf(":");
+            const id = input.dataset.bind.slice(0, at), prop = input.dataset.bind.slice(at + 1);
+            const item = itemMap.get(id);
+            if (item) input.value = item[prop];
+        }
+        for (const label of content.querySelectorAll("[data-itemname]")) label.textContent = itemMap.get(label.dataset.itemname)?.name || "無題の素材";
+        for (const label of content.querySelectorAll("[data-recipename]")) label.textContent = config.recipes.find(r => r.id === label.dataset.recipename)?.name || "無題の組み合わせ";
+    };
+    const selectedIds = () => config.catalog.items.filter(i => state.selected.has(i.id)).map(i => i.id);
+    const addGroup = mode => {
+        const ids = selectedIds(); const id = newId();
+        if (commit(next => next.recipes.find(r => r.id === next.active_recipe_id).groups.push({ id, name: mode === "random" ? "ランダム選択" : "固定テキスト", mode, item_ids: ids, count: 1, on: true }))) {
+            state.openGroups.add(id); render();
+        }
+    };
+    const editGroup = (id, change, key = null, redraw = true) => commit(next => change(next.recipes.find(r => r.id === next.active_recipe_id).groups.find(g => g.id === id)), key, redraw);
+    const setGroupCandidates = (group, ids) => {
+        group.item_ids = ids;
+        const weights = group.item_weights, retained = new Set(ids);
+        if (weights) {
+            for (const id of Object.keys(weights)) if (!retained.has(id)) delete weights[id];
+            if (!Object.keys(weights).length) delete group.item_weights;
+        }
+    };
+    const moveGroup = (id, delta) => commit(next => {
+        const groups = next.recipes.find(r => r.id === next.active_recipe_id).groups;
+        const at = groups.findIndex(g => g.id === id); const to = at + delta;
+        if (to >= 0 && to < groups.length) [groups[at], groups[to]] = [groups[to], groups[at]];
+    });
+    const renderPreview = () => {
+        if (!preview || !state.previewOpen) return;
+        preview.replaceChildren();
+        for (const warning of recipeWarnings(config)) preview.append(el("div", "cv2-warning", warning));
+        const enabled = recipe().groups.filter(g => g.on);
+        const items = new Map(config.catalog.items.map(i => [i.id, i]));
+        const random = enabled.some(g => g.mode === "random");
+        if (!random) {
+            const parts = []; let length = 0;
+            outer: for (const group of enabled) for (const id of group.item_ids) {
+                const text = items.get(id).text.trim();
+                if (text) { parts.push(text.slice(0, Math.max(0, 6000 - length))); length += text.length; }
+                if (length >= 6000) { parts.push("…（プレビューを省略・出力は全文）"); break outer; }
+            }
+            preview.append(hint("出力プレビュー"), el("pre", "", parts.join("\n") || "（空の出力）"));
+        }
+        else preview.append(hint("ランダムの確定結果はワークフロー実行後に表示 · 同じseedで再現 · グループ内は重複なし"));
+        if (state.result) {
+            const fresh = !buffer.dirty && state.result.config === widget(node).value && String(state.result.seed) === String(seed(node));
+            preview.append(hint(fresh ? "最新の実行結果" : "前回の実行結果（設定またはseed変更後・未更新）"), el("pre", "", (state.result.text || "（空の出力）").slice(0, 6000)));
+            const details = el("details"); details.append(el("summary", "cv2-muted", "抽選結果の詳細（先頭6000文字）"), el("pre", "", state.result.selection.slice(0, 6000))); preview.append(details);
+        }
+    };
+
+    const menu = (label, ...actions) => {
+        const details = el("details", "cv2-menu");
+        details.append(el("summary", "", label), row(...actions)); return details;
+    };
+    const switchMode = mode => { buffer.flush(); state.mode = mode; state.mobilePane = "work"; render(); };
+    const deleteItems = async ids => {
+        const count = ids.reduce((n, id) => n + (referenceCounts.get(id) || 0), 0);
+        if (await showConfirmDialog({ title: "素材を削除", message: `${ids.length}件の素材を削除します。${count}件のグループ参照からも外れます。Undoで戻せます。`, danger: true, okLabel: "削除", cancelLabel: "キャンセル" })) {
+            if (!state.close) return;
+            commit(next => removeItems(next, ids)); render();
+        }
+    };
+    const newItem = () => {
+        const id = newId();
+        if (commit(next => next.catalog.items.push({ id, name: "新しい素材", text: "", tags: [] }))) {
+            state.activeItem = id; state.query = ""; state.filterTags = []; switchMode("items");
+            content.querySelector(`[data-focus="library:${id}:name"]`)?.focus();
+        }
+    };
+    function renderLibrary(pane, full = false) {
+        if (full) pane.className += " cv2-table";
+        const managing = state.mode === "library";
+        pane.append(row(el("strong", "", full ? "アイテムライブラリ" : "アイテム"), hint(`${config.catalog.items.length}件`), ...(state.mode !== "composition" ? [button("＋ 新規", newItem, { disabled: config.catalog.items.length >= LIMITS.items })] : [])));
+        const search = field(state.query, "名前・本文・タグを検索", "search", value => { state.query = value; render(); }, { search: true });
+        const filters = el("details", "cv2-filter"); filters.open = state.filtersOpen;
+        filters.addEventListener("toggle", () => { if (filters.isConnected) state.filtersOpen = filters.open; });
+        filters.append(el("summary", "cv2-muted", state.filterTags.length ? `タグ：${state.filterTags.join("・")}` : "タグ：すべて"));
+        filters.append(hint("選んだタグをすべて含む（AND）"), field(state.tagQuery, "絞り込みタグを検索", "tag-search", value => { state.tagQuery = value; render(); }, { search: true }));
+        const tags = el("div", "cv2-tag-options");
+        const allTags = [...new Set([...config.catalog.items.flatMap(i => i.tags), ...state.filterTags])].sort((a,b)=>a.localeCompare(b,"ja"));
+        for (const tag of allTags.filter(tag => tag.toLocaleLowerCase().includes(state.tagQuery.toLocaleLowerCase()))) {
+            const option = el("label", "cv2-row"), checkbox = el("input"); checkbox.type = "checkbox"; checkbox.checked = state.filterTags.includes(tag);
+            checkbox.setAttribute("aria-label", `${tag}で絞り込み`); checkbox.dataset.focus = `tag-filter:${tag}`;
+            checkbox.addEventListener("change", () => { state.filterTags = checkbox.checked ? [...new Set([...state.filterTags,tag])] : state.filterTags.filter(value=>value!==tag); render(); });
+            option.title = tag; option.append(checkbox, document.createTextNode(tag)); tags.append(option);
+        }
+        filters.append(tags, button("タグ絞り込みを解除", () => { state.filterTags = []; render(); }));
+        const controls = row(search, filters);
+        if (full) {
+            const sort = el("select"); sort.setAttribute("aria-label", "並べ替え");
+            for (const [value, name] of [["catalog", "登録順"], ["name", "名前順"], ["tags", "タグ順"], ["used", "使用件数順"]]) sort.append(new Option(name, value));
+            sort.value = state.sort; sort.addEventListener("change", () => { state.sort = sort.value; render(); }); controls.append(sort);
+        }
+        pane.append(controls);
+        const visible = filteredItems(config, state.query, state.filterTags);
+        if (state.sort === "name") visible.sort((a, b) => a.name.localeCompare(b.name, "ja") || a.id.localeCompare(b.id));
+        else if (state.sort === "tags") {
+            const keys = itemTagSortKeys(visible);
+            visible.sort((a, b) => compareItemTagKeys(keys.get(a.id), keys.get(b.id)) || a.name.localeCompare(b.name, "ja") || a.id.localeCompare(b.id));
+        }
+        else if (state.sort === "used") visible.sort((a, b) => (referenceCounts.get(b.id) || 0) - (referenceCounts.get(a.id) || 0));
+        const selecting = true;
+        if (selecting) {
+            const selected = selectedIds();
+            const selectionRow = row(button("一覧を全選択", () => { for (const item of visible) state.selected.add(item.id); render(); }, { disabled: !visible.length }), button("一覧の選択を解除", () => { for (const item of visible) state.selected.delete(item.id); render(); }, { disabled: !selected.length }), button("すべて解除", () => { state.selected.clear(); render(); }, { disabled: !selected.length }), hint(`${selected.length}件選択 / 検索結果${visible.length}件`));
+            if ((managing || state.mode === "items") && selected.length) {
+                const bulkTag = field("", "一括操作するタグ（カンマ区切り）", "bulk-tags", () => {});
+                const updateTags = remove => {
+                    const target = parseTags(bulkTag.value);
+                    commit(next => { for (const item of next.catalog.items) if (state.selected.has(item.id)) item.tags = remove ? item.tags.filter(t => !target.includes(t)) : [...new Set([...item.tags, ...target])]; });
+                };
+                selectionRow.append(menu("一括操作", bulkTag, button("タグ追加", () => updateTags(false)), button("タグ除去", () => updateTags(true)), button("選択アイテムを削除", () => deleteItems(selected))));
+            }
+            pane.append(selectionRow);
+        }
+        if (full) { const columns = el("div", "cv2-columns cv2-muted"); columns.append(el("span"), el("span", "", "名前"), el("span", "", "タグ"), el("span", "cv2-excerpt", "本文"), el("span", "", "使用数")); pane.append(columns); }
+        const list = el("div", "cv2-scroll cv2-list"); list.dataset.scroll = full ? "library-items" : "items";
+        if (!visible.length) list.append(el("div", "cv2-empty", config.catalog.items.length ? "一致する素材がありません" : "「＋ 新規」でアイテムを作成します。"));
+        const paintRows = () => {
+            if (!visible.length) return;
+            const { start, end, top, bottom } = visibleWindow(visible.length, list.scrollTop, list.clientHeight || 220);
+            list.replaceChildren();
+            const before = el("div"); before.style.height = `${top}px`; list.append(before);
+            for (const [offset, item] of visible.slice(start, end).entries()) {
+                const line = el("div", "cv2-item"); line.style.height = "40px"; line.dataset.active = String(item.id === state.activeItem);
+                if (selecting) {
+                    const check = el("input"); check.type = "checkbox"; check.checked = state.selected.has(item.id); check.setAttribute("aria-label", `${item.name}を選択`);
+                    const at = start + offset;
+                    check.addEventListener("click", event => {
+                        const anchor = visible.findIndex(i => i.id === state.selectionAnchor);
+                        if (event.shiftKey && anchor >= 0) for (const ranged of visible.slice(Math.min(at, anchor), Math.max(at, anchor) + 1)) { if (check.checked) state.selected.add(ranged.id); else state.selected.delete(ranged.id); }
+                        if (check.checked) state.selected.add(item.id); else state.selected.delete(item.id);
+                        state.selectionAnchor = item.id; render();
+                    }); line.append(check);
+                }
+                const choose = button(item.name || "無題の素材", () => {
+                    if (state.mode === "composition") { if (state.selected.has(item.id)) state.selected.delete(item.id); else state.selected.add(item.id); render(); }
+                    else { state.activeItem = item.id; switchMode("items"); }
+                });
+                choose.dataset.itemname = item.id; choose.title = item.text.slice(0, 500); line.append(choose);
+                if (full) line.append(hint(item.tags.join(" · ")), el("span", "cv2-muted cv2-excerpt", item.text.slice(0, 180).replace(/\s+/g, " ")));
+                line.append(hint(`${referenceCounts.get(item.id) || 0}${full ? "件" : ""}`)); list.append(line);
+            }
+            const after = el("div"); after.style.height = `${bottom}px`; list.append(after);
+        };
+        list.addEventListener("scroll", paintRows); paintRows();
+        if (typeof ResizeObserver !== "undefined") { listObserver = new ResizeObserver(paintRows); listObserver.observe(list); }
+        pane.append(list);
+        if (state.mode === "composition" && selectedIds().length) pane.append(row(button("固定で追加", () => addGroup("all"), { disabled: recipe().groups.length >= LIMITS.groups }), button("ランダムで追加", () => addGroup("random"), { primary: true, disabled: recipe().groups.length >= LIMITS.groups })));
+    }
+
+    function renderItemEditor(pane) {
+        const active = itemMap.get(state.activeItem);
+        if (!active) { pane.append(el("div", "cv2-empty", "ライブラリでアイテムを選択するか、新規作成してください。"), button("＋ 新規", newItem)); return; }
+        const editor = el("div", "cv2-editor"); editor.dataset.scroll = "editor";
+        const duplicate = () => {
+            const copy = { ...structuredClone(active), id: newId(), name: `${active.name.slice(0, 250)} コピー` };
+            if (commit(next => next.catalog.items.push(copy))) { state.activeItem = copy.id; render(); content.querySelector(`[data-focus="library:${copy.id}:name"]`)?.focus(); }
+        };
+        editor.append(row(itemField(active, "name", "library"), hint(`使用${referenceCounts.get(active.id) || 0}件に反映`), menu("操作", button("アイテムを複製", duplicate, { disabled: config.catalog.items.length >= LIMITS.items }), button("アイテムを削除", () => deleteItems([active.id])))));
+        const tags = el("details", "cv2-tags"); tags.open = state.tagsOpen;
+        tags.addEventListener("toggle", () => { if (tags.isConnected) state.tagsOpen = tags.open; });
+        tags.append(el("summary", "cv2-muted", active.tags.length ? `タグ · ${active.tags.join(" · ")}` : "タグを編集"));
+        tags.append(field(active.tags.join(", "), "タグ（カンマ区切り・最大8件）", `tags:${active.id}`, value => {
+            const parsed = parseTags(value);
+            if (parsed.length > LIMITS.tags || parsed.some(tag => [...tag].length > LIMITS.name)) { report("未反映: タグは8件・各256文字までです", true); return; }
+            commit(next => { next.catalog.items.find(i => i.id === active.id).tags = parsed; }, `tags:${active.id}`, false);
+        }, { max: 8 * (LIMITS.name + 2) }));
+        editor.append(tags, itemField(active, "text", "library", true)); pane.append(editor);
+    }
+
+    function renderRecipe(pane) {
+        const current = recipe();
+        const select = el("select", "cv2-grow"); select.setAttribute("aria-label", "組み合わせ");
+        for (const item of sortedNamedOptions(config.recipes)) { const option = new Option(item.name || "無題の組み合わせ", item.id); option.dataset.recipename = item.id; select.append(option); }
+        select.value = current.id; select.addEventListener("change", () => commit(next => { next.active_recipe_id = select.value; }));
+        const metadata = menu("操作", field(current.name, "組み合わせ名", `recipe:${current.id}`, value => commit(next => { next.recipes.find(r => r.id === current.id).name = value; }, `recipe:${current.id}`, false)), button("組み合わせを複製", () => commit(next => {
+            const copy = structuredClone(current); copy.id = newId(); copy.name = `${copy.name.slice(0, 250)} コピー`; copy.groups.forEach(g => { g.id = newId(); }); next.recipes.push(copy); next.active_recipe_id = copy.id;
+        }), { disabled: config.recipes.length >= LIMITS.recipes }), button("組み合わせを削除", async () => {
+            if (await showConfirmDialog({ title: "組み合わせを削除", message: "この組み合わせを削除します。素材はライブラリに残ります。Undoで戻せます。", danger: true, okLabel: "削除", cancelLabel: "キャンセル" })) {
+                if (!state.close) return;
+                commit(next => { next.recipes = next.recipes.filter(r => r.id !== current.id); next.active_recipe_id = next.recipes[0].id; });
+            }
+        }, { disabled: config.recipes.length === 1 }));
+        pane.append(row(select, button("＋ 組み合わせ", () => commit(next => {
+            const id = newId(); next.recipes.push({ id, name: `組み合わせ ${next.recipes.length + 1}`, groups: [] }); next.active_recipe_id = id;
+        }), { disabled: config.recipes.length >= LIMITS.recipes }), metadata));
+        const groups = el("div", "cv2-scroll"); groups.dataset.scroll = "groups";
+        if (!current.groups.length) groups.append(el("div", "cv2-empty", "一覧でアイテムを選び、「固定で追加」または「ランダムで追加」。グループを上から順に結合します。"));
+        for (const [index, group] of current.groups.entries()) {
+            const card = el("div", "cv2-card"); card.dataset.off = String(!group.on);
+            const enabled = el("input"); enabled.type = "checkbox"; enabled.checked = group.on; enabled.setAttribute("aria-label", "グループを有効化");
+            enabled.addEventListener("change", () => editGroup(group.id, g => { g.on = enabled.checked; }));
+            card.append(row(enabled, field(group.name, "グループ名", `group:${group.id}`, value => editGroup(group.id, g => { g.name = value; }, `group:${group.id}`, false)), menu("操作", button("上へ移動", () => moveGroup(group.id, -1), { disabled: !index }), button("下へ移動", () => moveGroup(group.id, 1), { disabled: index === current.groups.length - 1 }), button("グループを外す", () => commit(next => { const r = next.recipes.find(r => r.id === next.active_recipe_id); r.groups = r.groups.filter(g => g.id !== group.id); })))));
+            const mode = el("select"); mode.setAttribute("aria-label", "選択方式"); mode.append(new Option("すべて使用", "all"), new Option("ランダム選択", "random")); mode.value = group.mode;
+            mode.addEventListener("change", () => editGroup(group.id, g => { g.mode = mode.value; }));
+            const modeRow = row(mode, hint(`候補 ${group.item_ids.length}件`));
+            if (group.mode === "random") modeRow.append(field(formatRandomCount(group), "抽選する件数（例: 0～2）", `count:${group.id}`, value => {
+                try {
+                    const count = parseRandomCount(value);
+                    editGroup(group.id, g => { g.count = count.count; if (Object.hasOwn(count, "count_min")) g.count_min = count.count_min; else delete g.count_min; }, `count:${group.id}`, false);
+                } catch (error) { report(`未反映: ${error.message}`, true); }
+            }), hint("件を選ぶ"));
+            modeRow.append(menu("候補を変更", button("左の選択を候補に設定", () => editGroup(group.id, g => setGroupCandidates(g, selectedIds())), { disabled: !selectedIds().length }), button("左で候補を選択", () => { state.selected = new Set(group.item_ids); state.query = ""; state.filterTags = []; state.mobilePane = "library"; state.libraryHidden = false; render(); })));
+            card.append(modeRow);
+            const affixes = el("details", "cv2-affixes");
+            const affixSummary = el("summary", "cv2-muted", group.prefix || group.suffix ? "前後の文字 · 設定済み" : "前後の文字");
+            affixes.append(affixSummary);
+            for (const [prop, label, placeholder] of [["prefix", "前に付ける文字", "例: （"], ["suffix", "後ろに付ける文字", "例: ）"]]) {
+                const input = field(group[prop] ?? "", label, `affix:${group.id}:${prop}`, value => {
+                    editGroup(group.id, g => { if (value) g[prop] = value; else delete g[prop]; }, `affix:${group.id}:${prop}`, false);
+                    const edited = config.recipes.find(r => r.id === config.active_recipe_id).groups.find(g => g.id === group.id);
+                    affixSummary.textContent = edited?.prefix || edited?.suffix ? "前後の文字 · 設定済み" : "前後の文字";
+                }, { max: LIMITS.affix });
+                input.placeholder = placeholder;
+                input.maxLength = LIMITS.affix * 2;
+                affixes.append(input);
+            }
+            card.append(affixes);
+            const candidates = el("details"); candidates.dataset.group = group.id; candidates.open = state.openGroups.has(group.id) || group.item_ids.length === 1;
+            candidates.addEventListener("toggle", () => {
+                if (!candidates.isConnected) return;
+                const wasOpen = state.openGroups.has(group.id);
+                if (candidates.open) state.openGroups.add(group.id); else state.openGroups.delete(group.id);
+                if (candidates.open && !wasOpen && group.item_ids.length !== 1) render();
+            });
+            const names = group.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name || "無題");
+            candidates.append(el("summary", "cv2-muted", names.length ? `${names.join(" · ")}${group.item_ids.length > 4 ? ` … 全${group.item_ids.length}件` : ""}` : "候補がありません"));
+            const page = Math.min(state.pages.get(group.id) || 0, Math.max(0, Math.ceil(group.item_ids.length / 20) - 1));
+            if (candidates.open) {
+                if (group.item_ids.length > 20) candidates.append(row(button("前の20件", () => { state.pages.set(group.id, page - 1); render(); }, { disabled: page === 0 }), hint(`${page * 20 + 1}–${Math.min((page + 1) * 20, group.item_ids.length)} / ${group.item_ids.length}件`), button("次の20件", () => { state.pages.set(group.id, page + 1); render(); }, { disabled: (page + 1) * 20 >= group.item_ids.length })));
+                for (const [offset, id] of group.item_ids.slice(page * 20, (page + 1) * 20).entries()) {
+                    const at = page * 20 + offset;
+                    const label = el("span", "", itemMap.get(id)?.name || "無題の素材"); label.dataset.itemname = id;
+                    const candidate = el("div", "cv2-candidate"); candidate.dataset.candidate = id;
+                    if (group.mode === "random") {
+                        const weight = el("input", ""); weight.type = "text"; weight.inputMode = "decimal";
+                        weight.value = String(candidateWeight(group, id)); weight.placeholder = "1"; weight.setAttribute("aria-label", `${label.textContent}の抽選重み`); weight.style.width = "80px";
+                        weight.dataset.focus = `weight:${group.id}:${id}`;
+                        weight.addEventListener("input", () => {
+                            try {
+                                const value = parseSelectionWeight(weight.value);
+                                editGroup(group.id, g => {
+                                    if (value === 1) {
+                                        if (g.item_weights) delete g.item_weights[id];
+                                    } else g.item_weights = {...g.item_weights, [id]:value};
+                                    if (g.item_weights && !Object.keys(g.item_weights).length) delete g.item_weights;
+                                }, `weight:${group.id}:${id}`, false);
+                            } catch (error) { report(`未反映: ${error.message}`, true); weight.focus(); }
+                        });
+                        weight.addEventListener("keydown", event => { if (event.key === "Enter") weight.blur(); });
+                        candidate.append(label, weight);
+                    } else candidate.append(label);
+                    candidate.append(menu("⋯", button("候補を上へ", () => editGroup(group.id, g => { [g.item_ids[at - 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at - 1]]; }), { disabled: !at }), button("候補を下へ", () => editGroup(group.id, g => { [g.item_ids[at + 1], g.item_ids[at]] = [g.item_ids[at], g.item_ids[at + 1]]; }), { disabled: at === group.item_ids.length - 1 }), button("候補から外す", () => editGroup(group.id, g => setGroupCandidates(g, g.item_ids.filter(value => value !== id))))));
+                    candidates.append(candidate);
+                }
+            }
+            card.append(candidates); groups.append(card);
+        }
+        pane.append(groups);
+        const details = el("details", "cv2-preview"); details.open = state.previewOpen;
+        details.append(el("summary", "cv2-muted", "出力プレビュー・実行結果"));
+        preview = el("div"); details.append(preview);
+        details.addEventListener("toggle", () => { if (details.isConnected) { state.previewOpen = details.open; renderPreview(); } });
+        pane.append(details); renderPreview();
+    }
+
+    function render() {
+        const active = document.activeElement;
+        const focus = active?.dataset?.focus;
+        const selection = focus && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
+        for (const target of content.querySelectorAll("[data-scroll]")) state.scroll.set(target.dataset.scroll, target.scrollTop);
+        const scroll = state.scroll;
+        listObserver?.disconnect(); listObserver = null;
+        for (const input of content.querySelectorAll("[data-focus]")) detachAutoComplete(input);
+        content.replaceChildren();
+        preview = null;
+        itemMap = new Map(config.catalog.items.map(item => [item.id, item]));
+        const itemIds = new Set(config.catalog.items.map(i => i.id));
+        referenceCounts = new Map();
+        for (const r of config.recipes) for (const g of r.groups) for (const id of g.item_ids) referenceCounts.set(id, (referenceCounts.get(id) || 0) + 1);
+        for (const id of state.selected) if (!itemIds.has(id)) state.selected.delete(id);
+        if (!config.catalog.items.some(i => i.id === state.activeItem)) state.activeItem = config.catalog.items[0]?.id ?? null;
+        content.dataset.mode = state.mode;
+        content.dataset.hidden = String(state.libraryHidden && state.mode !== "library");
+        content.dataset.mobile = state.mobilePane;
+        for (const [mode, control] of modeButtons) control.setAttribute("aria-pressed", String(state.mode === mode));
+        paneButton.disabled = state.mode === "library";
+        const mobile = typeof matchMedia !== "undefined" && matchMedia("(max-width:760px)").matches;
+        paneButton.textContent = mobile ? (state.mobilePane === "work" ? "一覧を表示" : "作業を表示") : (state.libraryHidden ? "一覧を表示" : "一覧を隠す");
+        if (state.mode === "library") { const pane = el("div", "cv2-pane cv2-library"); content.append(pane); renderLibrary(pane, true); }
+        else {
+            const left = el("div", "cv2-pane cv2-library"), right = el("div", "cv2-pane cv2-work"); content.append(left, right);
+            renderLibrary(left);
+            if (state.mode === "items") renderItemEditor(right); else renderRecipe(right);
+        }
+        updateHistory();
+        for (const target of content.querySelectorAll("[data-scroll]")) if (scroll.has(target.dataset.scroll)) { target.scrollTop = scroll.get(target.dataset.scroll); target.dispatchEvent(new Event("scroll")); }
+        if (focus) {
+            const input = [...content.querySelectorAll("[data-focus]")].find(e => e.dataset.focus === focus);
+            input?.focus({ preventScroll: true }); if (selection && input?.setSelectionRange) input.setSelectionRange(...selection);
+        }
+    }
+
+    const dismissTagFilter = event => { for (const filter of content?.querySelectorAll(".cv2-filter[open]") ?? []) if (!filter.contains(event.target)) { filter.open = false; state.filtersOpen = false; } };
+    document.addEventListener("pointerdown", dismissTagFilter, true);
+    state.close = showDialog({ title: "SAX Text Catalog V2", className: "sax-catalog-v2", width: 1180, maxHeight: "98vh", gap: 10,
+        onClose: () => {
+            document.removeEventListener("pointerdown", dismissTagFilter, true);
+            for (const input of content.querySelectorAll("[data-focus]")) detachAutoComplete(input);
+            if (state.discard) buffer.cancel(); else buffer.flush();
+            for (const target of content.querySelectorAll("[data-scroll]")) state.scroll.set(target.dataset.scroll, target.scrollTop);
+            listObserver?.disconnect(); widget(node).serializeValue = serializeValue;
+            state.close = null; state.refresh = null; state.status = null; state.flush = null; state.getConfig = null; state.quickCommit = null;
+        },
+        build(dlg, close) {
+            // 共通ダイアログのタイトルを操作行へまとめて作業領域を確保する。
+            dlg.children[0].style.display = "none";
+            const style = el("style"); style.textContent = STYLE; dlg.append(style);
+            undoButton = button("元に戻す", () => restore("undo")); redoButton = button("やり直す", () => restore("redo"));
+            const controls = row(el("strong", "", "SAX Text Catalog V2")); controls.className += " cv2-tabs";
+            for (const [mode, label] of [["library", "ライブラリ"], ["items", "アイテム編集"], ["composition", "組み合わせ"]]) {
+                const control = button(label, () => switchMode(mode)); modeButtons.set(mode, control); controls.append(control);
+            }
+            paneButton = button("一覧を表示", () => {
+                if (typeof matchMedia !== "undefined" && matchMedia("(max-width:760px)").matches) { state.libraryHidden = false; state.mobilePane = state.mobilePane === "work" ? "library" : "work"; }
+                else state.libraryHidden = !state.libraryHidden;
+                render();
+            });
+            controls.append(paneButton, undoButton, redoButton, button("閉じる", close)); dlg.append(controls);
+            content = el("div", "cv2-layout"); status = el("div", "cv2-status cv2-muted"); dlg.append(content, status);
+            report("ノードに自動反映 · ワークフローの保存は別途必要です");
+            // テキスト入力中のCtrl+Zはブラウザの編集履歴を維持する。
+            dlg.addEventListener("keydown", event => {
+                if (event.isComposing || event.defaultPrevented) return;
+                if (event.key === "Escape") { event.preventDefault(); close(); }
+                else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !["INPUT", "TEXTAREA"].includes(event.target.tagName)) {
+                    event.preventDefault(); restore(event.shiftKey ? "redo" : "undo");
+                }
+            });
+            render();
+        },
+    });
+    state.refresh = renderPreview;
+    state.status = report;
+}
+
+function initialize(node) {
+    const value = widget(node);
+    if (value) hideWidget(value, { mode: "minimal" });
+    let version;
+    try { version = JSON.parse(value?.value ?? "{}").version; } catch { /* 旧エディターで元データを保護し、エラーを表示する。 */ }
+    if (version === 3) {
+        if (!sharedController(node)) node.widgets = node.widgets.filter(w => w.name === "config_json" || w.name === "seed" || w.name === "control_after_generate");
+        try { readReference(node); }
+        catch (error) {
+            const control = node.addWidget("button", "カタログ参照エラーを確認", null, () => showAlertDialog({ title: "カタログの参照が不正です", message: error.message }), { serialize: false });
+            control.serialize = false;
+            return;
+        }
+        node.size[0] = Math.max(node.size[0] ?? 0, 370);
+        installSharedControls(node);
+        return;
+    }
+    if (!node.widgets?.some(w => w.name === "共有カタログへ移行")) {
+        const migration = node.addWidget("button", "共有カタログへ移行", null, async () => {
+            if (node._saxCatalogMigrating) return;
+            node._saxCatalogMigrating = true;
+            try {
+                stateFor(node).flush?.();
+                stateFor(node).close?.();
+                const original = widget(node).value, graph = node.graph;
+                const config = parseConfig(original);
+                const name = await showPromptDialog({ title: "共有カタログ名", defaultValue: "移行したカタログ" });
+                if (name === null) return;
+                const document = await importCatalog({ ...config, name });
+                if (widget(node).value !== original || node.graph !== graph) throw new Error("移行中にノードの設定が変わったため、参照への切り替えを停止しました。保存したカタログはカタログ選択から使用できます。");
+                // 外部保存成功まで埋め込みデータを変更しない。
+                stateFor(node).close?.();
+                widget(node).value = JSON.stringify({ version: 3, catalog_id: document.id, rows: [{ id: newId(), recipe_id: config.active_recipe_id, on: true }] });
+                node.widgets = node.widgets.filter(w => w.name === "config_json" || w.name === "seed" || w.name === "control_after_generate");
+                states.delete(node); initialize(node); node.graph?.change?.();
+            } catch (error) { await showAlertDialog({ title: "移行できませんでした", message: error.message }); }
+            finally { node._saxCatalogMigrating = false; }
+        }, { serialize: false });
+        migration.serialize = false;
+        migration.options = { ...(migration.options ?? {}), serialize: false };
+    }
+    if (!node.widgets?.some(w => w.name === "カタログを開く" || w.name === "管理・編集")) node.addWidget("button", "カタログを開く", null, () => openCatalog(node), { serialize: false });
+    node.size[0] = Math.max(node.size[0] ?? 0, 310);
+    const seedWidget = node.widgets?.find(w => w.name === "seed");
+    if (seedWidget && !seedWidget._saxV2Chained) {
+        const callback = seedWidget.callback;
+        seedWidget.callback = function (...args) { const result = callback?.apply(this, args); states.get(node)?.refresh?.(); return result; };
+        seedWidget._saxV2Chained = true;
+    }
+    installQuickControls(node, {
+        read: () => stateFor(node).getConfig?.(),
+        commit: change => node._saxCatalogMigrating ? false : stateFor(node).quickCommit?.(change),
+        state: () => stateFor(node),
+    });
+}
+
+app.registerExtension({
+    name: "SAX.TextCatalogV2",
+    async setup() {
+        const queue = app.queuePrompt;
+        if (queue && !app._saxSharedCatalogQueue) {
+            app._saxSharedCatalogQueue = true;
+            app.queuePrompt = async function (...args) {
+                try {
+                    let graph, signature;
+                    do {
+                        graph = this.rootGraph ?? this.graph;
+                        signature = JSON.stringify(graph?._nodes?.filter(n => n.comfyClass === NODE_TYPE || n.type === NODE_TYPE).map(n => widget(n)?.value));
+                        await flushCatalogNodes(graph?._nodes);
+                    } while (graph !== (this.rootGraph ?? this.graph) || signature !== JSON.stringify((this.rootGraph ?? this.graph)?._nodes?.filter(n => n.comfyClass === NODE_TYPE || n.type === NODE_TYPE).map(n => widget(n)?.value)));
+                }
+                catch (error) { await showAlertDialog({ title: "カタログを保存できないためQueueを停止しました", message: error.message }); throw error; }
+                return queue.apply(this, args);
+            };
+        }
+        // バッチの各送信・サブグラフも、シリアライズ済みpromptの参照から保存を保証する。
+        const { api } = await import("../../scripts/api.js");
+        if (api.queuePrompt && !api._saxSharedCatalogQueue) {
+            api._saxSharedCatalogQueue = true;
+            const send = api.queuePrompt;
+            api.queuePrompt = async function (number, prompt, ...args) {
+                try { await flushCatalogPrompt(prompt?.output); }
+                catch (error) { await showAlertDialog({ title: "カタログを保存できないためQueueを停止しました", message: error.message }); throw error; }
+                return send.call(this, number, prompt, ...args);
+            };
+        }
+    },
+    beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData.name !== NODE_TYPE) return;
+        const created = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function () { const result = created?.apply(this, arguments); initialize(this); return result; };
+        const configure = nodeType.prototype.onConfigure;
+        nodeType.prototype.onConfigure = function () {
+            if (sharedController(this)) {
+                sharedController(this).dispose();
+                this.widgets = this.widgets.filter(w => w.name === "config_json" || w.name === "seed" || w.name === "control_after_generate");
+            }
+            const state = states.get(this); if (state) state.discard = true;
+            state?.close?.(); states.delete(this);
+            const result = configure?.apply(this, arguments); initialize(this); return result;
+        };
+        const removed = nodeType.prototype.onRemoved;
+        nodeType.prototype.onRemoved = function () { sharedController(this)?.dispose(); states.get(this)?.close?.(); states.delete(this); return removed?.apply(this, arguments); };
+        const serialize = nodeType.prototype.onSerialize;
+        nodeType.prototype.onSerialize = function (data) {
+            states.get(this)?.flush?.();
+            // LiteGraphはonSerialize前にwidgets_valuesを採取する版がある。
+            const result = serialize?.apply(this, arguments);
+            const index = this.widgets?.findIndex(w => w.name === "config_json");
+            if (index >= 0 && data.widgets_values) data.widgets_values[index] = widget(this).value;
+            return result;
+        };
+        const executed = nodeType.prototype.onExecuted;
+        nodeType.prototype.onExecuted = function (message) {
+            const result = executed?.apply(this, arguments);
+            const shared = sharedController(this);
+            if (shared) {
+                try { shared.result = { text: message.text?.[0] ?? "", selection: JSON.parse(message.selection_json?.[0] ?? "{}") }; }
+                catch { shared.result = null; }
+                return result;
+            }
+            const state = stateFor(this);
+            state.result = { text: message.text?.[0] ?? "", selection: message.selection_json?.[0] ?? "", config: message.config_json?.[0], seed: message.seed?.[0] };
+            state.refresh?.(); return result;
+        };
+    },
+});

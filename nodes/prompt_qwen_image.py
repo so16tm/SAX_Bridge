@@ -3,7 +3,7 @@
 エンコード本体は ComfyUI 本体の `TextEncodeQwenImage21` に委ねる。
 テンプレート・画像スロット・参照 latent の組み立てはモデル固有で細かく、
 自前で複製すると本体の修正に追従できなくなるため。
-このノードが足すのは Pipe 方式の入出力、Wildcard / LoRA 構文、
+このノードが足すのは Pipe 方式の入出力、LoRA 構文、
 参照画像サイズに合わせた空 latent の batch 対応、
 および ComfyUI 本体の QwenImage21Cache / ModelAttentionBackend を
 Pipe の model にかけるだけの薄い橋渡し（kv_cache_* / attention）。
@@ -14,8 +14,9 @@ from typing import Any
 import torch
 from comfy_api.latest import io
 
-from .io_types import PipeLine, filter_new_loras, record_applied_loras, require_pipe
-from .prompt import _apply_loras, _get_impact_wildcards
+from .io_types import PipeLine, _APPLIED_LORAS_KEY, filter_new_loras, record_applied_loras, require_pipe
+from .prompt import _apply_loras
+from .lora_tags import split_lora_tags
 
 # Qwen-Image 2.1 が公式に受け付ける参照画像の上限
 MAX_REFERENCE_IMAGES = 10
@@ -91,15 +92,6 @@ def _apply_model_options(
     return model
 
 
-def _expand_text(wildcards: Any, text: str, seed: int) -> tuple[str, str, list]:
-    """Wildcard を展開し (populated, LoRA タグ除去後のテキスト, LoRA リスト) を返す。"""
-    if wildcards is None:
-        return text, text, []
-    populated = wildcards.process(text, seed)
-    loras = wildcards.extract_lora_values(populated)
-    return populated, wildcards.remove_lora_tags(populated), loras
-
-
 def _ordered_images(images: dict | None) -> list[tuple[str, torch.Tensor]]:
     """Autogrow の {image_N: IMAGE} を N の昇順に並べ、未接続を除いて返す。"""
     if not images:
@@ -115,7 +107,7 @@ class SAX_Bridge_Prompt_Qwen_Image(io.ComfyNode):
     - 参照画像あり: i2i / 複数画像編集（最大 10 枚。出力サイズは output_size で
       Loader の width / height か image_1 のサイズを選ぶ）
     - positive / negative を同時にエンコードして Pipe に載せる
-    - Wildcard 構文と LoRA 構文（positive 側のみ）をサポート
+    - 送信前に展開された文章と LoRA 構文（positive 側のみ）をサポート
     - KV キャッシュ（参照画像・プロンプト部分の再利用）とアテンションバックエンドを
       Pipe の model に設定できる（どちらも ComfyUI 本体の機能。既定では何もしない）
     """
@@ -141,7 +133,7 @@ class SAX_Bridge_Prompt_Qwen_Image(io.ComfyNode):
                     "wildcard_text",
                     multiline=True,
                     tooltip="Prompt or edit instruction. Refer to reference images as <image1>, <image2>, ... "
-                            "Wildcard and LoRA syntax are supported.",
+                            "Autocomplete++ expands wildcards before submission. LoRA tags are applied here.",
                 ),
                 io.String.Input(
                     "negative_text",
@@ -229,16 +221,15 @@ class SAX_Bridge_Prompt_Qwen_Image(io.ComfyNode):
         if ref_images and vae is None:
             raise ValueError("[SAX_Bridge] Pipe does not contain a VAE (required for reference images).")
 
-        seed = pipe.get("seed", 0)
-        wildcards = _get_impact_wildcards()
-        populated, positive_text, loras = _expand_text(wildcards, wildcard_text, seed)
-        # negative の LoRA タグは除去だけ行い適用しない（SAX Prompt Concat の negative と揃える方針）
-        _neg_populated, negative_text, _neg_loras = _expand_text(wildcards, negative_text, seed)
+        populated = wildcard_text
+        positive_text, loras = split_lora_tags(wildcard_text)
+        # Qwen の negative 側の LoRA タグは除去のみ行い、適用しない。
+        negative_text, _neg_loras = split_lora_tags(negative_text)
 
         applied_names: list[str] = []
         new_loras = filter_new_loras(pipe, loras)
         if new_loras:
-            model, clip, applied_names = _apply_loras(model, clip, new_loras)
+            model, clip, applied_names = _apply_loras(model, clip, new_loras, pipe.get(_APPLIED_LORAS_KEY, ()))
         model = _apply_model_options(model, kv_cache_device, kv_cache_dtype, attention)
 
         encoder = _get_upstream_encoder()

@@ -1,0 +1,154 @@
+{
+  "id": "5ad552eb-ab48-418d-a2cb-d4c95ef81d18",
+  "revision": 0,
+  "last_node_id": 3,
+  "last_link_id": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Text_Catalog_V2",
+      "pos": [
+        100,
+        120
+      ],
+      "size": [
+        370,
+        277
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "config_json",
+          "name": "config_json",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "config_json"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "text",
+          "name": "text",
+          "type": "STRING",
+          "links": [
+            1
+          ]
+        },
+        {
+          "localized_name": "selection_json",
+          "name": "selection_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SAX_Bridge_Text_Catalog_V2"
+      },
+      "widgets_values": [
+        "{\"version\":2,\"catalog\":{\"items\":[{\"id\":\"quality\",\"name\":\"品質\",\"text\":\"high quality\",\"tags\":[\"品質\"]},{\"id\":\"portrait-a\",\"name\":\"人物A\",\"text\":\"a traveler\",\"tags\":[\"人物\"]},{\"id\":\"portrait-b\",\"name\":\"人物B\",\"text\":\"a painter\",\"tags\":[\"人物\"]},{\"id\":\"beach\",\"name\":\"海辺背景\",\"text\":\"on a sunny beach\",\"tags\":[\"背景\"]},{\"id\":\"city\",\"name\":\"街中背景\",\"text\":\"in a quiet city street\",\"tags\":[\"背景\"]}]},\"recipes\":[{\"id\":\"nested-example\",\"name\":\"ネストの例\",\"groups\":[{\"id\":\"quality-group\",\"name\":\"品質\",\"mode\":\"all\",\"count\":1,\"on\":true,\"item_ids\":[\"quality\"]},{\"id\":\"scene\",\"name\":\"シーンをランダム1件\",\"kind\":\"nested\",\"mode\":\"random\",\"count\":1,\"on\":true,\"groups\":[{\"id\":\"beach-scene\",\"name\":\"海辺\",\"kind\":\"nested\",\"mode\":\"all\",\"count\":1,\"on\":true,\"groups\":[{\"id\":\"beach-person\",\"name\":\"人物をランダム1件\",\"mode\":\"random\",\"count\":1,\"on\":true,\"item_ids\":[\"portrait-a\",\"portrait-b\"]},{\"id\":\"beach-background\",\"name\":\"海辺背景\",\"mode\":\"all\",\"count\":1,\"on\":true,\"item_ids\":[\"beach\"]}]},{\"id\":\"city-scene\",\"name\":\"街中\",\"kind\":\"nested\",\"mode\":\"all\",\"count\":1,\"on\":true,\"groups\":[{\"id\":\"city-person\",\"name\":\"人物をすべて使用\",\"mode\":\"all\",\"count\":2,\"on\":true,\"item_ids\":[\"portrait-a\",\"portrait-b\"]},{\"id\":\"city-background\",\"name\":\"街中背景\",\"mode\":\"all\",\"count\":1,\"on\":true,\"item_ids\":[\"city\"]}]}]}]}],\"active_recipe_id\":\"nested-example\"}",
+        123,
+        "fixed"
+      ],
+      "widgets_values_named": {
+        "config_json": "{\"version\":2,\"catalog\":{\"items\":[{\"id\":\"quality\",\"name\":\"品質\",\"text\":\"high quality\",\"tags\":[\"品質\"]},{\"id\":\"portrait-a\",\"name\":\"人物A\",\"text\":\"a traveler\",\"tags\":[\"人物\"]},{\"id\":\"portrait-b\",\"name\":\"人物B\",\"text\":\"a painter\",\"tags\":[\"人物\"]},{\"id\":\"beach\",\"name\":\"海辺背景\",\"text\":\"on a sunny beach\",\"tags\":[\"背景\"]},{\"id\":\"city\",\"name\":\"街中背景\",\"text\":\"in a quiet city street\",\"tags\":[\"背景\"]}]},\"recipes\":[{\"id\":\"nested-example\",\"name\":\"ネストの例\",\"groups\":[{\"id\":\"quality-group\",\"name\":\"品質\",\"mode\":\"all\",\"count\":1,\"on\":true,\"item_ids\":[\"quality\"]},{\"id\":\"scene\",\"name\":\"シーンをランダム1件\",\"kind\":\"nested\",\"mode\":\"random\",\"count\":1,\"on\":true,\"groups\":[{\"id\":\"beach-scene\",\"name\":\"海辺\",\"kind\":\"nested\",\"mode\":\"all\",\"count\":1,\"on\":true,\"groups\":[{\"id\":\"beach-person\",\"name\":\"人物をランダム1件\",\"mode\":\"random\",\"count\":1,\"on\":true,\"item_ids\":[\"portrait-a\",\"portrait-b\"]},{\"id\":\"beach-background\",\"name\":\"海辺背景\",\"mode\":\"all\",\"count\":1,\"on\":true,\"item_ids\":[\"beach\"]}]},{\"id\":\"city-scene\",\"name\":\"街中\",\"kind\":\"nested\",\"mode\":\"all\",\"count\":1,\"on\":true,\"groups\":[{\"id\":\"city-person\",\"name\":\"人物をすべて使用\",\"mode\":\"all\",\"count\":2,\"on\":true,\"item_ids\":[\"portrait-a\",\"portrait-b\"]},{\"id\":\"city-background\",\"name\":\"街中背景\",\"mode\":\"all\",\"count\":1,\"on\":true,\"item_ids\":[\"city\"]}]}]}]}],\"active_recipe_id\":\"nested-example\"}",
+        "seed": 123,
+        "control_after_generate": "fixed"
+      }
+    },
+    {
+      "id": 2,
+      "type": "SAX_Bridge_Debug_Text",
+      "pos": [
+        650,
+        120
+      ],
+      "size": [
+        147.9556640625,
+        26
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "value",
+          "name": "value",
+          "type": "*",
+          "link": 1
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SAX_Bridge_Debug_Text"
+      },
+      "widgets_values": [
+        null
+      ],
+      "widgets_values_named": {
+        "__sax_debug_text": null
+      }
+    },
+    {
+      "id": 3,
+      "type": "Note",
+      "pos": [
+        100,
+        600
+      ],
+      "size": [
+        900,
+        200
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "ネスト構成要素のサンプル。\n品質を出力し、シーンから海辺または街中をランダム1件選び、選ばれた子の人物・背景を解決します。\nそのままQueueできます。「共有カタログへ移行」後、セット編集から階層を編集できます。\n＋ ネストで作成、配置先やドラッグで階層移動、各階層ですべて使用／ランダム件数を指定します。"
+      ],
+      "widgets_values_named": {
+        "text": "ネスト構成要素のサンプル。\n品質を出力し、シーンから海辺または街中をランダム1件選び、選ばれた子の人物・背景を解決します。\nそのままQueueできます。「共有カタログへ移行」後、セット編集から階層を編集できます。\n＋ ネストで作成、配置先やドラッグで階層移動、各階層ですべて使用／ランダム件数を指定します。"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.9,
+      "offset": [
+        416,
+        110
+      ]
+    }
+  },
+  "version": 0.4
+}

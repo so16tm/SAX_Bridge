@@ -1,0 +1,88 @@
+{
+  "version": 3,
+  "id": "5c80b9eb5679444cbb8cc428f0cc4da2",
+  "name": "共有テキストセット サンプル",
+  "revision": 1,
+  "catalog": {
+    "items": [
+      {
+        "id": "quality",
+        "name": "fixed_quality",
+        "text": "high quality, detailed",
+        "tags": [
+          "quality"
+        ]
+      },
+      {
+        "id": "candidate-a",
+        "name": "soft_light",
+        "text": "soft natural light",
+        "tags": [
+          "lighting"
+        ]
+      },
+      {
+        "id": "candidate-b",
+        "name": "film_grain",
+        "text": "subtle film grain",
+        "tags": [
+          "style"
+        ]
+      },
+      {
+        "id": "candidate-c",
+        "name": "studio",
+        "text": "clean studio background",
+        "tags": [
+          "background"
+        ]
+      }
+    ]
+  },
+  "recipes": [
+    {
+      "id": "default",
+      "name": "品質とランダム表現",
+      "groups": [
+        {
+          "id": "quality-group",
+          "name": "Fixed quality",
+          "mode": "all",
+          "item_ids": [
+            "quality"
+          ],
+          "count": 1,
+          "on": true
+        },
+        {
+          "id": "variation-group",
+          "name": "Random variation",
+          "mode": "random",
+          "item_ids": [
+            "candidate-a",
+            "candidate-b",
+            "candidate-c"
+          ],
+          "count": 2,
+          "on": true
+        }
+      ]
+    },
+    {
+      "id": "lighting",
+      "name": "照明セット",
+      "groups": [
+        {
+          "id": "lighting-fixed",
+          "name": "照明",
+          "mode": "all",
+          "item_ids": [
+            "candidate-a"
+          ],
+          "count": 1,
+          "on": true
+        }
+      ]
+    }
+  ]
+}

@@ -26,7 +26,7 @@
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
 | [Debug](#debug) | Debugging & testing | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
-| [Utility](#utility) | Pipe-internal helpers | [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
+| [Utility](#utility) | Pipe-internal helpers and tag dictionary updates | [SAX Tag Dictionary](#sax-tag-dictionary) / [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Text Catalog V2](#sax-text-catalog-v2) / [SAX Text Catalog Converter](#sax-text-catalog-converter) / [SAX Wildcard Editor](#sax-wildcard-editor) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
@@ -297,7 +297,7 @@ Connect the Loader's `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` to 
 
 ### SAX Prompt
 
-`SAX_Bridge_Prompt` — Handles wildcard expansion, LoRA tag extraction, and `BREAK`-syntax split encoding in one node.
+`SAX_Bridge_Prompt` — Applies LoRA tags and performs `BREAK`-syntax split encoding. Autocomplete++ handles dynamic prompt / wildcard expansion before queue submission.
 
 **Inputs**
 
@@ -311,11 +311,11 @@ Connect the Loader's `MODEL` / `MODEL_REF2VA` / `CLIP` / `VAE` / `AUDIO_VAE` to 
 **Outputs**: `PIPE`, `POPULATED_TEXT` (expanded text)
 
 **Behavior**:
-1. Randomly expands wildcard tokens based on the seed inherited from the Pipe
-2. Extracts LoRA tags and applies them to Model and CLIP
+1. Receives text expanded by Autocomplete++ in the browser (or plain text when it is absent)
+2. Extracts LoRA tags and applies them to Model and CLIP without Impact Pack
 3. Splits text into chunks at `BREAK`, encodes each chunk with CLIP, and concatenates with `ConditioningConcat`
 
-> Wildcard functionality is only available when `comfyui-impact-pack` is installed.
+> Enable Autocomplete++'s `Enable Prompt Expansion Engine` for dynamic prompts and wildcards. SAX does not expand them again on the server. Without Autocomplete++, ordinary text and LoRA / `BREAK` processing remain available; dynamic syntax is passed through. Direct API clients must send expanded text.
 
 [↑ Back to top](#top)
 
@@ -1035,6 +1035,26 @@ applied_loras: {'lora_a'} (1 entries)
 
 ## Utility
 
+### SAX Tag Dictionary
+
+`SAX_Bridge_Tag_Dictionary` — A standalone utility that downloads the latest published compatible Danbooru tag CSV on request. Category: `SAX/Bridge/Utility`. No inputs or outputs; no connection to the generation workflow is needed.
+
+**Outputs**: None
+
+1. Add the node and press **最新CSVを取得** (Get latest CSV). The button sends a POST request; neither startup nor queue submission downloads files.
+2. When Autocomplete++ is installed, reload the browser after the update.
+3. Select `sax_danbooru.csv` in Autocomplete++'s `Main Tag File`. If a controller overrides this setting, change that selection as well.
+
+The fixed source is [DraconicDragon/dbr-e621-lists-archive](https://github.com/DraconicDragon/dbr-e621-lists-archive), distributed under the Unlicense. SAX selects the newest date from published `danbooru_YYYY-MM-DD_pt20-ia-dd.csv` files. These lists contain tags used in at least 20 posts and include active/deleted aliases. The archive is normally updated in January, April, July, and October; “latest” means its latest published CSV, not a live export of every Danbooru tag on the download date.
+
+The CSV is saved to `sax_tag_dictionary/sax_danbooru.csv` under ComfyUI's system user directory. With Autocomplete++ installed, a dedicated copy is placed at its `tags/sax_danbooru.csv`. Downloading is also available without Autocomplete++; its original `danbooru.csv` and translation dictionaries are never changed. This utility does not change autocomplete or prompt expansion behavior.
+
+Downloads are checked against the published hash and validated as compatible CSV before atomic replacement. A failed download or validation leaves existing files intact. If the dedicated file has been manually modified, SAX refuses to overwrite it; preserve those edits before attempting another update.
+
+[↑ Back to Top](#top)
+
+---
+
 ### SAX Primitive Store
 
 `SAX_Bridge_Primitive_Store` — Defines and manages shared primitive variables used throughout the workflow in one place. Adding items dynamically creates output slots that distribute values to downstream nodes.
@@ -1051,6 +1071,8 @@ applied_loras: {'lora_a'} (1 entries)
 | `FLT` | Float | Drag to increase/decrease / Click to edit Value, Min, Max, Step |
 | `STR` | String | Click to open text input dialog |
 | `BOL` | Boolean | Click to toggle instantly (ON / OFF) |
+
+`SEED` in `random` mode draws a value from `0` to `Max` on each queued execution, including jobs submitted together. To reproduce a result, use `fixed` mode with the seed used for that result.
 
 > Renaming is not supported. To rename, delete and re-add the item.
 
@@ -1118,16 +1140,16 @@ applied_loras: {'lora_a'} (1 entries)
 - Tag filter is fixed to a single line; if it overflows, a `[Show all]` button opens a separate dialog
 
 **Text Editor Autocomplete (Optional)**
-- If [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) is installed, the Item Text editor textarea gets danbooru tag autocomplete
-- Inherits pyssss defaults: category color coding, alias support, ↑↓ Enter/Tab confirmation
-- Auto-appends comma separator (`globalSeparator = ", "`)
-- Falls back silently to manual input if pyssss is not installed
+- Optional [Autocomplete++](https://github.com/michikora/ComfyUI-Autocomplete-Plus-Plus) provides danbooru tag autocomplete in the V1 and V2 text editors. Candidate selection and formatting follow its settings.
+- Without it, text can still be entered, saved, selected, and output manually.
+- Catalog text is expanded in a queue-only snapshot; stored templates are unchanged and catalog JSON is protected from expansion. Shared V2 also takes its text snapshot at submission.
+- Catalog random item selection still uses its backend seed. Autocomplete++ expansion has its own random state; `Follow Seed` cannot resolve a runtime Primitive Store random seed or `Pipe.seed`, so use `Random` unless the browser can see the intended numeric seed. Matching the image seed is not guaranteed.
 
 **LoRA / Wildcard Pickers**
 - Below the Item Text editor area, `[+ LoRA]` and `[+ Wildcard]` buttons are placed
 - `[+ LoRA]`: opens a picker modal listing ComfyUI's LoRA inventory; inserts `<lora:NAME>` at the cursor position (extension stripped, subdirectory kept to avoid same-name collisions, e.g. `<lora:style/foo>`)
-- `[+ Wildcard]`: opens a picker modal listing Impact-Pack wildcards; inserts the wildcard name at the cursor position (auto-prepends `, ` when the preceding text doesn't end with one)
-- Buttons are disabled when no LoRA is found / Impact-Pack is not installed (tooltip explains the reason)
+- `[+ Wildcard]`: opens a picker modal listing Autocomplete++ wildcards; inserts the wildcard name at the cursor position (auto-prepends `, ` when the preceding text doesn't end with one)
+- Buttons are disabled when no LoRA is found / no Autocomplete++ wildcards are available (tooltip explains the reason)
 
 **Sort Order**
 - Tags: favorites (context-aware) → item count desc → alphabetical
@@ -1160,6 +1182,145 @@ With `merge_outputs` ON (`merged`), surviving texts are stripped, empty strings 
 
 > **Data Scope**: Per-node (saved in `items_json`, included in the workflow). No global sharing.
 > **Sharing one Item across multiple Relations**: A single Item can be referenced by multiple Relations to fan out the same text.
+
+[↑ Back to top](#top)
+
+---
+
+### SAX Text Catalog V2
+
+`SAX_Bridge_Text_Catalog_V2` — An independent node that combines named items from an external shared catalog using fixed and random text-set components. V1 (`SAX_Bridge_Text_Catalog`) remains unchanged and can coexist with V2.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `config_json` | String (hidden, optional) | Version 3 catalog ID and ordered text-set rows, managed by the UI. Existing embedded version 2 data remains executable |
+| `seed` | Int (0 to 9007199254740991) | Selection seed. ComfyUI control after generate can update it for each run |
+
+**Outputs**: `text` STRING (trimmed non-empty texts joined by newlines) / `selection_json` STRING (execution selection record). Adding sets does not add output sockets.
+
+#### Storage and Sharing
+
+- An **item** contains a name, text, and tags. A **component** specifies all/random-N selection over candidate item IDs (item component) or child components (nested component). A **text set** contains ordered components. Components reference items; they do not copy their text.
+- Items and set definitions are stored in the ComfyUI server's system user directory for `sax_text_catalog`. Nodes and workflows using the same server share these catalogs. Workflows store only catalog ID, ordered set references, enabled states, and Seed.
+- Item text and set-definition edits affect other workflows sharing the catalog. Selected rows, row order, and enabled states belong to each workflow. Cloning a node does not create an independent copy of shared text.
+- Changes are saved automatically as batched deltas. Save status is visible; Queue submission waits for saving and is blocked on save failure.
+- Concurrent edits cause a conflict instead of silent overwrite. Unsaved edits are preserved; explicitly reload to discard them or reapply them onto the latest revision. Reapplying may overwrite another edit to the same item.
+- Export/import moves catalogs between environments. Import creates a fresh catalog ID, so select the imported catalog in the workflow. Missing or corrupt references cause execution errors.
+
+#### JSON Contract and Execution
+
+Reference stored in the workflow:
+
+```json
+{
+  "version": 3,
+  "catalog_id": "sample-catalog-id",
+  "rows": [{ "id": "row-1", "recipe_id": "set-1", "on": true }]
+}
+```
+
+External catalog (import creates a fresh ID and revision):
+
+```json
+{
+  "version": 3,
+  "id": "sample-catalog-id",
+  "name": "Shared prompts",
+  "revision": 1,
+  "catalog": { "items": [{ "id": "item-1", "name": "Quality", "text": "high quality", "tags": ["quality"] }] },
+  "recipes": [{ "id": "set-1", "name": "Base quality", "groups": [{ "id": "fixed", "name": "Quality", "mode": "all", "item_ids": ["item-1"], "count": 1, "on": true }] }]
+}
+```
+
+Nested component example (select one immediate child, then use all its items):
+
+```json
+{
+  "id": "scene", "name": "Scene", "kind": "nested", "mode": "random", "count": 1, "on": true,
+  "groups": [
+    { "id": "beach", "name": "Beach", "mode": "all", "count": 1, "on": true, "item_ids": ["item-1"] }
+  ]
+}
+```
+
+- Browser queue submission takes a snapshot of the saved catalog and expands its candidate text through Autocomplete++ before sending. Later edits do not change an already submitted job; stored templates remain unchanged. Direct API submissions without a queued snapshot read the latest saved catalog at execution and must provide expanded text when needed. Unchanged catalogs reuse the validated server cache; external changes also invalidate ComfyUI's execution cache.
+- Enabled rows and components are emitted in order. `all` selects all candidates in candidate order; `random` chooses `count` distinct candidates and emits them in candidate order. Zero is valid; insufficient candidates cause an error. The same item may appear in multiple components.
+- Nested components use `kind: "nested"` and `groups`, without `item_ids`. Item components use `item_ids` and omit `kind` or set it to `"items"`. All/random selection in a nested component chooses whole immediate child components, then recursively resolves each selected child using its own settings. Disabled children are excluded from random draws. The count upper bound must not exceed the number of enabled, positive-weight children. A disabled or unselected parent emits none of its descendants. Output follows saved order at every level.
+- Draws depend independently on Seed, set ID, and component ID. Reordering, moving between parents, or toggling another component does not change that component's draw. Editing a shared catalog can change output even with the same Seed.
+- The selection record contains catalog ID/revision, Seed, rows, components, selection order, and executed item names/text. The full catalog is not returned with every execution.
+- Limits: 10,000 items, 1,024 shared sets, 32 sibling components, 256 total components per set, 8 levels of depth, 10,000 candidates per item component, random count 0–10,000, 8 tags, 128-character IDs, 256-character names/tags, 65,536-character text, and 32 MiB each for catalog, combined text, and selection record. Legacy embedded catalogs retain the 32-set limit.
+
+#### UI and Editing
+
+- The node is ordered as execution settings, catalog management, then set composition. Seed and previous results stay above the growing set list. Catalog selection, items, and the management menu (⋯) share one row.
+- Select a catalog on the node, then choose sets directly in each row's dropdown. Toggle the checkbox, drag the handle or use arrow keys to reorder, and remove a row with ×. Set-edit and item-edit icons appear to the right of each dropdown, keeping each set on one line. Tooltips explain both icons. All rows are displayed without paging. An added draft row is excluded from the workflow until a set is selected. Seed and post-run seed behavior remain on the node.
+- Each row's set-edit action opens that set directly. Edit candidates, counts, enabled components, and component order, or switch/create sets in the same editor. Item text fields are separate.
+- Components use compact two-line controls with candidate counts and short previews. Candidate rows show text previews and support row clicks, Shift ranges, selecting or clearing all filtered matches, and a selected-only view. Selection survives search/tag changes, and selected items can be added as one combined component or as a separate component per item. Separate components use each item name and all mode; combined components support all or random-N selection. Additions exceeding component limits are rejected together while retaining the selection. Changing candidates opens their selected-only list directly.
+- Item components use the edit icon in their first row to open candidate and selection settings. Components with one candidate use a single row; random counts remain visible. Multiple candidates restore the normal two-line layout.
+- Add a nested component to group children. Nested rows show immediate-child counts and all/random-N settings; collapse their descendants with the disclosure control. Selection settings stay in the second row. The edit icon opens a destination-parent selector and an action to add items inside that component. Drop at the top of a row to insert before it, at the bottom to insert after it, or in the center of a nested row to move inside it. Up/down buttons reorder siblings. Moving a component into itself or its descendants is disallowed. Adding an item component also offers a destination parent.
+- The component affix action edits Prefix and Suffix. Item components apply `Prefix + text + Suffix` to each selected item. Nested components wrap each selected immediate child's entire output once. For example, children emitting `A\nB` and `C` with parent affixes `[` and `]` produce `[A\nB]\n[C]`; the parent does not wrap every descendant item separately. Shared source text is unchanged, and spaces and punctuation are appended literally. Empty text and empty blocks remain omitted; each affix allows up to 4096 characters. Result rows also show their portion of the affixed output.
+- The nested component's add-here action chooses the destination for the next addition. After successfully adding items or a nested component, the destination returns to the set root and can be chosen freely for the next addition. Validation errors retain the destination and selection.
+- Random selection supports per-candidate weights. Use the item component's weight button to edit item weights; children of random nested components expose a weight field in their row. The default is 1, zero excludes a random candidate, and decimals are supported. Weights belong to each component reference, independently of item text and other sets. For a single draw, weight 3 has three times the probability of weight 1; inclusion probabilities for multiple draws or count ranges also depend on the other candidates. The count upper bound must not exceed the positive-weight candidate count. All-items mode ignores weights.
+- Random count fields accept fixed values (`2`) and inclusive ranges (`0～2`, `0-2`, or `0〜2`). The count is sampled uniformly, then that many candidates are selected without replacement. Item and nested components both support ranges; the lower bound must be nonnegative and the upper bound cannot exceed the candidate count. Fixed counts and equal-bound ranges preserve existing seeded draws.
+- Each item component's output-order list supports dragging, up/down buttons or arrow keys, and direct position numbers. Order is automatically saved to the shared set. All-items output follows this order; random selections are emitted in this order too. Updating candidates preserves the order of retained items and appends new candidates. Candidate-search sorting is independent.
+- The item action opens a name/text/tag list. Click a field to edit inline; expand long text when needed. No save or return-to-list action is required between edits.
+- Duplicate beside Expand copies the name, text, and tags to an item with a new ID and preserves search, tag, and set filters. Its name opens for editing only when the copy matches the current filter. It does not automatically add the copy to set candidates. Undo/Redo is supported.
+- The title, navigation, and save status share one compact header row. Bulk actions appear only while items are selected; the column-header checkbox selects all matching items.
+- Inline and expanded text editors offer a wildcard file picker using the existing Autocomplete++ inventory. Search filenames or folder names and insert a literal `__folder/name__` at the caret or replace a selection. Catalog does not expand the token. If the inventory cannot be loaded, the text stays unchanged and the editor reports the missing setup or files.
+- Search, tag, and set filters combine. Each row's item-edit action opens the same list filtered to all candidate items in that set, deduplicated. Tags organize/search items; they do not automatically add candidates.
+- Item, set-candidate, and result lists use the same multi-select tag picker with AND matching: an item must contain every selected tag. Search tag names, clear all selections, or dismiss the picker by clicking outside. Text search matches item names, text, and tags in every view. Selections persist when closing and reopening the list.
+- Item, set-candidate, and result lists share Select all matches, Clear matching selections, and Clear all actions. Matching items include offscreen rows; clearing matches preserves selections outside the filter. Repeated result items share one selection, while deleted items cannot be selected. Result lists also support bulk tagging of shared originals.
+- Variable-height virtualization renders nearby rows. Search, scroll, and text display density persist. Undo/Redo, IME input, tag completion, Shift range selection, select all, and bulk tagging/deletion are supported.
+- Text-set and catalog choices use name order across views, with IDs breaking equal-name ties. Stored set rows, component order, and execution output remain unchanged.
+- Item lists, set candidate lists, and items within each result section share the same sort setting. The default is name order; registration, tag, and usage order choices carry across these views. Tag order compares alphabetically sorted tag lists, breaks ties by item name, and places untagged items last. Display sorting does not change set definitions or execution output order.
+- Previous execution results use the same name/text list, divided into sections following the set/component hierarchy. Unselected child components and item candidates can be revealed. Inline text edits update the shared original and are marked as applying to the next run.
+- Executed text and previous output remain immutable. Repeated occurrences stay visible and synchronize shared edits. Deleted items retain their executed text for viewing but cannot be edited.
+
+**Legacy V2 migration**: Embedded version 2 workflows remain executable. The explicit migration action creates an external catalog and switches to its reference only after successful saving. No automatic migration or V1 replacement takes place.
+
+Samples: `tests/workflows/22_text_catalog_v2.json` checks legacy migration. `23_text_catalog_v2_shared.json` and `catalogs/23_text_catalog_v2_catalog.json` demonstrate external sharing. `25_text_catalog_v2_nested.json` combines parent random selection with child selection settings and runs without an external catalog. Explicitly migrate it to a shared catalog before editing its hierarchy. Performance targets on a local SSD are an initial read below 100ms for a typical 1,000-item catalog and a few milliseconds when unchanged; these are goals rather than guarantees and depend on total text size and environment.
+
+[↑ Back to top](#top)
+
+---
+
+### SAX Text Catalog Converter
+
+`SAX_Bridge_Text_Catalog_Converter` — Converts V1 items into a new or existing shared V2 catalog (`SAX/Bridge/Utility`).
+
+1. Add the converter to the same graph as a V1 node.
+2. Use the V1-source button to select that node and capture its current data.
+3. Select the destination: enter `catalog_name` for a new catalog, or choose an existing saved catalog from the list.
+4. Click the registration/add-V2 button. A V2 node referencing that catalog is added with only the newly imported set enabled. Connect its output where needed.
+
+Appending preserves the destination's items, sets, and catalog name. Imported item/set IDs are regenerated and references remapped, so matching names or IDs never overwrite existing records. Duplicate set names receive a numeric suffix. The append is an atomic revision-checked update; conflicts or limits leave the destination unchanged. Existing catalogs come from the same ComfyUI server's saved catalog list, without arbitrary file paths.
+
+All item names, text, and tags are retained, including unused items. Each V1 relation becomes a separate component, preserving order, duplicates, and enabled states in the V1-selection set. The original V1 node and links stay intact. Unused tag definitions and favorite-tag preferences are excluded. V2 trims each text, omits blank text, and joins the result with newlines.
+
+Registration happens only through the button. Queue execution creates no catalogs; the `catalog_json` STRING output contains importable V2 JSON. Duplicate registration of the loaded data is prevented. Reload the V1 source to register another copy. Invalid references, formats, and limits fail before registration.
+
+Sample: `tests/workflows/24_text_catalog_converter.json`.
+
+**Inputs**
+
+| Parameter | Type | Description |
+|-----------|-----|-------------|
+| `v1_json` | String (optional) | JSON loaded from a V1 node |
+| `catalog_name` | String | Name for a new catalog |
+
+**Outputs**: `catalog_json` STRING
+
+[↑ Top](#top)
+
+---
+
+### SAX Wildcard Editor
+
+`SAX_Bridge_Wildcard_Editor` — Opens the editor for creating and editing Autocomplete++ wildcard `.txt` files. The node does not need to be executed (`SAX/Bridge/Utility`).
+
+**Outputs**: None
 
 [↑ Back to top](#top)
 

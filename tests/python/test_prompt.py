@@ -3,7 +3,7 @@
 import pytest
 import torch
 from unittest.mock import MagicMock, patch
-from nodes.prompt import SAX_Bridge_Prompt, _encode_with_break, _resolve_lora_name
+from nodes.prompt import SAX_Bridge_Prompt, SAX_Bridge_Prompt_Concat, _encode_with_break, _resolve_lora_name
 from nodes.io_types import filter_new_loras, record_applied_loras
 from nodes.prompt import _apply_loras
 
@@ -120,17 +120,15 @@ class TestPromptExecute:
             "loader_settings": {"positive": ""},
         }
 
-    @patch("nodes.prompt._get_impact_wildcards", return_value=None)
     @patch("nodes.prompt._encode_with_break")
-    def test_no_wildcards_passthrough(self, mock_encode, mock_wc):
+    def test_no_wildcards_passthrough(self, mock_encode):
         mock_encode.return_value = MagicMock()
         pipe = self._make_pipe()
         result = SAX_Bridge_Prompt.execute(pipe, "hello world")
         assert result[1] == "hello world"
 
-    @patch("nodes.prompt._get_impact_wildcards", return_value=None)
     @patch("nodes.prompt._encode_with_break")
-    def test_updates_positive_conditioning(self, mock_encode, mock_wc):
+    def test_updates_positive_conditioning(self, mock_encode):
         conditioning = MagicMock()
         mock_encode.return_value = conditioning
         pipe = self._make_pipe()
@@ -138,9 +136,8 @@ class TestPromptExecute:
         new_pipe = result[0]
         assert new_pipe["positive"] is conditioning
 
-    @patch("nodes.prompt._get_impact_wildcards", return_value=None)
     @patch("nodes.prompt._encode_with_break")
-    def test_updates_loader_settings(self, mock_encode, mock_wc):
+    def test_updates_loader_settings(self, mock_encode):
         mock_encode.return_value = MagicMock()
         pipe = self._make_pipe()
         result = SAX_Bridge_Prompt.execute(pipe, "my prompt")
@@ -157,6 +154,33 @@ class TestPromptExecute:
         pipe["clip"] = None
         with pytest.raises(ValueError, match="CLIP"):
             SAX_Bridge_Prompt.execute(pipe, "test")
+
+    @patch("nodes.prompt._encode_with_break")
+    @patch("nodes.prompt._apply_loras")
+    def test_lora_applied_without_backend_dynamic_expansion(self, mock_apply, mock_encode):
+        pipe = self._make_pipe()
+        mock_apply.return_value = ("patched model", "patched clip", ["style/name.safetensors"])
+        text = "{red|blue} __colors__ <lora:style/name:.8:.4>"
+        result = SAX_Bridge_Prompt.execute(pipe, text)
+        assert result[1] == text
+        mock_encode.assert_called_once_with("patched clip", "{red|blue} __colors__ ")
+        assert mock_apply.call_args.args[2] == [("style/name", .8, .4, None, None, None, None)]
+        assert result[0]["_applied_loras"] == {"style/name"}
+        assert result[0]["loader_settings"]["positive"] == "{red|blue} __colors__ "
+        assert pipe["loader_settings"]["positive"] == ""
+
+
+@patch("nodes.prompt._encode_with_break", return_value="conditioning")
+@patch("nodes.prompt._apply_loras", return_value=("patched model", "patched clip", ["style/name.safetensors"]))
+def test_concat_applies_lora_and_keeps_dynamic_syntax_without_impact(mock_apply, mock_encode):
+    pipe = {"model": "model", "clip": "clip", "seed": 12}
+    result = SAX_Bridge_Prompt_Concat.execute(
+        pipe, True, {"text_1": "__colors__", "text_2": "{red|blue} <lora:style/name:.5>"}
+    )
+    mock_encode.assert_called_once_with("patched clip", "__colors__\n{red|blue} ")
+    assert result[2] == "__colors__\n{red|blue} <lora:style/name:.5>"
+    assert result[0]["positive"] == "conditioning"
+    assert mock_apply.call_args.args[2][0][1] == .5
 
 
 class TestEncodeWithBreak:

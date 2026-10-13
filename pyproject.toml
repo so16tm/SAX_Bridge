@@ -6,9 +6,6 @@ license = { file = "LICENSE" }
 requires = []
 dependencies = []
 
-[project.optional-dependencies]
-wildcards = ["comfyui-impact-pack"]
-
 [project.urls]
 Repository = "https://github.com/so16tm/SAX_Bridge"
 

@@ -133,9 +133,13 @@ SAM3 側の `mask_grow` と本ノードの `grow` は加算的に効くため、
 - **タグ連動ソート** で関連 Item をグループ化し、タグトグル並びと一致させる
 - 未割当 / 削除済み Item 参照は空文字を出力 — `SAX Prompt Concat` 等の空文字スキップと整合
 - **`merge_outputs` トグル** で全 Relation を改行結合した単一出力に切替 — `SAX Prompt Concat` へ 1 本で接続でき、多入力時の入力スロット並び順崩れを回避できる
-- [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) が導入されていれば Text 編集エリアで **danbooru タグオートコンプリート** が利用可能（未導入時は手動入力）
+- [Autocomplete++](https://github.com/michikora/ComfyUI-Autocomplete-Plus-Plus) が導入されていれば Text 編集エリアで **danbooru タグ補完** が利用可能（未導入時も手動入力可能）
 
 詳細は [ノードリファレンス: SAX Text Catalog](docs/nodes_ja.md#sax-text-catalog) を参照してください。
+
+**SAX Text Catalog Converter** でV1の全アイテムと選択行を、新規または既存のV2共有カタログへ取り込めます。元V1の接続を維持し、新しいV2ノードを追加します。[変換ノードの使い方](docs/nodes_ja.md#sax-text-catalog-converter)。
+
+**SAX Text Catalog V2** は外部カタログを複数のワークフローで共有する独立ノードです。1万件までのアイテムを本文のインライン編集・検索・一括操作・仮想一覧で管理し、複数のテキストセットをノード上で選択・並び替えできます。固定文とSeed付きランダムN件を結合し、構成要素をネストして子の構成要素をまとめて選択できます。実行結果からも本文を修正できます。V1は維持し、旧V2は明示的に移行できます。詳しくは [V2 ノードリファレンス](docs/nodes_ja.md#sax-text-catalog-v2) を参照してください。
 
 [↑ トップへ](#sax_bridge)
 
@@ -206,9 +210,16 @@ git clone https://github.com/so16tm/SAX_Bridge
 | 依存 | 用途 | 必須 |
 |---|---|---|
 | ComfyUI | 実行環境 | ✅ |
-| `comfyui-impact-pack` | Wildcard 機能（SAX Prompt） | オプション |
-| `ComfyUI-Custom-Scripts` (pyssss) | SAX Text Catalog の danbooru タグ補完 | オプション |
+| [Autocomplete++](https://github.com/michikora/ComfyUI-Autocomplete-Plus-Plus) | タグ補完、キュー送信前の動的プロンプト・Wildcard 展開 | オプション |
 | `sam3` | SAX SAM3 系ノード | SAM3 使用時のみ |
+
+SAX は Impact Pack / ComfyUI-Custom-Scripts を必要としません。Autocomplete++ は別途導入し、動的プロンプト・Wildcard を使用する場合は `Enable Prompt Expansion Engine` を有効にしてください。既存の Wildcard ファイルは Impact Pack から Autocomplete++ の `wildcards` フォルダへ手動で移行し、構文の互換性を確認してください。
+
+Text Catalog V1 / V2 の本文はキュー送信時のスナップショットだけで展開し、保存したテンプレートは変更しません。SAX はサーバーで LoRA 適用と `BREAK` のエンコードを行い、本文を再展開しません。Autocomplete++ 未導入でも通常テキストは使用できますが、動的構文は未展開で渡されます。API 直接送信はブラウザの展開エンジンを通らないため、展開済みテキストを指定してください。
+
+Autocomplete++ は Primitive Store の実行時 random seed や Pipe 内の seed を取得できません。この構成では展開モード `Random` を推奨し、画像 seed との同期は保証しません。カタログのランダム項目選択は従来どおりバックエンドの seed を使用します。
+
+タグ辞書を手動で更新するには、`SAX/Bridge/Utility` の [SAX Tag Dictionary](docs/nodes_ja.md#sax-tag-dictionary) を追加し、**最新CSVを取得** を押してください。公開済みの互換 Danbooru CSV の最新版を取得します。起動・キュー送信ではダウンロードしません。Autocomplete++ 導入済みなら、更新後にブラウザを再読み込みし、`Main Tag File` で `sax_danbooru.csv` を選択してください（コントローラで上書きしている場合はそちらも変更）。元の CSV・翻訳辞書は変更しません。Autocomplete++ 未導入でも、この単体機能で CSV を取得できます。
 
 > SAX SAM3 系ノードを使用しない場合、sam3 のインストールは不要です。
 

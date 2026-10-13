@@ -1,0 +1,247 @@
+{
+  "id": "47ab9032-8b08-44cb-85b2-5849b9a92d5b",
+  "revision": 0,
+  "last_node_id": 4,
+  "last_link_id": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "SAX_Bridge_Text_Catalog",
+      "pos": [
+        150,
+        200
+      ],
+      "size": [
+        295.2265625,
+        276
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "items_json",
+          "name": "items_json",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "items_json"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "select_to_add_lora",
+          "name": "select_to_add_lora",
+          "shape": 7,
+          "type": "COMBO",
+          "widget": {
+            "name": "select_to_add_lora"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "select_to_add_wildcard",
+          "name": "select_to_add_wildcard",
+          "shape": 7,
+          "type": "COMBO",
+          "widget": {
+            "name": "select_to_add_wildcard"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "merge_outputs",
+          "name": "merge_outputs",
+          "shape": 7,
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "merge_outputs"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "B",
+          "type": "STRING",
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "A",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "B",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "(unset)",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SAX_Bridge_Text_Catalog"
+      },
+      "widgets_values": [
+        "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"a\",\"name\":\"A\",\"text\":\"alpha\",\"tags\":[\"tag\"]},{\"id\":\"b\",\"name\":\"B\",\"text\":\"beta\",\"tags\":[]},{\"id\":\"unused\",\"name\":\"未使用\",\"text\":\"unused\",\"tags\":[]}],\"tag_definitions\":[\"tag\"],\"favorite_tags\":[]},\"relations\":[{\"item_id\":\"b\",\"on\":true},{\"item_id\":\"a\",\"on\":false},{\"item_id\":\"b\",\"on\":true},{\"item_id\":null,\"on\":true}]}",
+        "Select the LoRA to add to the text",
+        "Select the Wildcard to add to the text",
+        false,
+        null
+      ],
+      "widgets_values_named": {
+        "items_json": "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"a\",\"name\":\"A\",\"text\":\"alpha\",\"tags\":[\"tag\"]},{\"id\":\"b\",\"name\":\"B\",\"text\":\"beta\",\"tags\":[]},{\"id\":\"unused\",\"name\":\"未使用\",\"text\":\"unused\",\"tags\":[]}],\"tag_definitions\":[\"tag\"],\"favorite_tags\":[]},\"relations\":[{\"item_id\":\"b\",\"on\":true},{\"item_id\":\"a\",\"on\":false},{\"item_id\":\"b\",\"on\":true},{\"item_id\":null,\"on\":true}]}",
+        "select_to_add_lora": "Select the LoRA to add to the text",
+        "select_to_add_wildcard": "Select the Wildcard to add to the text",
+        "merge_outputs": false,
+        "__sax_text_catalog_widget": null
+      }
+    },
+    {
+      "id": 2,
+      "type": "SAX_Bridge_Text_Catalog_Converter",
+      "pos": [
+        600,
+        200
+      ],
+      "size": [
+        284.9693359375,
+        158
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "catalog_name",
+          "name": "catalog_name",
+          "type": "STRING",
+          "widget": {
+            "name": "catalog_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "v1_json",
+          "name": "v1_json",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "v1_json"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "catalog_json",
+          "name": "catalog_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SAX_Bridge_Text_Catalog_Converter",
+        "saxConverterDestination": {
+          "mode": "new",
+          "id": "",
+          "name": ""
+        }
+      },
+      "widgets_values": [
+        "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"a\",\"name\":\"A\",\"text\":\"alpha\",\"tags\":[\"tag\"]},{\"id\":\"b\",\"name\":\"B\",\"text\":\"beta\",\"tags\":[]},{\"id\":\"unused\",\"name\":\"未使用\",\"text\":\"unused\",\"tags\":[]}],\"tag_definitions\":[\"tag\"],\"favorite_tags\":[]},\"relations\":[{\"item_id\":\"b\",\"on\":true},{\"item_id\":\"a\",\"on\":false},{\"item_id\":\"b\",\"on\":true},{\"item_id\":null,\"on\":true}]}",
+        "V1から変換"
+      ],
+      "widgets_values_named": {
+        "v1_json": "{\"version\":1,\"catalog\":{\"items\":[{\"id\":\"a\",\"name\":\"A\",\"text\":\"alpha\",\"tags\":[\"tag\"]},{\"id\":\"b\",\"name\":\"B\",\"text\":\"beta\",\"tags\":[]},{\"id\":\"unused\",\"name\":\"未使用\",\"text\":\"unused\",\"tags\":[]}],\"tag_definitions\":[\"tag\"],\"favorite_tags\":[]},\"relations\":[{\"item_id\":\"b\",\"on\":true},{\"item_id\":\"a\",\"on\":false},{\"item_id\":\"b\",\"on\":true},{\"item_id\":null,\"on\":true}]}",
+        "catalog_name": "V1から変換"
+      }
+    },
+    {
+      "id": 3,
+      "type": "SAX_Bridge_Debug_Text",
+      "pos": [
+        10,
+        10
+      ],
+      "size": [
+        147.9556640625,
+        60
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "value",
+          "name": "value",
+          "type": "*",
+          "link": 1
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SAX_Bridge_Debug_Text"
+      },
+      "widgets_values": [
+        null
+      ],
+      "widgets_values_named": {
+        "__sax_debug_text": null
+      }
+    },
+    {
+      "id": 4,
+      "type": "Note",
+      "pos": [
+        150,
+        550
+      ],
+      "size": [
+        800,
+        180
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "1. Converterの「V1ノードから読み込む」で元ノードを選択します。\n2. catalog_nameを指定し、「共有カタログへ登録・V2ノードを追加」をクリックします。\n3. 未使用アイテムも登録され、OFFと重複を含むV1の行順が「V1の選択」セットへ保存されます。\n4. 追加されたV2のtextをDebug Textへ接続してQueueするとbeta改行betaを出力します。元V1の接続は維持されます。\n5. Converterのcatalog_json端子はインポート可能なJSONを出力し、Queueでは共有カタログを新規作成しません。"
+      ],
+      "widgets_values_named": {
+        "text": "1. Converterの「V1ノードから読み込む」で元ノードを選択します。\n2. catalog_nameを指定し、「共有カタログへ登録・V2ノードを追加」をクリックします。\n3. 未使用アイテムも登録され、OFFと重複を含むV1の行順が「V1の選択」セットへ保存されます。\n4. 追加されたV2のtextをDebug Textへ接続してQueueするとbeta改行betaを出力します。元V1の接続は維持されます。\n5. Converterのcatalog_json端子はインポート可能なJSONを出力し、Queueでは共有カタログを新規作成しません。"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      3,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.9,
+      "offset": [
+        416,
+        110
+      ]
+    }
+  },
+  "version": 0.4
+}

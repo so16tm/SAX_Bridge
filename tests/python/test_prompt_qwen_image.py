@@ -34,8 +34,7 @@ def _encoder(latent_hw=(96, 64)):
 
 
 def _run(pipe, encoder, **kwargs):
-    with patch("nodes.prompt_qwen_image._get_upstream_encoder", return_value=encoder), \
-         patch("nodes.prompt_qwen_image._get_impact_wildcards", return_value=None):
+    with patch("nodes.prompt_qwen_image._get_upstream_encoder", return_value=encoder):
         return SAX_Bridge_Prompt_Qwen_Image.execute(pipe, **kwargs)
 
 
@@ -177,3 +176,32 @@ def test_non_default_option_without_core_node_raises_clear_error():
             _run(_pipe(), _encoder(), wildcard_text="x", images={}, kv_cache_dtype="int4")
         with pytest.raises(ValueError, match="ModelAttentionBackend.*Please update ComfyUI"):
             _run(_pipe(), _encoder(), wildcard_text="x", images={}, attention="pytorch attention")
+
+
+def test_lora_applies_only_positive_and_keeps_unexpanded_dynamic_text():
+    pipe = _pipe()
+    encoder = _encoder()
+    with patch("nodes.prompt_qwen_image._apply_loras", return_value=("model", "clip", ["positive.safetensors"])) as apply:
+        out, populated = _run(
+            pipe, encoder,
+            wildcard_text="__colors__ <lora:positive:.7>",
+            negative_text="{red|blue} <lora:negative:.2>",
+        ).args
+    assert populated == "__colors__ <lora:positive:.7>"
+    assert apply.call_args.args[2] == [("positive", .7, .7, None, None, None, None)]
+    assert encoder.execute.call_args.args[:3] == ("clip", "__colors__ ", "{red|blue} ")
+    assert out["_applied_loras"] == {"positive"}
+
+
+def test_lora_and_core_model_options_compose_without_losing_the_applied_model():
+    pipe = _pipe()
+    cache = _fresh_core_node()
+    with _core_nodes(QwenImage21Cache=cache), patch(
+        "nodes.prompt_qwen_image._apply_loras", return_value=("lora-model", "lora-clip", ["positive"])
+    ):
+        out, _ = _run(
+            pipe, _encoder(), wildcard_text="a cat <lora:positive:.7>", kv_cache_device="cpu"
+        ).args
+    assert out["model"].source == "lora-model"
+    assert out["clip"] == "lora-clip"
+    assert out["_applied_loras"] == {"positive"}
