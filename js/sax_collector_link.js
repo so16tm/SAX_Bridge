@@ -22,6 +22,8 @@
  *   mergeSourceAnchors(oldSource, newSource)          — H-1 rebuild 時の identity アンカー引継ぎ
  *   rebuildLiveSources({...})                         — H-1/H-3 rebuild の app 非依存中核 (live 再構築 + anchor 引継ぎ + missing 温存)
  *   resolveLocalSlotBySlotName(entity, name, gi)      — NodeCollector 下流リンク復元の段階1 resolver (同名出力を globalSlotIdx で判別)
+ *   remapSlotIdentity(old, freshNames, freshTypes)    — 上流の出力増減/並べ替え時に旧スロットの identity を新出力へ対応付ける
+ *   translateGlobalSlotIdx(entity, gi)                — rebuild 前の global index を rebuild 後の index へ写す (除去は -1)
  */
 
 /**
@@ -185,7 +187,8 @@ export function reconcileAllRemoved(sources, getNodeById) {
  *   - 旧 source が無い (初回 addSource) 場合は newSource をそのまま返す (fresh が正)。
  *   - inputAnchors: 既存 index 分は旧アンカーを保持、増分 (M-4) は新 fresh を充てる。
  *     旧が現在の slot 数より多い場合は切り詰める。
- *   - slotNames / slotTypes (NodeCollector): inputAnchors と同様「既存分は旧保持・増分は fresh」。
+ *   - slotNames / slotTypes (NodeCollector) は対象外。出力の増減/並べ替えで index がずれるため、
+ *     buildSource 側で remapSlotIdentity により identity を対応付ける。
  *
  * 新オブジェクトを返さず newSource を in-place 更新する (Coordinator の entity identity を
  * 壊さないため。makeSourceListWidget は _addSourceInner で新 source を push 済みであり、
@@ -200,13 +203,9 @@ export function mergeSourceAnchors(oldSource, newSource) {
 
     newSource.inputAnchors = _mergeIndexed(oldSource.inputAnchors, newSource.inputAnchors);
 
-    // NodeCollector の出力 resolver 用 (slotNames / slotTypes)。一方が配列なら両方をマージ。
-    if (Array.isArray(newSource.slotNames) || Array.isArray(oldSource.slotNames)) {
-        newSource.slotNames = _mergeIndexed(oldSource.slotNames, newSource.slotNames);
-    }
-    if (Array.isArray(newSource.slotTypes) || Array.isArray(oldSource.slotTypes)) {
-        newSource.slotTypes = _mergeIndexed(oldSource.slotTypes, newSource.slotTypes);
-    }
+    // slotNames / slotTypes (NodeCollector) は index 対応ではマージしない。上流の出力が
+    // 途中で増減/並べ替えされると index がずれ、旧名を index で温存すると別スロットの
+    // identity を引き継いでしまう。identity の引継ぎは buildSource が remapSlotIdentity で行う。
     return newSource;
 }
 
@@ -255,7 +254,7 @@ export function partitionLiveSources(sources, getNodeById) {
  * (TextCatalog / PrimitiveStore の in-place 更新と同型)。
  *
  * 取り込み規則:
- *   - アンカー系 (inputAnchors / slotNames / slotTypes) は mergeSourceAnchors の規則で引継ぐ。
+ *   - アンカー系 (inputAnchors) は mergeSourceAnchors の規則で引継ぐ。
  *   - fresh が持たないキー (前回の sig / _connectRetries 等) は削除し、fresh の状態と一致させる
  *     (旧状態の残留による判定ズレを防ぐ)。
  *   - 旧 / fresh いずれかが無い場合は存在するほうをそのまま返す (初回 addSource は fresh が正)。
@@ -281,7 +280,7 @@ export function adoptSourceIdentity(oldSource, freshSource) {
  * H-1/H-3 rebuild の app 非依存中核ロジック。
  *
  * 保存済み source 配列を走査し、上流が live なものだけを `buildSourceFn` で fresh 再構築し、
- * 旧 source から identity アンカー (inputAnchors / slotNames / slotTypes) を index 対応で
+ * 旧 source から identity アンカー (inputAnchors) を index 対応で
  * 引き継ぐ (mergeSourceAnchors)。上流が一時 null (missing) の source は再構築せず温存する
  * (H-3: missing があっても live の rebuild を凍結しない)。
  *
@@ -335,6 +334,86 @@ export function rebuildLiveSources({ savedSources, getNodeById, buildSourceFn, g
 }
 
 /**
+ * 上流の出力が増減/並べ替えされたとき、旧スロット (index) の identity を新しい出力へ対応付ける。
+ *
+ * 旧 identity (name/type) を index で温存すると、途中に出力が挿入/削除された時点で
+ * 以降のスロットがすべて別の出力の identity を名乗り、後続スロットの下流リンクが切れる。
+ * 対応付けは「name+type 一致 → name 一致 → 同一位置」の順に、旧スロットの昇順で
+ * 未使用の新出力から最も近いものを 1 対 1 で選ぶ。対応先のない旧スロットは「除去された」とみなす。
+ *
+ * 戻り値:
+ *   - slotNames / slotTypes: 対応付いた新出力は旧 identity を保持し、新規出力は fresh を採用
+ *   - enabledSlots: 有効だった旧スロットの対応先 + 新規出力 (新スロットは既定で有効)
+ *   - remap: 旧 global index → 新 global index (除去は -1)。下流リンク復元の index 写像に使う
+ *
+ * @param {{ names: string[], types: string[], enabledSlots: number[] }} old  rebuild 前の identity と有効スロット
+ * @param {string[]} freshNames  現在の上流出力名
+ * @param {string[]} freshTypes  現在の上流出力型
+ * @returns {{ slotNames: string[], slotTypes: string[], enabledSlots: number[], remap: number[] }}
+ */
+export function remapSlotIdentity(old, freshNames, freshTypes) {
+    const oldNames = old?.names ?? [];
+    const oldTypes = old?.types ?? [];
+    const n = freshNames.length;
+    const used = new Array(n).fill(false);
+    const remap = new Array(oldNames.length).fill(-1);
+
+    const nearestUnused = (i, accept) => {
+        let best = -1;
+        for (let j = 0; j < n; j++) {
+            if (used[j] || !accept(j)) continue;
+            if (best < 0 || Math.abs(j - i) < Math.abs(best - i)) best = j;
+        }
+        return best;
+    };
+    const assign = (accept) => {
+        for (let i = 0; i < oldNames.length; i++) {
+            if (remap[i] >= 0) continue;
+            const j = nearestUnused(i, (jj) => accept(i, jj));
+            if (j >= 0) { remap[i] = j; used[j] = true; }
+        }
+    };
+    assign((i, j) => freshNames[j] === oldNames[i] && freshTypes[j] === oldTypes[i]);
+    assign((i, j) => freshNames[j] === oldNames[i]);
+    assign((i, j) => j === i);   // 改名: 位置が同じ未対応の出力
+
+    const slotNames = freshNames.slice();
+    const slotTypes = freshTypes.slice();
+    const enabled = new Set();
+    for (let j = 0; j < n; j++) if (!used[j]) enabled.add(j);   // 新規出力は既定で有効
+    for (const oi of (old?.enabledSlots ?? [])) {
+        if (remap[oi] >= 0) enabled.add(remap[oi]);
+    }
+    remap.forEach((j, i) => {
+        if (j < 0) return;
+        slotNames[j] = oldNames[i];
+        slotTypes[j] = oldTypes[i];
+    });
+    return {
+        slotNames,
+        slotTypes,
+        enabledSlots: [...enabled].sort((a, b) => a - b),
+        remap,
+    };
+}
+
+/**
+ * rebuild 前に捕捉した global index を、rebuild 後の index へ写す。
+ * entity._slotRemap (remapSlotIdentity の remap) が無ければ恒等。除去されたスロットは -1。
+ *
+ * @param {{ _slotRemap?: number[] }} entity
+ * @param {number | null} globalSlotIdx
+ * @returns {number | null}  null は入力が null (index 情報なし)
+ */
+export function translateGlobalSlotIdx(entity, globalSlotIdx) {
+    if (globalSlotIdx == null) return null;
+    const remap = entity?._slotRemap;
+    if (!Array.isArray(remap)) return globalSlotIdx;
+    const mapped = remap[globalSlotIdx];
+    return mapped == null ? -1 : mapped;
+}
+
+/**
  * NodeCollector 出力リンク復元の段階1 resolver: 出力名 → entity 内 localSlotIdx。
  *
  * 上流ノードは同名の出力を複数持ちうる (例: 2 つの "IMAGE")。`slotNames.indexOf` だけだと
@@ -348,16 +427,19 @@ export function rebuildLiveSources({ savedSources, getNodeById, buildSourceFn, g
  *
  * @param {{ slotNames?: string[], enabledSlots?: number[] }} entity
  * @param {string} slotName
- * @param {number | null} [globalSlotIdx]  capture 時の entity 内 global index (任意)
+ * @param {number | null} [globalSlotIdx]  capture 時の entity 内 global index (任意。rebuild で
+ *                                          上流の出力が増減した場合は entity._slotRemap で写してから使う)
  * @returns {number | null}
  */
 export function resolveLocalSlotBySlotName(entity, slotName, globalSlotIdx = null) {
     const names = entity?.slotNames ?? [];
+    const target = translateGlobalSlotIdx(entity, globalSlotIdx);
+    if (target === -1) return null;   // 上流で除去された出力 (同名の別出力へ寄せない)
     let best = -1;
     for (let i = 0; i < names.length; i++) {
         if (names[i] !== slotName) continue;
         if (best < 0) { best = i; continue; }
-        if (globalSlotIdx != null && Math.abs(i - globalSlotIdx) < Math.abs(best - globalSlotIdx)) best = i;
+        if (target != null && Math.abs(i - target) < Math.abs(best - target)) best = i;
     }
     if (best < 0) return null;
     const localIdx = entity?.enabledSlots?.indexOf(best) ?? -1;

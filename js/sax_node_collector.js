@@ -2,7 +2,7 @@ import { app } from "../../scripts/app.js";
 import { showPicker } from "./sax_picker.js";
 import { ensureRenderLinkPatch, showDialog, h, applySourceListLifecycle, initSourceBase } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
-import { resolveAnchorToOutputSlot, resolveLocalSlotBySlotName } from "./sax_collector_link.js";
+import { resolveAnchorToOutputSlot, resolveLocalSlotBySlotName, remapSlotIdentity, translateGlobalSlotIdx } from "./sax_collector_link.js";
 
 const EXT_NAME  = "SAX.NodeCollector";
 const NODE_TYPE = "SAX_Bridge_Node_Collector";
@@ -28,11 +28,33 @@ const SOURCE_SPEC = {
         const allCount   = Math.min(srcOutputs.length, MAX_SLOTS);
         if (allCount === 0) return null;
 
-        // rebuildAllSources 時: 一時ヒントがあれば旧 enabledSlots を引き継ぐ。
+        // B3: 上流出力の identity (name/type) は現在の srcNode から fresh に生成する。
+        const slotNames = [];
+        const slotTypes = [];
+        for (let i = 0; i < allCount; i++) {
+            const out = srcOutputs[i];
+            slotNames.push(out.label || out.name || out.type || `out_${offset + i}`);
+            slotTypes.push(out.type || "*");
+        }
+
+        // rebuildAllSources 時: 一時ヒントがあれば旧 enabledSlots / identity を引き継ぐ。
         // hints は rebuildAllSources / swapSources の auto-hints (sax_ui_base.js) 経由で設定される。
         const hint = collectorNode._rebuildHints?.get(srcNode.id);
         let enabledSlots;
-        if (hint?.enabledSlots) {
+        let slotRemap;
+        if (hint?.enabledSlots && Array.isArray(hint.slotNames) && hint.slotNames.length > 0) {
+            // 上流の出力が途中で増減/並べ替えされても、旧スロットの identity と有効/無効を
+            // 新しい出力へ名前・型・位置で対応付ける (index のまま引き継ぐと後続スロットがずれて
+            // 下流リンクが切れる)。改名は同一位置として旧 identity を保つ (B2/B3 の改名追従)。
+            const r = remapSlotIdentity(
+                { names: hint.slotNames, types: hint.slotTypes ?? [], enabledSlots: hint.enabledSlots },
+                slotNames, slotTypes);
+            enabledSlots = r.enabledSlots;
+            slotNames.splice(0, slotNames.length, ...r.slotNames);
+            slotTypes.splice(0, slotTypes.length, ...r.slotTypes);
+            // 下流リンク復元 (resolveLocalSlot*) が capture 時の global index を写すために使う。
+            if (r.remap.some((j, i) => j !== i)) slotRemap = r.remap;
+        } else if (hint?.enabledSlots) {
             const oldEnabled  = hint.enabledSlots;
             const oldCount    = hint.slotCount ?? oldEnabled.length;
             if (allCount > oldCount) {
@@ -48,25 +70,12 @@ const SOURCE_SPEC = {
                 enabledSlots = [...oldEnabled];
             }
         } else {
-            // ヒントなし（新規追加、または sig 変化時のリビルド）: 全スロット有効
+            // ヒントなし（新規追加）: 全スロット有効
             enabledSlots = Array.from({ length: allCount }, (_, i) => i);
         }
         // 上流の選択候補数と Collector の残り物理ピン数を分ける。
         // 残りが少なくても、無効にした先頭ピンの代わりに末尾を選択できる。
         enabledSlots = enabledSlots.slice(0, remaining);
-
-        // B3: 上流出力の identity (name/type) を常に現在の srcNode から fresh 生成する。
-        // 初回 identity の保持 (改名前 name を rebuild で上書きしない) は rebuild 経路
-        // (sax_ui_base.js の mergeSourceAnchors が slotNames/slotTypes を旧から index 対応で
-        // 引き継ぐ) が担う。これにより上流改名後も出力 resolver (slotName 解決) と入力再接続
-        // (アンカー解決) が同一の保存名を基準にできる (H-1: buildSource 内で旧 source を参照しない)。
-        const slotNames = [];
-        const slotTypes = [];
-        for (let i = 0; i < allCount; i++) {
-            const out = srcOutputs[i];
-            slotNames.push(out.label || out.name || out.type || `out_${offset + i}`);
-            slotTypes.push(out.type || "*");
-        }
 
         return {
             ...initSourceBase(srcNode),
@@ -74,6 +83,7 @@ const SOURCE_SPEC = {
             enabledSlots,
             slotNames,
             slotTypes,
+            ...(slotRemap ? { _slotRemap: slotRemap } : {}),
         };
     },
 
@@ -244,7 +254,9 @@ function buildNodeCollectorSpec(node) {
         resolveLocalSlotBySlotName,
         // 段階2: globalSlotIdx → enabledSlots.indexOf → localSlotIdx
         resolveLocalSlotByGlobalIdx: (entity, globalSlotIdx) => {
-            const localIdx = entity?.enabledSlots?.indexOf(globalSlotIdx) ?? -1;
+            // 上流の出力が増減した rebuild 直後は、capture 時の index を新しい index へ写す
+            // (除去された出力は -1 で解決失敗 = 別スロットへ寄せない)。
+            const localIdx = entity?.enabledSlots?.indexOf(translateGlobalSlotIdx(entity, globalSlotIdx)) ?? -1;
             return localIdx >= 0 ? localIdx : null;
         },
     };
