@@ -60,6 +60,26 @@ def test_queued_fixed_seed_is_reproducible(monkeypatch):
     assert [SAX_Bridge_Primitive_Store.execute(payload).args[0] for _ in range(3)] == [37] * 3
 
 
+def test_increment_seed_passes_stored_value_through(monkeypatch):
+    # increment の加算は UI がキュー登録時に items_json へ書き込む。
+    # バックエンドは再抽選せず、保存値をそのまま出力する。
+    def unexpected_draw(*args):
+        pytest.fail("increment seed must not be redrawn")
+    monkeypatch.setattr("nodes.primitive_store.random.randint", unexpected_draw)
+    payload = json.dumps([{"type": "SEED", "mode": "increment", "timing": "after", "value": 38, "max": 100}])
+    assert [SAX_Bridge_Primitive_Store.execute(payload).args[0] for _ in range(3)] == [38] * 3
+
+
+def test_increment_seed_cache_follows_items_json():
+    # 値が変われば items_json が変わるため再実行され、同じ値なら再利用される。
+    # random のように常に無効化はしない。
+    first = json.dumps([{"type": "SEED", "mode": "increment", "value": 5}])
+    second = json.dumps([{"type": "SEED", "mode": "increment", "value": 6}])
+    assert SAX_Bridge_Primitive_Store.IS_CHANGED(first) == first
+    assert SAX_Bridge_Primitive_Store.IS_CHANGED(second) == second
+    assert first != second
+
+
 Store = SAX_Bridge_Primitive_Store
 
 def _outputs(items_json):

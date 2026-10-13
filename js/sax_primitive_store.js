@@ -11,6 +11,7 @@ import {
     makeJsonWidgetAccessor,
 } from "./sax_ui_base.js";
 import { ensureCoordinator } from "./sax_dynamic_slot_coordinator.js";
+import { SEED_MAX, SEED_MODE_LABELS, advanceSeeds, nextSeedMode, randomSeed } from "./sax_primitive_seed.js";
 
 const EXT_NAME  = "SAX.PrimitiveStore";
 const NODE_TYPE = "SAX_Bridge_Primitive_Store";
@@ -49,10 +50,6 @@ function makeDefaultItem(type, name) {
         case "SEED":    return { ...base, value: 0,     min: 0,             max: 2 ** 53 - 1,  step: 1, mode: "fixed", timing: "before" };
         default:        return { ...base, value: 0   };
     }
-}
-
-function randomSeed(max) {
-    return Math.floor(Math.random() * ((max ?? 2 ** 53 - 1) + 1));
 }
 
 function getNodeItems(node) {
@@ -175,16 +172,17 @@ function showStringEditDialog(item, saveItemsFn) {
 }
 
 const SEED_MODES = [
-    { value: "fixed",  label: "Fixed"  },
-    { value: "random", label: "Random" },
+    { value: "fixed",     label: "Fixed"     },
+    { value: "random",    label: "Random"    },
+    { value: "increment", label: "Increment" },
 ];
 const SEED_TIMINGS = [
-    { value: "before", label: "Before", tooltip: "実行前にシードを生成" },
-    { value: "after",  label: "After",  tooltip: "実行後にシードを生成（次回用）" },
+    { value: "before", label: "Before", tooltip: "実行前に値を更新して使用" },
+    { value: "after",  label: "After",  tooltip: "実行後に値を更新（次回用）" },
 ];
 
 function showSeedEditPopup(item, saveItemsFn) {
-    const curMax = item.max ?? 2 ** 53 - 1;
+    const curMax = item.max ?? SEED_MAX;
     showItemEditDialog({
         title:     item.name,
         width:     380,
@@ -245,14 +243,15 @@ function drawTypeBadge(ctx, item, x, midY, w, h) {
     const bw    = w - 8;
     const bx    = x + 4;
     const by    = midY - bh / 2;
-    const isRandom = item.type === "SEED" && item.mode === "random";
+    // 自動更新する SEED (random / increment) は枠線のみで固定値と区別する
+    const isAuto = item.type === "SEED" && (item.mode === "random" || item.mode === "increment");
 
     rrect(ctx, bx, by, bw, bh, 3,
-        isRandom ? null : meta.color,
-        isRandom ? meta.color : null);
+        isAuto ? null : meta.color,
+        isAuto ? meta.color : null);
 
     ctx.save();
-    ctx.fillStyle    = isRandom ? meta.color : PRIMITIVE_BADGE_TEXT_COLOR;
+    ctx.fillStyle    = isAuto ? meta.color : PRIMITIVE_BADGE_TEXT_COLOR;
     ctx.font         = `bold 8px sans-serif`;
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
@@ -311,7 +310,7 @@ function makeStoreWidget(node) {
                 draw: (ctx, item, x, midY, w, h) => drawTypeBadge(ctx, item, x, midY, w, h),
                 onClick: (item) => {
                     if (item.type !== "SEED") return false;
-                    item.mode = item.mode === "random" ? "fixed" : "random";
+                    item.mode = nextSeedMode(item.mode);
                     return true;
                 },
             },
@@ -326,7 +325,7 @@ function makeStoreWidget(node) {
                     if (item.type === "BOOLEAN" || item.type === "STRING") return;
                     const isInt = item.type === "INT" || item.type === "SEED";
                     const min  = item.min  ?? (isInt ? 0 : -1e9);
-                    const max  = item.max  ?? (isInt ? 2 ** 53 - 1 : 1e9);
+                    const max  = item.max  ?? (isInt ? SEED_MAX : 1e9);
                     const step = item.step ?? (isInt ? 1 : 0.1);
                     const snapped  = Math.round((v - min) / step) * step + min;
                     const clamped  = Math.max(min, Math.min(max, snapped));
@@ -375,8 +374,9 @@ function makeStoreWidget(node) {
                 const t = getComfyTheme();
                 const midY = y + h / 2;
                 txt(ctx, item.name, x + 4, midY, t.inputText ?? t.contentBg, "left", 11);
-                if (item.type === "SEED" && item.mode === "random") {
-                    const label = item.timing === "after" ? "rnd:aft" : "rnd:bef";
+                const modeLabel = item.type === "SEED" ? SEED_MODE_LABELS[item.mode] : null;
+                if (modeLabel) {
+                    const label = `${modeLabel}:${item.timing === "after" ? "aft" : "bef"}`;
                     const labelX = x + w - 4;
                     ctx.save();
                     ctx.font         = "9px sans-serif";
@@ -399,26 +399,20 @@ function makeStoreWidget(node) {
 }
 
 // ---------------------------------------------------------------------------
-// SEED 自動ランダム化
+// SEED 自動更新 (random / increment)
 // ---------------------------------------------------------------------------
 
-function randomizeSeedsOnNodes(timing) {
+function advanceSeedsOnNodes(event) {
     for (const node of app.graph._nodes ?? []) {
         if (node.comfyClass !== NODE_TYPE) continue;
         const items = node._primitiveItems;
         if (!items?.length) continue;
 
-        // SEED ランダム化は値のみ変更で slot 構造不変。Coordinator.mutate({ skipCapture: true })
+        // SEED 更新は値のみ変更で slot 構造不変。Coordinator.mutate({ skipCapture: true })
         // でトランザクション境界を明示しつつ capture/restore コストを避ける。
         // coordinator は ensureCoordinator により onNodeCreated 時点で生成済み。
         const coordinator = node._saxCoordinator;
-        const action = (entities) => {
-            for (const item of entities) {
-                if (item.type === "SEED" && item.mode === "random" && item.timing === timing) {
-                    item.value = randomSeed(item.max ?? 2 ** 53 - 1);
-                }
-            }
-        };
+        const action = (entities) => advanceSeeds(entities, event);
         if (coordinator) {
             coordinator.mutate(action, { skipCapture: true });
         } else {
@@ -438,21 +432,20 @@ app.registerExtension({
     name: EXT_NAME,
 
     setup() {
-        // キュー登録時: 初回実行用に seed を生成
+        // キュー登録時: Before の seed を更新してから登録し、After の increment は登録直後に進める
         const origQueuePrompt = app.queuePrompt?.bind(app);
         if (origQueuePrompt) {
             app.queuePrompt = async function (...args) {
-                randomizeSeedsOnNodes("before");
-                return origQueuePrompt(...args);
+                advanceSeedsOnNodes("queue-before");
+                const result = await origQueuePrompt(...args);
+                advanceSeedsOnNodes("queue-after");
+                return result;
             };
         }
 
-        // 実行完了時: 両タイミングを生成（複数キュー時に次の実行で異なる seed を保証）
+        // 実行完了時: random を更新（複数キュー時に次の実行で異なる seed を保証）
         api.addEventListener("executing", (e) => {
-            if (e.detail === null) {
-                randomizeSeedsOnNodes("after");
-                randomizeSeedsOnNodes("before");
-            }
+            if (e.detail === null) advanceSeedsOnNodes("executed");
         });
     },
 
