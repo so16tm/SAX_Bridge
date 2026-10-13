@@ -162,6 +162,7 @@ Automatically detects and re-syncs when source slots are added, removed, or rena
 Generate and edit with Qwen-Image 2.1 in 4 nodes: **SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output**.
 With no reference images it runs text-to-image; connect images to `image_1`–`image_10` for image-to-image (multi-image composition and editing), referring to them as `<image1>`, `<image2>`, ... in the prompt.
 SAX Diffusion Loader detects the text encoder type from the model automatically, so no extra setup is needed (recommended: `cfg=1`, `euler`, `simple`).
+Quality: `steps=40` at native 2K (e.g. 2048×2048). Turbo: put Comfy-Org's `qwen_image_2.1_turbo_lora_*` in the Loader's `lora_name` and use `steps=8` (about 5× faster). The prompt node also offers the KV cache and attention backend of ComfyUI's built-in features, both off by default.
 
 [↑ Back to top](#sax_bridge)
 

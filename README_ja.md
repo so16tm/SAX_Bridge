@@ -162,6 +162,7 @@ SAM3 側の `mask_grow` と本ノードの `grow` は加算的に効くため、
 **SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output** の 4 ノードで Qwen-Image 2.1 の生成と編集ができます。
 参照画像を繋がなければ t2i、`image_1` 〜 `image_10` に画像を繋げば i2i（複数画像の合成・編集）になり、プロンプトでは `<image1>` `<image2>` … で画像を指します。
 SAX Diffusion Loader はテキストエンコーダの種別をモデルから自動判定するため、追加の設定は不要です（推奨: `cfg=1`・`euler`・`simple`）。
+Quality は `steps=40`・ネイティブ 2K（例: 2048×2048）。Turbo は Comfy-Org の `qwen_image_2.1_turbo_lora_*` を Loader の `lora_name` に指定して `steps=8`（約 5 倍速）。プロンプトノードでは ComfyUI 本体の KV キャッシュとアテンションバックエンドも選べます（既定は何も変えません）。
 
 [↑ トップへ](#sax_bridge)
 

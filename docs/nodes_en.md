@@ -346,7 +346,11 @@ Use `target_positive` to choose whether the result is stored in Positive or Nega
 | `pipe` | PIPE_LINE | Pipe from SAX Diffusion Loader with Qwen-Image 2.1 loaded |
 | `wildcard_text` | String | Prompt / edit instruction. Refer to reference images as `<image1>`, `<image2>`, ... Wildcard and LoRA syntax supported |
 | `negative_text` | String | Negative prompt (no effect with the official cfg=1 setting) |
-| `resolution` | Int (0–4096, step 32) | Reference images are resized to about resolution × resolution pixels (aspect ratio kept, multiples of 32). 0 keeps the original size |
+| `resolution` | Int (0–4096, step 32) | Reference images are resized to about resolution × resolution pixels (aspect ratio kept, multiples of 32). 0 keeps the original size. This does not set the output size (see `output_size`) |
+| `output_size` | Combo | Output size when reference images are connected: `loader` (default; the Loader's `width` / `height`, same as text-to-image) / `image_1` (`image_1` resized by `resolution`; keeps a single-image edit aligned with its source) |
+| `kv_cache_device` | Combo | Where the prefix KV cache (prompt and reference images) is kept: `auto` (default, spare VRAM first then RAM) / `gpu` / `cpu` / `off` (recompute every step) |
+| `kv_cache_dtype` | Combo | KV cache precision: `default` (lossless) / `int8` (half the size, near-bf16 accuracy) / `int4` (a quarter, higher error) |
+| `attention` | Combo | Attention backend: `default` (leave ComfyUI's setting untouched) / `pytorch attention` / `comfy kitchen attention` (INT8, NVIDIA / AMD only; falls back to PyTorch attention when unavailable) |
 | `images` | Autogrow | Reference images (grows from `image_1` up to 10 ports). `image_1` is the edit target |
 
 **Outputs**: `PIPE`, `POPULATED_TEXT`
@@ -354,10 +358,14 @@ Use `target_positive` to choose whether the result is stored in Positive or Nega
 **Behavior**:
 - Encoding is delegated to ComfyUI's built-in `TextEncodeQwenImage21` (requires a ComfyUI version with Qwen-Image 2.1 support)
 - Without reference images: the latent keeps the Loader's `width` / `height` (text-to-image)
-- With reference images: the latent is replaced with the resized size of `image_1`, with the Loader's `batch_size` (a different size shifts the edit)
+- With reference images and `output_size=loader`: the latent also keeps the Loader's `width` / `height`, so the output size is set in one place. All reference images are resized individually by `resolution` and used only as references
+- With `output_size=image_1`: the latent is replaced with the resized size of `image_1` (about `resolution` × `resolution` pixels) with the Loader's `batch_size`. Use it for single-image edits where a different size would shift the result
 - LoRA syntax is applied from `wildcard_text` only (LoRA tags in `negative_text` are just removed)
+- `kv_cache_*` and `attention` apply ComfyUI's built-in `QwenImage21Cache` / `ModelAttentionBackend` to the Pipe's model. At their defaults (`auto` + `default`, `default`) nothing is applied, so older ComfyUI versions without these nodes work unchanged; a non-default value on a version without the node raises a clear error
 
-**Recommended settings** (following the official workflow): on SAX Diffusion Loader set `cfg=1`, `sampler_name=euler`, `scheduler_name=simple`, `steps=25`–`50`.
+**Recommended settings** (following the official model card / Comfy-Org README): on SAX Diffusion Loader set `cfg=1`, `sampler_name=euler`, `scheduler_name=simple`.
+- Quality: `steps=40`, native 2K (`width` / `height` such as 2048×2048, 2400×1792, 2752×1536; keep them multiples of 16 because the VAE is 1/16). 1024-class sizes also work and take about a quarter of the time
+- Turbo (about 5× fewer steps): set `lora_name` to Comfy-Org's `qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors` (strength 1.0) and `steps=8`. Alternatively load the `qwen_image_2.1_turbo_*` model itself as `unet_name`
 
 ```
 t2i: SAX Diffusion Loader → SAX Qwen Image Prompt → SAX KSampler → SAX Output
