@@ -153,6 +153,7 @@ export function openSharedEditor(session, options = {}) {
     const showCandidates = new Set();
     const doc = () => session.document;
     // アイテム一覧と実行結果は検索語・タグ・スクロール位置を別々に保持する。
+    const resultKey = value => value ? `${value.catalog_id}|${value.revision ?? value.catalog_revision}|${value.seed}|${value.text}` : "";
     const view = () => mode === "results" ? pref.results : pref;
     let newItemId = null;
     function sortItems(values, resolve = value => value) {
@@ -696,6 +697,6 @@ export function openSharedEditor(session, options = {}) {
         dlg.append(header, errorMessage, conflict); content = el("div", "se-pane"); content.style.flex = "1"; dlg.append(content); render();
     } });
     unsubscribe = session.subscribe(() => { updateStatus(); scheduleRefresh(); });
-    openEditors.set(session, { close, open(next) { if (next.result) { if (next.result !== result) pref.results = { query: "", tags: [], scroll: 0 }; result = next.result; } if (next.recipeId) { if (next.mode === "items") { pref.recipeFilter = next.recipeId; pref.query = ""; pref.tags = []; pref.scroll = 0; } else pref.recipeId = next.recipeId; } mode = next.mode ?? mode; render(); close.show(); } });
+    openEditors.set(session, { close, open(next) { if (next.result) { if (resultKey(next.result) !== resultKey(result)) pref.results = { query: "", tags: [], scroll: 0 }; result = next.result; } if (next.recipeId) { if (next.mode === "items") { pref.recipeFilter = next.recipeId; pref.query = ""; pref.tags = []; pref.scroll = 0; } else pref.recipeId = next.recipeId; } mode = next.mode ?? mode; render(); close.show(); } });
     return close;
 }

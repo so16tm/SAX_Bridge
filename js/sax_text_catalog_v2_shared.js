@@ -156,7 +156,7 @@ export function installSharedControls(node) {
             const link = document.createElement("a"); link.href = url; link.download = `${controller.session.document.name}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         }]]) { const button = document.createElement("button"); button.textContent = label; button.onclick = act(callback); dialog.append(button); }
         const file = document.createElement("input"); file.type = "file"; file.accept = ".json,application/json";
-        file.onchange = act(async () => { if (!file.files[0]) return; const source = JSON.parse(await file.files[0].text()); try { if (!await confirmDiscardRows("カタログをインポート", "インポート")) return; const doc = await importCatalog(source); if (controller.disposed) return; write({ version: 3, catalog_id: doc.id, rows: initialRows(doc, true) }); await controller.reload(); close(); } finally { file.value = ""; } });
+        file.onchange = act(async () => { if (!file.files[0]) return; try { const source = JSON.parse(await file.files[0].text()); if (!await confirmDiscardRows("カタログをインポート", "インポート")) return; const doc = await importCatalog(source); if (controller.disposed) return; write({ version: 3, catalog_id: doc.id, rows: initialRows(doc, true) }); await controller.reload(); close(); } finally { file.value = ""; } });
         const label = document.createElement("label"); label.textContent = "インポート（新しいカタログとして追加）"; label.append(file); dialog.append(label);
     } }), { serialize: false }));
     controller.reload = act(async () => {
