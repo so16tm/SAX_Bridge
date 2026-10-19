@@ -1,4 +1,4 @@
-import { LIMITS, validateConfig, validateGroups, groupItemIds, walkGroups } from "./sax_text_catalog_v2_model.js";
+import { LIMITS, validateConfig, validateGroups, groupItemIds, walkGroups, tagsError } from "./sax_text_catalog_v2_model.js";
 
 const BASE = "/sax/text-catalog/v2/catalogs";
 const sessions = new Map();
@@ -44,7 +44,8 @@ function validateOperation(document, operation) {
         const item = operation.item;
         if (!item) throw new Error("アイテムが必要です");
         string(item.id, LIMITS.id, true); string(item.name, LIMITS.name); string(item.text, LIMITS.text);
-        if (!Array.isArray(item.tags) || item.tags.length > LIMITS.tags || new Set(item.tags).size !== item.tags.length) throw new Error("タグが不正です");
+        if (!Array.isArray(item.tags) || new Set(item.tags).size !== item.tags.length) throw new Error("タグが不正です");
+        const tagProblem = tagsError(item.tags); if (tagProblem) throw new Error(tagProblem);
         item.tags.forEach(tag => string(tag, LIMITS.name, true));
         if (!document.catalog.items.some(value => value.id === item.id) && document.catalog.items.length >= LIMITS.items) throw new Error("アイテムは10000件以内にしてください");
     } else if (type === "recipe.put") {

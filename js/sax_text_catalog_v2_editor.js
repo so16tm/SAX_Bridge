@@ -1,5 +1,5 @@
 import { showDialog, showConfirmDialog } from "./sax_ui_base.js";
-import { LIMITS, candidateWeight, parseSelectionWeight, parseRandomCount, formatRandomCount, sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds } from "./sax_text_catalog_v2_model.js";
+import { LIMITS, candidateWeight, parseSelectionWeight, parseRandomCount, formatRandomCount, sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds, itemUsage, deletionImpact, normalizeSearch, searchTokens, matchesSearch, tagsError } from "./sax_text_catalog_v2_model.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { openWildcardPicker } from "./sax_text_catalog_v2_wildcards.js";
 
@@ -21,8 +21,8 @@ const STYLE = `
 .sax-shared-affix input{width:100%;font:inherit;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#242426);border:1px solid var(--border-color,#45454b);border-radius:6px;padding:6px 8px}.sax-shared-affix label{display:flex;flex-direction:column;gap:4px;font-size:12px}.sax-shared-affix pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:8px;border:1px solid var(--border-color,#45454b);border-radius:6px;max-height:140px;overflow:auto}
 .sax-shared-editor *{box-sizing:border-box}.sax-shared-editor [hidden]{display:none!important}.sax-shared-editor .se-mobile-tags{display:none}.sax-shared-editor>div{width:97vw!important;height:94vh;max-height:97vh!important;padding:16px!important;border-radius:12px!important;font-family:system-ui,sans-serif}
 .sax-shared-editor button,.sax-shared-editor input,.sax-shared-editor select,.sax-shared-editor textarea{font:inherit;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#242426);border:1px solid var(--border-color,#45454b);border-radius:6px;padding:7px 9px;min-width:0}.sax-shared-editor button{cursor:pointer}.sax-shared-editor button:disabled{opacity:.45;cursor:default}.sax-shared-editor :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:2px}.sax-shared-editor textarea{width:100%;resize:vertical;line-height:1.7;min-height:160px}.sax-shared-editor input[type=checkbox]{width:16px;height:16px;accent-color:var(--primary-background,#5686d6)}
-.sax-shared-editor .se-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sax-shared-editor .se-grow{flex:1;min-width:110px}.sax-shared-editor .se-muted{opacity:.68;font-size:12px}.sax-shared-editor .se-error{color:var(--error-text,#ed9494);white-space:pre-wrap}.sax-shared-editor .se-status{min-height:18px}.sax-shared-editor .se-scroll{flex:1;min-height:0;overflow:auto;position:relative;scrollbar-gutter:stable;overflow-anchor:none}.sax-shared-editor .se-canvas{position:relative}.sax-shared-editor .se-record{position:absolute;left:0;right:0;display:grid;grid-template-columns:24px minmax(130px,.8fr) minmax(260px,3fr) minmax(120px,.7fr) 72px;gap:12px;padding:10px 6px;border-bottom:1px solid var(--border-color,#45454b);align-items:start}.sax-shared-editor .se-cell{border:0;background:transparent;text-align:left;cursor:text;line-height:1.7;padding:3px;white-space:pre-wrap;overflow-wrap:anywhere;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:var(--se-lines,3)}.sax-shared-editor .se-cell:hover{background:color-mix(in srgb,var(--primary-background,#5686d6) 12%,transparent);border-radius:5px}.sax-shared-editor .se-cell:empty:before{content:attr(data-placeholder);opacity:.45}.sax-shared-editor .se-record input:not([type=checkbox]){width:100%}.sax-shared-editor .se-record textarea{resize:none;min-height:200px}.sax-shared-editor .se-record[data-editing=true]{background:color-mix(in srgb,var(--primary-background,#5686d6) 8%,transparent)}.sax-shared-editor .se-tools{display:flex;flex-direction:column;gap:6px}.sax-shared-editor .se-section{position:absolute;left:0;right:0;padding:12px 8px;background:var(--comfy-input-bg,#242426);border-radius:6px;display:flex;align-items:center;gap:12px;overflow:hidden}.sax-shared-editor .se-section strong{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sax-shared-editor .se-empty{padding:24px;opacity:.7}.sax-shared-editor .se-columns{display:grid;grid-template-columns:24px minmax(130px,.8fr) minmax(260px,3fr) minmax(120px,.7fr) 72px;gap:12px;padding:0 6px;font-size:12px;opacity:.65}.sax-shared-editor .se-layout{display:grid;grid-template-columns:minmax(240px,1fr) minmax(320px,1.4fr);gap:16px;flex:1;min-height:0}.sax-shared-editor .se-pane{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}.sax-shared-editor .se-card{padding:12px;border:1px solid var(--border-color,#45454b);border-radius:8px;margin-bottom:10px}.sax-shared-editor .se-card[data-off=true]{opacity:.55}.sax-shared-editor .se-card>.se-row{margin-bottom:8px}.sax-shared-editor .se-candidate{position:absolute;left:0;right:0;height:40px;display:flex;align-items:center;gap:10px;padding:6px;border-bottom:1px solid var(--border-color,#45454b)}.sax-shared-editor .se-candidate span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sax-shared-editor .se-primary{background:var(--primary-background,#386cb8);color:#fff}.sax-shared-editor .se-result-text{flex:1;min-height:0;resize:none!important}.sax-shared-editor .se-badge{font-size:11px;color:var(--primary-background,#80adf2);display:block}.sax-shared-editor .se-conflict{padding:8px;border:1px solid var(--error-text,#ed9494);border-radius:6px}.sax-shared-editor details>summary{cursor:pointer}
-@media(max-width:760px){.sax-shared-editor>div{padding:10px!important}.sax-shared-editor .se-layout{grid-template-columns:1fr;grid-template-rows:minmax(180px,.7fr) minmax(220px,1fr)}.sax-shared-editor .se-record,.sax-shared-editor .se-columns{grid-template-columns:20px minmax(75px,.7fr) minmax(140px,2fr) 65px;gap:6px}.sax-shared-editor .se-tags{display:none}.sax-shared-editor .se-row{gap:5px}.sax-shared-editor .se-row button{padding:6px}.sax-shared-editor .se-section .se-muted{display:none}}
+.sax-shared-editor .se-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sax-shared-editor .se-grow{flex:1;min-width:110px}.sax-shared-editor .se-muted{opacity:.68;font-size:12px}.sax-shared-editor .se-error{color:var(--error-text,#ed9494);white-space:pre-wrap}.sax-shared-editor .se-status{min-height:18px}.sax-shared-editor .se-scroll{flex:1;min-height:0;overflow:auto;position:relative;scrollbar-gutter:stable;overflow-anchor:none}.sax-shared-editor .se-canvas{position:relative}.sax-shared-editor .se-record{position:absolute;left:0;right:0;display:grid;grid-template-columns:24px minmax(130px,.8fr) minmax(260px,3fr) minmax(120px,.7fr) 96px;gap:12px;padding:10px 6px;border-bottom:1px solid var(--border-color,#45454b);align-items:start}.sax-shared-editor .se-cell{border:0;background:transparent;text-align:left;cursor:text;line-height:1.7;padding:3px;white-space:pre-wrap;overflow-wrap:anywhere;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:var(--se-lines,3)}.sax-shared-editor .se-cell:hover{background:color-mix(in srgb,var(--primary-background,#5686d6) 12%,transparent);border-radius:5px}.sax-shared-editor .se-cell:empty:before{content:attr(data-placeholder);opacity:.45}.sax-shared-editor .se-record input:not([type=checkbox]){width:100%}.sax-shared-editor .se-record textarea{resize:none;min-height:200px}.sax-shared-editor .se-record[data-editing=true]{background:color-mix(in srgb,var(--primary-background,#5686d6) 8%,transparent)}.sax-shared-editor .se-tools{display:flex;flex-direction:column;gap:6px}.sax-shared-editor .se-section{position:absolute;left:0;right:0;padding:12px 8px;background:var(--comfy-input-bg,#242426);border-radius:6px;display:flex;align-items:center;gap:12px;overflow:hidden}.sax-shared-editor .se-section strong{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sax-shared-editor .se-empty{padding:24px;opacity:.7}.sax-shared-editor .se-columns{display:grid;grid-template-columns:24px minmax(130px,.8fr) minmax(260px,3fr) minmax(120px,.7fr) 96px;gap:12px;padding:0 6px;font-size:12px;opacity:.65}.sax-shared-editor .se-layout{display:grid;grid-template-columns:minmax(240px,1fr) minmax(320px,1.4fr);gap:16px;flex:1;min-height:0}.sax-shared-editor .se-pane{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}.sax-shared-editor .se-card{padding:12px;border:1px solid var(--border-color,#45454b);border-radius:8px;margin-bottom:10px}.sax-shared-editor .se-card[data-off=true]{opacity:.55}.sax-shared-editor .se-card>.se-row{margin-bottom:8px}.sax-shared-editor .se-candidate{position:absolute;left:0;right:0;height:40px;display:flex;align-items:center;gap:10px;padding:6px;border-bottom:1px solid var(--border-color,#45454b)}.sax-shared-editor .se-candidate span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sax-shared-editor .se-primary{background:var(--primary-background,#386cb8);color:#fff}.sax-shared-editor .se-result-text{flex:1;min-height:0;resize:none!important}.sax-shared-editor .se-badge{font-size:11px;color:var(--primary-background,#80adf2);display:block}.sax-shared-editor .se-conflict{padding:8px;border:1px solid var(--error-text,#ed9494);border-radius:6px}.sax-shared-editor details>summary{cursor:pointer}
+@media(max-width:760px){.sax-shared-editor>div{padding:10px!important}.sax-shared-editor .se-layout{grid-template-columns:1fr;grid-template-rows:minmax(180px,.7fr) minmax(220px,1fr)}.sax-shared-editor .se-record,.sax-shared-editor .se-columns{grid-template-columns:20px minmax(75px,.7fr) minmax(140px,2fr) 65px;gap:6px}.sax-shared-editor .se-item-actions{flex-wrap:wrap}.sax-shared-editor .se-item-actions button{flex:1 1 28px}.sax-shared-editor .se-tags{display:none}.sax-shared-editor .se-row{gap:5px}.sax-shared-editor .se-row button{padding:6px}.sax-shared-editor .se-section .se-muted{display:none}}
 @media(max-width:760px){.sax-shared-editor .se-mobile-tags{display:block}}
 .sax-shared-editor>div{padding:10px!important;gap:6px!important}.sax-shared-editor .se-header{flex-wrap:nowrap;gap:5px;min-width:0}.sax-shared-editor .se-header strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-size:12px}.sax-shared-editor .se-header button,.sax-shared-editor .se-filterbar button,.sax-shared-editor .se-filterbar input,.sax-shared-editor .se-filterbar select{padding:3px 7px;height:28px;font-size:12px}.sax-shared-editor .se-header .se-status{flex:none;max-width:180px;min-height:0;gap:4px;font-size:11px}.sax-shared-editor .se-status>span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}.sax-shared-editor .se-list-view{gap:5px}.sax-shared-editor .se-filterbar{gap:5px}.sax-shared-editor .se-filterbar select{max-width:180px}.sax-shared-editor .se-filterbar .se-grow{min-width:140px}.sax-shared-editor .se-wildcard{font-size:11px;padding:3px 6px;margin-top:5px}.sax-shared-editor .se-columns{line-height:18px}.sax-shared-editor .se-error-message{font-size:12px;white-space:pre-wrap}
 @media(max-width:760px){.sax-shared-editor .se-header{flex-wrap:wrap}.sax-shared-editor .se-header strong{flex-basis:100%}.sax-shared-editor .se-header .se-status{margin-left:auto;max-width:130px}.sax-shared-editor .se-filterbar select{flex:1;max-width:none;min-width:80px}.sax-shared-editor .se-filterbar .se-grow{flex-basis:100%}}
@@ -39,7 +39,7 @@ const STYLE = `
 .sax-shared-editor .se-card[data-single=true] input.se-grow{min-width:40px}
 .sax-shared-editor .se-single-mode{font-size:11px;white-space:nowrap}
 .sax-shared-editor .se-item-actions{display:flex;gap:4px}
-.sax-shared-editor .se-item-actions button{flex:1;min-width:0;padding:4px 0;font-size:11px}
+.sax-shared-editor .se-item-actions button{flex:1;min-width:0;padding:4px 0;font-size:11px}.sax-shared-editor .se-item-actions .se-danger{color:var(--error-text,#ed9494)}.sax-shared-editor .se-invalid{border-color:var(--error-text,#ed9494)!important;box-shadow:0 0 0 1px var(--error-text,#ed9494)}.sax-shared-editor .se-field-error{color:var(--error-text,#ed9494);font-size:11px;line-height:15px;white-space:pre-wrap;margin:2px 0 4px}
 .sax-shared-editor .se-record{gap:8px;padding:4px 6px;font-size:13px}
 .sax-shared-editor .se-cell{line-height:18px;padding:2px 3px}
 .sax-shared-editor .se-record button,.sax-shared-editor .se-record input:not([type=checkbox]){font-size:12px;padding:3px 5px;min-height:24px}
@@ -82,6 +82,18 @@ function input(value, callback, type = "text") { const n = el("input"); n.type =
 function select(options, value, fn) { const n = el("select"); for (const [id, name] of options) { const o = el("option", "", name); o.value = id; n.append(o); } n.value = value; n.addEventListener("change", () => fn(n.value)); return n; }
 function check(value, fn) { const n = el("input"); n.type = "checkbox"; n.checked = value; n.addEventListener("change", () => fn(n.checked)); return n; }
 function label(text, control) { const n = el("label", "se-row"); n.append(control, document.createTextNode(text)); return n; }
+// 入力欄を赤枠にし、host の直後へ理由を出す。host が null なら赤枠だけにする。エラーを表示したときは true を返す。
+let fieldErrorSeq = 0;
+function setFieldError(control, message, host = control) {
+    control._fieldError?.remove(); control._fieldError = null;
+    control.classList?.toggle("se-invalid", Boolean(message));
+    if (!message) { control.removeAttribute?.("aria-invalid"); control.removeAttribute?.("aria-describedby"); return false; }
+    control.setAttribute("aria-invalid", "true");
+    if (host) { const note = el("div", "se-field-error", message); note.id = `se-field-error-${++fieldErrorSeq}`; note.setAttribute("role", "alert"); host.after(note); control._fieldError = note; control.setAttribute("aria-describedby", note.id); }
+    return true;
+}
+const TEXT_INPUT_EXCLUDED = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"]);
+function isTextEntry(target) { return Boolean(target?.isContentEditable) || target?.tagName === "TEXTAREA" || (target?.tagName === "INPUT" && !TEXT_INPUT_EXCLUDED.has(target.type)); }
 
 // Prefix sums support expanded editing rows without rendering the entire catalog.
 export class VariableRowIndex {
@@ -124,7 +136,7 @@ class VirtualRows {
 
 export function openSharedEditor(session, options = {}) {
     const existing = openEditors.get(session); if (existing) { existing.open(options); return existing.close; }
-    let pref = preferences.get(session); if (!pref) { pref = { query: "", recipeFilter: "", tags: [], lines: 3, scroll: 0, recipeId: null, sort: "name" }; preferences.set(session, pref); }
+    let pref = preferences.get(session); if (!pref) { pref = { query: "", recipeFilter: "", tags: [], lines: 3, scroll: 0, recipeId: null, sort: "name", results: { query: "", tags: [], scroll: 0 } }; preferences.set(session, pref); }
     let mode = options.mode ?? "items", result = options.result ?? null;
     if (options.recipeId) { if (mode === "items") { pref.recipeFilter = options.recipeId; pref.query = ""; pref.tags = []; pref.scroll = 0; } else pref.recipeId = options.recipeId; }
     let content, status, conflict, errorMessage, close, virtual = null, active = null, unsubscribe, localError = "", saveTimer, refreshing = false;
@@ -140,16 +152,18 @@ export function openSharedEditor(session, options = {}) {
     const orderLists = [];
     const showCandidates = new Set();
     const doc = () => session.document;
+    // アイテム一覧と実行結果は検索語・タグ・スクロール位置を別々に保持する。
+    const view = () => mode === "results" ? pref.results : pref;
+    let newItemId = null;
     function sortItems(values, resolve = value => value) {
         const tagKeys = pref.sort === "tags" ? itemTagSortKeys(values.map(resolve)) : null;
         const ranks = pref.sort === "catalog" ? new Map(doc().catalog.items.map((item, index) => [item.id, index])) : null;
-        const counts = new Map();
-        if (pref.sort === "usage") for (const r of doc().recipes) for (const id of groupItemIds(r.groups)) counts.set(id, (counts.get(id) ?? 0) + 1);
+        const usage = pref.sort === "usage" ? itemUsage(doc().recipes) : null;
         return values.sort((a, b) => {
             const left = resolve(a), right = resolve(b);
             if (tagKeys) { const difference = compareItemTagKeys(tagKeys.get(left.id), tagKeys.get(right.id)); if (difference) return difference; }
             if (ranks) { const difference = (ranks.get(left.id) ?? Infinity) - (ranks.get(right.id) ?? Infinity); if (difference) return difference; }
-            if (pref.sort === "usage") { const difference = (counts.get(right.id) ?? 0) - (counts.get(left.id) ?? 0); if (difference) return difference; }
+            if (pref.sort === "usage") { const difference = (usage.get(right.id)?.groups ?? 0) - (usage.get(left.id)?.groups ?? 0); if (difference) return difference; }
             return left.name.localeCompare(right.name, "ja") || left.id.localeCompare(right.id);
         });
     }
@@ -225,11 +239,11 @@ export function openSharedEditor(session, options = {}) {
     function entries() {
         if (mode === "items") {
             let ids = null; const r = doc().recipes.find(r => r.id === pref.recipeFilter); if (r) ids = new Set(groupItemIds(r.groups));
-            const q = pref.query.trim().toLocaleLowerCase();
-            const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && matchesItem(i, q, pref.tags));
+            const tokens = searchTokens(pref.query);
+            const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && matchesItem(i, tokens, pref.tags));
             return sortItems(values).map(i => ({ key: i.id, itemId: i.id, height: Math.max(33, 13 + pref.lines * 18) }));
         }
-        const list = []; const q = pref.query.trim().toLocaleLowerCase();
+        const list = []; const tokens = searchTokens(pref.results.query), resultTags = pref.results.tags;
         for (const [ri, r] of (result?.rows ?? []).entries()) {
             if (resultRecipe && r.recipe_id !== resultRecipe) continue;
             list.push({ key: `r:${ri}`, section: true, title: r.name, subtitle: r.on ? "テキストセット" : "無効・出力なし", height: 32 });
@@ -247,7 +261,7 @@ export function openSharedEditor(session, options = {}) {
                     list.push({ key, section: true, depth, title: g.name || "構成要素", subtitle: !r.on || !g.on ? "未選択・無効／出力なし" : g.mode === "random" ? `ランダム${Object.hasOwn(g,"count_min") ? formatRandomCount(g) + "件" : ""}・候補${g.candidate_ids?.length ?? 0}件から${snapshots.length}件選択` : `すべて使用・${snapshots.length}件`, candidates: g, height: 32 });
                     const values = snapshots.map((snapshot, i) => ({ key: `${key}:${i}`, depth, itemId: snapshot.id, snapshot, height: Math.max(33, 13 + pref.lines * 18) + 32 }));
                     if (reveal || showCandidates.has(key)) for (const id of g.candidate_ids ?? []) if (!chosen.has(id)) { const item = itemMap.get(id); if (item) values.push({ key: `${key}:candidate:${id}`, depth, itemId: id, candidate: true, height: Math.max(33, 13 + pref.lines * 18) }); }
-                    list.push(...sortItems(values.filter(e => matchesItem(itemMap.get(e.itemId) ?? e.snapshot, q, pref.tags)), e => itemMap.get(e.itemId) ?? e.snapshot));
+                    list.push(...sortItems(values.filter(e => matchesItem(itemMap.get(e.itemId) ?? e.snapshot, tokens, resultTags)), e => itemMap.get(e.itemId) ?? e.snapshot));
                 }
             }
             appendGroups(r.groups ?? [], `g:${ri}`);
@@ -264,8 +278,9 @@ export function openSharedEditor(session, options = {}) {
             dlg.append(row(el("span", "se-muted se-grow", "共有カタログへ自動保存"), wildcardButton(area, { commit: () => putItem(id, { text: area.value }, historyKey), current: () => doc().catalog.items.some(i => i.id === id) })), area, btn("閉じる", end)); queueMicrotask(() => area.focus());
         }, onClose() { detachAutoComplete(area); refresh(); } });
     }
-    function revealNewItem(item, resetFilters = true) {
+    function revealNewItem(item, resetFilters = true, selectName = false) {
         if (resetFilters) { pref.query = ""; pref.tags = []; pref.recipeFilter = ""; } render();
+        newItemId = selectName ? item.id : null;
         const index = virtual.entries.findIndex(e => e.itemId === item.id);
         if (index < 0) return;
         virtual.scroll.scrollTop = virtual.index.offsets[index]; virtual.paint();
@@ -297,18 +312,29 @@ export function openSharedEditor(session, options = {}) {
                 releaseActive(); virtual.pinned = entry.key; n.dataset.editing = "true";
                 const latest = itemMap.get(entry.itemId); if (!latest) return;
                 const edit = field === "text" ? el("textarea") : el("input"); edit.setAttribute("aria-label", field === "text" ? "アイテム本文" : field === "name" ? "アイテム名" : "アイテムタグ"); edit.value = field === "tags" ? latest.tags.join(", ") : latest[field]; if (field === "name") edit.maxLength = 256;
-                const historyKey = newId(); const commit = () => { let next = edit.value; try { if (field === "tags") next = parseTags(next); putItem(entry.itemId, { [field]: next }, historyKey); } catch (error) { localError = error.message; updateStatus(); } };
+                const historyKey = newId(); const commit = () => { let next = edit.value; try { if (field === "tags") { next = parseTags(next); if (setFieldError(edit, tagsError(next))) return; } putItem(entry.itemId, { [field]: next }, historyKey); } catch (error) { localError = error.message; updateStatus(); } };
                 let composing = false; edit.addEventListener("compositionstart", () => { composing = true; }); edit.addEventListener("compositionend", () => { composing = false; commit(); }); edit.addEventListener("input", () => { if (!composing) commit(); });
-                edit.addEventListener("keydown", e => { if (e.defaultPrevented) return; if ((e.key === "Enter" && field !== "text") || (e.key === "Escape" && !composing)) { e.preventDefault(); edit.blur(); } });
+                edit.addEventListener("keydown", e => {
+                    if (e.defaultPrevented) return;
+                    const advance = e.key === "Enter" && field !== "text" && !composing && !e.isComposing && e.keyCode !== 229;
+                    if (!advance && !(e.key === "Escape" && !composing)) return;
+                    e.preventDefault(); edit.blur();
+                    // 名前の確定後は同じアイテムの本文編集へ進む。
+                    if (advance && field === "name") virtual?.nodes.get(entry.key)?.querySelector('[aria-label="本文を編集"]')?.click();
+                });
                 let pickerButton;
                 edit.addEventListener("blur", event => { if (active?.edit !== edit || active.picker || event.relatedTarget === pickerButton) return; commit(); active = null; virtual.pinned = null; refresh(); });
-                c.replaceWith(edit); active = { edit, commit, picker: false };
+                // 欄の下へエラーを出せるよう、タグ欄だけ入力欄を包んで差し替える。
+                const holder = field === "tags" ? el("div") : edit; if (holder !== edit) holder.append(edit);
+                c.replaceWith(holder); active = { edit, commit, picker: false };
                 if (field === "text") {
                     attachAutoComplete(edit);
                     pickerButton = wildcardButton(edit, { commit, inline: true, current: () => doc().catalog.items.some(i => i.id === entry.itemId) });
                     edit.after(pickerButton);
                 }
-                edit.focus(); edit.setSelectionRange?.(edit.value.length, edit.value.length);
+                edit.focus();
+                if (field === "name" && newItemId === entry.itemId) edit.select?.(); else edit.setSelectionRange?.(edit.value.length, edit.value.length);
+                newItemId = null;
             }
             return c;
         }
@@ -321,12 +347,12 @@ export function openSharedEditor(session, options = {}) {
         const tools = el("div", "se-tools"); if (current) {
             const expanded = btn("拡大", () => { releaseActive(); expandedEditor(entry.itemId); });
             const actions = el("div", "se-item-actions"); actions.append(expanded);
-            if (mode === "items") { const duplicate = btn("複製", () => duplicateItem(entry.itemId)); duplicate.title = "名前・本文・タグをコピーして新しいアイテムを作成"; duplicate.addEventListener("pointerdown", event => event.preventDefault()); actions.append(duplicate); }
+            if (mode === "items") { const duplicate = btn("複製", () => duplicateItem(entry.itemId)); duplicate.title = "名前・本文・タグをコピーして新しいアイテムを作成"; duplicate.addEventListener("pointerdown", event => event.preventDefault()); actions.append(duplicate); const remove = btn("削除", () => deleteItems([entry.itemId]), "se-danger"); remove.title = "このアイテムを削除（使用中のセットからも外れます）"; remove.addEventListener("pointerdown", event => event.preventDefault()); actions.append(remove); }
             tools.append(mode === "items" ? actions : expanded);
-            const tags = btn("タグ", () => { const value = input(current.tags.join(", "), () => {}); value.setAttribute("aria-label", "アイテムタグ"); showDialog({ title: "タグを編集", build(dlg, end) { dlg.append(value, btn("反映", () => { try { putItem(entry.itemId, { tags: parseTags(value.value) }); end(); } catch (error) { localError = error.message; updateStatus(); } })); } }); }); tags.classList.add("se-mobile-tags"); tools.append(tags);
+            const tags = btn("タグ", () => { const value = input(current.tags.join(", "), () => {}); value.setAttribute("aria-label", "アイテムタグ"); showDialog({ title: "タグを編集", build(dlg, end) { dlg.append(value, btn("反映", () => { try { const parsed = parseTags(value.value); if (setFieldError(value, tagsError(parsed))) return; putItem(entry.itemId, { tags: parsed }); end(); } catch (error) { localError = error.message; updateStatus(); } })); } }); }); tags.classList.add("se-mobile-tags"); tools.append(tags);
         } n.append(tools); return n;
     }
-    let bulkBar, selectAllControl, selectionCount;
+    let bulkBar, bulkTagEdit, selectAllControl, selectionCount;
     function selectableIds() { return [...new Set((virtual?.entries ?? []).filter(e => !e.section && itemMap.has(e.itemId)).map(e => e.itemId))]; }
     function selectMatching(yes) {
         releaseActive(); for (const id of selectableIds()) { if (yes) selected.add(id); else selected.delete(id); } updateBulk();
@@ -335,19 +361,19 @@ export function openSharedEditor(session, options = {}) {
         for (const id of selected) if (!itemMap.has(id)) selected.delete(id);
         if (selectionCount) selectionCount.textContent = `${selected.size}件選択`;
         for (const node of virtual?.nodes.values() ?? []) { const checkbox = node.querySelector("input[type=checkbox]"); if (checkbox) checkbox.checked = selected.has(node.dataset.itemId); }
-        if (bulkBar) { bulkBar.firstChild.textContent = `${selected.size}件選択`; bulkBar.hidden = !selected.size; }
+        if (bulkBar) { bulkBar.firstChild.textContent = `${selected.size}件選択`; bulkBar.hidden = !selected.size; if (!selected.size && bulkTagEdit) setFieldError(bulkTagEdit, ""); }
         if (selectAllControl && virtual) { const ids = selectableIds(); const count = ids.filter(id => selected.has(id)).length; selectAllControl.checked = Boolean(ids.length) && count === ids.length; selectAllControl.indeterminate = count > 0 && count < ids.length; }
     }
-    function matchesItem(item, query, tags) {
-        return tags.every(tag => item?.tags?.includes(tag)) && (!query || `${item?.name ?? ""}\n${item?.text ?? ""}\n${item?.tags?.join(" ") ?? ""}`.toLocaleLowerCase().includes(query));
+    function matchesItem(item, tokens, tags) {
+        return tags.every(tag => item?.tags?.includes(tag)) && matchesSearch(item, tokens);
     }
-    function tagFilter(getTags = () => pref.tags, setTags = tags => { pref.tags = tags; }, onChange = refresh) {
+    function tagFilter(getTags = () => view().tags, setTags = tags => { view().tags = tags; }, onChange = refresh) {
         const control = el("details", "se-tag-filter"), summary = el("summary"), popup = el("div", "se-tag-popup");
         summary.setAttribute("aria-label", "タグで絞り込み");
         const options = el("div", "se-tag-options");
         const tags = [...new Set([...doc().catalog.items.flatMap(i => i.tags), ...getTags()])].sort((a,b) => a.localeCompare(b,"ja"));
         const updateSummary = () => { const chosen = getTags(); summary.textContent = chosen.length ? `タグ：${chosen.join("・")} ▾` : "タグ：すべて ▾"; summary.title = chosen.length ? `すべてに一致（AND）：${chosen.join("、")}` : "複数のタグを選んで絞り込み"; };
-        const search = input("", value => { const q = value.toLocaleLowerCase(); for (const option of options.children) option.hidden = !(option.dataset.tag ?? "").toLocaleLowerCase().includes(q); }); search.placeholder = "絞り込みタグを検索";
+        const search = input("", value => { const tokens = searchTokens(value); for (const option of options.children) option.hidden = !tokens.every(token => normalizeSearch(option.dataset.tag).includes(token)); }); search.placeholder = "絞り込みタグを検索";
         for (const tag of tags) {
             const checkbox = check(getTags().includes(tag), yes => { releaseActive(); setTags(yes ? [...new Set([...getTags(), tag])] : getTags().filter(value => value !== tag)); updateSummary(); onChange(); });
             checkbox.setAttribute("aria-label", `${tag}で絞り込み`);
@@ -361,8 +387,9 @@ export function openSharedEditor(session, options = {}) {
         return control;
     }
     function filters() {
-        const q = input(pref.query, value => { pref.query = value; releaseActive(); scheduleRefresh(); }); q.placeholder = "名前・本文・タグを検索"; q.className = "se-grow";
-        const tag = tagFilter();
+        const state = view();
+        const q = input(state.query, value => { state.query = value; releaseActive(); scheduleRefresh(); }); q.placeholder = "名前・本文・タグを検索（空白区切りで AND）"; q.className = "se-grow";
+        const tag = tagFilter(() => state.tags, tags => { state.tags = tags; });
         const sets = [["", "セット：すべて"], ...sortedNamedOptions(doc().recipes).map(r => [r.id, r.name])];
         const set = select(sets, mode === "results" ? resultRecipe : pref.recipeFilter, value => { releaseActive(); if (mode === "results") resultRecipe = value; else pref.recipeFilter = value; refresh(); });
         set.setAttribute("aria-label", "テキストセットで絞り込み");
@@ -372,7 +399,7 @@ export function openSharedEditor(session, options = {}) {
     function renderList() {
         const filterBar = filters(); content.append(filterBar);
         if (mode === "items") {
-            const newItem = btn("＋ アイテム", () => { const item = { id: newId(), name: "新しいアイテム", text: "", tags: [] }; if (mutate([{ type: "item.put", item }])) revealNewItem(item); });
+            const newItem = btn("＋ アイテム", () => { const item = { id: newId(), name: "新しいアイテム", text: "", tags: [] }; if (mutate([{ type: "item.put", item }])) revealNewItem(item, true, true); });
             filterBar.append(newItem);
         } else {
             const meta = el("div", "se-muted", result ? `カタログ改訂 ${result.revision ?? result.catalog_revision ?? "—"} · Seed ${result.seed ?? "—"} · 本文の修正は次回実行に反映` : "まだ実行結果がありません。ワークフローを実行してください。");
@@ -382,17 +409,36 @@ export function openSharedEditor(session, options = {}) {
         selectionCount = el("span", "se-muted");
         const selectionTools = row(btn("一覧を全選択", () => selectMatching(true)), btn("一覧の選択を解除", () => selectMatching(false)), btn("すべて解除", () => { selected.clear(); updateBulk(); }), selectionCount); selectionTools.classList.add("se-filterbar", "se-selection-tools");
         selectionTools.firstChild.title = "検索・タグ・セットに一致する全件を選択（画面外も含む）"; content.append(selectionTools);
-        const tagEdit = input("", () => {}); tagEdit.placeholder = "一括操作するタグ";
-        bulkBar = row(el("span", "se-muted", `${selected.size}件選択`), tagEdit, btn("タグ追加", () => bulkTags(tagEdit.value, true)), btn("タグ削除", () => bulkTags(tagEdit.value, false)), ...(mode === "items" ? [btn("削除", async () => { if (!selected.size) return; if (await showConfirmDialog({ title: "アイテムを削除", message: `${selected.size}件を削除します。すべてのセットの候補からも除かれます。`, danger: true, okLabel: "削除" })) { mutate([...selected].map(id => ({ type: "item.delete", id }))); selected.clear(); refresh(); updateBulk(); } })] : []));
+        const tagEdit = input("", () => { setFieldError(tagEdit, ""); }); tagEdit.placeholder = "一括操作するタグ"; bulkTagEdit = tagEdit;
+        bulkBar = row(el("span", "se-muted", `${selected.size}件選択`), tagEdit, btn("タグ追加", () => bulkTags(tagEdit, true)), btn("タグ削除", () => bulkTags(tagEdit, false)), ...(mode === "items" ? [btn("削除", () => deleteItems([...selected]))] : []));
         bulkBar.classList.add("se-filterbar"); bulkBar.hidden = !selected.size; content.append(bulkBar);
         const columns = el("div", "se-columns"); for (const [name, cls] of [["", ""], ["名前", ""], ["本文（クリックして編集）", ""], ["タグ", "se-tags"], ["", ""]]) columns.append(el("span", cls, name)); content.append(columns);
         selectAllControl = null;
         selectAllControl = check(false, selectMatching); selectAllControl.setAttribute("aria-label", "表示中のアイテムを全選択"); columns.firstChild.replaceWith(selectAllControl);
-        const scroll = el("div", "se-scroll"); content.append(scroll); virtual = new VirtualRows(scroll, itemRow, dispose); virtual.set(entries()); scroll.scrollTop = pref.scroll; scroll.addEventListener("scroll", () => { pref.scroll = scroll.scrollTop; }); virtual.paint();
+        const scroll = el("div", "se-scroll"); content.append(scroll); virtual = new VirtualRows(scroll, itemRow, dispose); virtual.set(entries()); const state = view(); scroll.scrollTop = state.scroll; scroll.addEventListener("scroll", () => { state.scroll = scroll.scrollTop; }); virtual.paint();
         if (!virtual.entries.length) virtual.canvas.append(el("div", "se-empty", mode === "items" ? "該当するアイテムがありません。検索・絞り込みを変更するか、アイテムを追加してください。" : "表示する実行結果がありません。"));
         updateBulk();
     }
-    function bulkTags(value, add) { try { const tags = parseTags(value); mutate([...selected].map(id => itemMap.get(id)).filter(Boolean).map(item => ({ type: "item.put", item: { ...item, tags: add ? [...new Set([...item.tags, ...tags])] : item.tags.filter(t => !tags.includes(t)) } }))); } catch (error) { localError = error.message; updateStatus(); } }
+    function bulkTags(control, add) {
+        try {
+            const tags = parseTags(control.value), inputProblem = tagsError(tags);
+            if (setFieldError(control, inputProblem, bulkBar)) return;
+            const items = [...selected].map(id => itemMap.get(id)).filter(Boolean).map(item => ({ ...item, tags: add ? [...new Set([...item.tags, ...tags])] : item.tags.filter(t => !tags.includes(t)) }));
+            const failed = items.filter(item => tagsError(item.tags));
+            if (failed.length) { setFieldError(control, `「${failed[0].name || "アイテム"}」${failed.length > 1 ? `ほか${failed.length - 1}件` : ""}でタグが最大${LIMITS.tags}件を超えるため、追加できません`, bulkBar); return; }
+            setFieldError(control, "");
+            mutate(items.map(item => ({ type: "item.put", item })));
+        } catch (error) { localError = error.message; updateStatus(); }
+    }
+    async function deleteItems(ids) {
+        releaseActive(); ids = ids.filter(id => itemMap.has(id)); if (!ids.length) return;
+        const impact = deletionImpact(itemUsage(doc().recipes), ids);
+        const target = ids.length === 1 ? `「${itemMap.get(ids[0]).name || "アイテム"}」` : `${ids.length}件`;
+        const detail = impact.groups ? `使用中の構成要素 ${impact.groups}件・セット ${impact.recipes}件から外れます。` : "どのセットでも使用されていません。";
+        if (!await showConfirmDialog({ title: "アイテムを削除", message: `${target}を削除します。${detail}\n「元に戻す」で参照も含めて復元できます。`, danger: true, okLabel: "削除", cancelLabel: "キャンセル" })) return;
+        ids = ids.filter(id => itemMap.has(id));
+        if (mutate(ids.map(id => ({ type: "item.delete", id })))) { for (const id of ids) selected.delete(id); refresh(); updateBulk(); }
+    }
     function eligibleCandidateCount(g) { return g.kind === "nested" ? g.groups.filter(child => child.on && (child.weight ?? 1) > 0).length : g.item_ids.filter(id => candidateWeight(g, id) > 0).length; }
     function editGroup(groupId, change, historyKey) {
         const r = recipe(); if (!r) return; const next = structuredClone(r); const g = [...walkGroups(next.groups)].find(g => g.id === groupId); if (!g) return; change(g, next);
@@ -430,7 +476,7 @@ export function openSharedEditor(session, options = {}) {
         left.append(el("strong", "", candidateGroup ? `「${[...walkGroups(r.groups)].find(g => g.id === candidateGroup)?.name || "構成要素"}」の候補を変更` : "追加するアイテムを選択"));
         const parent = select(parentOptions(candidateGroup), targetParent, value => { targetParent = value; }); parent.setAttribute("aria-label", "構成要素の配置先");
         left.append(row(el("span", "se-muted", "配置先"), parent));
-        const q = input(candidateQuery, value => { candidateQuery = value; renderCandidates(); }); q.placeholder = "名前・本文・タグを検索"; q.className = "se-grow";
+        const q = input(candidateQuery, value => { candidateQuery = value; renderCandidates(); }); q.placeholder = "名前・本文・タグを検索（空白区切りで AND）"; q.className = "se-grow";
         const tag = tagFilter(() => candidateTags, tags => { candidateTags = tags; }, () => renderCandidates());
         const filter = row(q, tag, sortControl(() => renderCandidates())); filter.classList.add("se-filterbar"); left.append(filter);
         const scroll = el("div", "se-scroll se-candidate-scroll"); left.append(scroll);
@@ -454,10 +500,10 @@ export function openSharedEditor(session, options = {}) {
         });
         virtual = candidateVirtual;
         const renderCandidates = () => {
-            const query = candidateQuery.trim().toLocaleLowerCase();
-            candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidatesOnly || candidateSelection.has(i.id)) && matchesItem(i, query, candidateTags))).map(i => ({ key: i.id, itemId: i.id, height: 48 })));
+            const tokens = searchTokens(candidateQuery);
+            candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidatesOnly || candidateSelection.has(i.id)) && matchesItem(i, tokens, candidateTags))).map(i => ({ key: i.id, itemId: i.id, height: 48 })));
             for (const [id, n] of candidateVirtual.nodes) { n.querySelector("input").checked = candidateSelection.has(id); n.dataset.selected = String(candidateSelection.has(id)); }
-            count.textContent = `${candidateSelection.size}件選択`; matched.textContent = `${candidateVirtual.entries.length}件一致`;
+            if (number._fieldError) validateCount(); count.textContent = `${candidateSelection.size}件選択`; matched.textContent = `${candidateVirtual.entries.length}件一致`;
         };
         const count = el("strong"), matched = el("span", "se-muted"); count.title = "Shift+クリックで範囲選択。検索・タグを変更しても選択は保持されます";
         const selectionbar = row(count, label("選択済みだけ", check(candidatesOnly, yes => { candidatesOnly = yes; renderCandidates(); })), matched); selectionbar.classList.add("se-selectionbar"); left.insertBefore(selectionbar, scroll);
@@ -467,10 +513,12 @@ export function openSharedEditor(session, options = {}) {
         if (candidateSettings?.key !== settingsKey) candidateSettings = {key:settingsKey,mode:edited?.mode ?? "all",count:edited ? formatRandomCount(edited) : "1"};
         let chosenMode = candidateSettings.mode, chosenCount = candidateSettings.count;
         const unit = el("span", "se-muted", "件");
-        const modeSelect = select([["all", "すべて使う"], ["random", "ランダム"]], chosenMode, value => { candidateSettings.mode = chosenMode = value; number.hidden = unit.hidden = value !== "random"; }); const number = input(chosenCount, value => { candidateSettings.count = chosenCount = value; }); number.style.width = "85px"; number.placeholder = "0～2"; number.title = "固定件数（2）または範囲（0～2）"; number.setAttribute("aria-label", "追加する構成要素のランダム件数"); number.hidden = unit.hidden = chosenMode !== "random";
+        const modeSelect = select([["all", "すべて使う"], ["random", "ランダム"]], chosenMode, value => { candidateSettings.mode = chosenMode = value; number.hidden = unit.hidden = value !== "random"; if (value === "random") { if (number._fieldError) validateCount(); } else setFieldError(number, ""); }); const number = input(chosenCount, value => { candidateSettings.count = chosenCount = value; if (chosenMode === "random" && !separate()) validateCount(); else setFieldError(number, ""); }); number.style.width = "85px"; number.placeholder = "0～2"; number.title = "固定件数（2）または範囲（0～2）"; number.setAttribute("aria-label", "追加する構成要素のランダム件数"); number.hidden = unit.hidden = chosenMode !== "random";
         modeSelect.setAttribute("aria-label", "追加する構成要素の選択方式");
         const separate = () => !candidateGroup && additionMode === "separate";
-        const updateAdditionMode = () => { modeSelect.hidden = separate(); number.hidden = unit.hidden = separate() || chosenMode !== "random"; };
+        const parseCount = () => { const bounds = parseRandomCount(chosenCount); if (chosenMode === "random" && !separate() && bounds.count > candidateSelection.size) throw new Error("ランダム件数の上限は候補数以下にしてください"); return bounds; };
+        const validateCount = () => { try { parseCount(); setFieldError(number, "", number.parentElement); return true; } catch (error) { setFieldError(number, error.message, number.parentElement); return false; } };
+        const updateAdditionMode = () => { modeSelect.hidden = separate(); number.hidden = unit.hidden = separate() || chosenMode !== "random"; if (number.hidden) setFieldError(number, ""); else if (number._fieldError) validateCount(); };
         if (!candidateGroup) {
             const addition = select([["combined", "1つの構成要素にまとめる"], ["separate", "アイテムごとに分ける"]], additionMode, value => { additionMode = value; updateAdditionMode(); });
             addition.setAttribute("aria-label", "構成要素の追加方法"); left.append(row(addition));
@@ -479,8 +527,8 @@ export function openSharedEditor(session, options = {}) {
         left.append(row(modeSelect, number, unit, btn(candidateGroup ? "候補を更新" : "選んだアイテムを追加", () => {
             if (!candidateSelection.size) { localError = "候補アイテムを選択してください"; updateStatus(); return; }
             let bounds;
-            try { bounds = separate() ? {count:1} : parseRandomCount(chosenCount); if (chosenMode === "random" && !separate() && bounds.count > candidateSelection.size) throw new Error("ランダム件数の上限は候補数以下にしてください"); }
-            catch (error) { localError = error.message; updateStatus(); return; }
+            try { bounds = separate() ? {count:1} : parseCount(); setFieldError(number, ""); }
+            catch (error) { if (chosenMode === "random" && !separate()) setFieldError(number, error.message, number.parentElement); else { localError = error.message; updateStatus(); } return; }
             const next = structuredClone(recipe());
             const previous = [...walkGroups(next.groups)].find(g => g.id === candidateGroup)?.item_ids ?? [];
             const ids = previous.filter(id => candidateSelection.has(id));
@@ -530,7 +578,7 @@ export function openSharedEditor(session, options = {}) {
             if (!single) {
                 const candidates = nested ? g.groups : g.item_ids;
                 const groupMode = select([["all", "すべて使う"], ["random", "ランダム"]], g.mode, value => { editGroup(g.id, next => { next.mode = value; }); render(); });
-                const amount = input(formatRandomCount(g), value => { try { const bounds = parseRandomCount(value); if (bounds.count > eligibleCandidateCount(locateGroup(recipe().groups, g.id).group)) throw new Error("ランダム件数の上限は有効かつ正の重みの候補数以下にしてください"); editGroup(g.id, next => { Object.assign(next, bounds); if (!Object.hasOwn(bounds,"count_min")) delete next.count_min; }); localError = ""; updateStatus(); } catch (error) { localError = error.message; updateStatus(); } }); amount.style.width = "85px"; amount.placeholder = "0～2"; amount.title = "固定件数（2）または範囲（0～2）"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
+                const amount = input(formatRandomCount(g), value => { try { const bounds = parseRandomCount(value); if (bounds.count > eligibleCandidateCount(locateGroup(recipe().groups, g.id).group)) throw new Error("ランダム件数の上限は有効かつ正の重みの候補数以下にしてください"); editGroup(g.id, next => { Object.assign(next, bounds); if (!Object.hasOwn(bounds,"count_min")) delete next.count_min; }); localError = ""; setFieldError(amount, ""); updateStatus(); } catch (error) { setFieldError(amount, error.message, amount.parentElement); } }); amount.style.width = "85px"; amount.placeholder = "0～2"; amount.title = "固定件数（2）または範囲（0～2）"; amount.hidden = g.mode !== "random"; amount.setAttribute("aria-label", `構成要素 ${index + 1}のランダム件数`);
                 const preview = el("span", "se-muted se-group-preview", nested ? g.groups.slice(0,4).map(child => child.name).join("、") : g.item_ids.slice(0, 4).map(id => itemMap.get(id)?.name ?? "削除済み").join("、"));
                 preview.title = "編集アイコンで全候補を一覧表示";
                 const orderButton = btn("出力順", () => { orderGroup = orderGroup === g.id ? null : g.id; orderScroll = 0; render(); }); orderButton.setAttribute("aria-expanded", String(orderGroup === g.id)); orderButton.title = "候補アイテムの出力順を並び替え";
@@ -562,8 +610,9 @@ export function openSharedEditor(session, options = {}) {
             }
         }
     }
-    function weightInput(value, name, commit) {
-        const control = input(value, raw => { try { const weight = parseSelectionWeight(raw); commit(weight); localError = ""; updateStatus(); } catch (error) { localError = error.message; updateStatus(); } }, "number");
+    // inline が真なら行の高さが固定された一覧内の欄で、メッセージは欄の近くに出せず赤枠とヘッダーの表示にとどめる。
+    function weightInput(value, name, commit, inline = false) {
+        const control = input(value, raw => { try { const weight = parseSelectionWeight(raw); commit(weight); localError = ""; setFieldError(control, ""); updateStatus(); } catch (error) { if (inline) { setFieldError(control, error.message, null); localError = error.message; updateStatus(); } else setFieldError(control, error.message, control.parentElement); } }, "number");
         control.min = "0"; control.max = "1000000"; control.step = "any"; control.style.width = "60px"; control.style.flex = "none"; control.setAttribute("aria-label", name); control.title = "抽選の重み：1が基準、3は選ばれやすく、0は抽選対象外"; return control;
     }
     function renderOrder(card, group) {
@@ -587,7 +636,7 @@ export function openSharedEditor(session, options = {}) {
             const up = control("↑", "アイテムを上へ", () => moveCandidate(group.id, entry.itemId, entry.index - 1)), down = control("↓", "アイテムを下へ", () => moveCandidate(group.id, entry.itemId, entry.index + 1));
             up.disabled = entry.index === 0; down.disabled = entry.index === group.item_ids.length - 1;
             n.append(handle, position, copy);
-            if (group.mode === "random") n.append(weightInput(candidateWeight(group, entry.itemId), `${item?.name || entry.itemId}の抽選重み`, value => editGroup(group.id, next => { if (value === 1) { if (next.item_weights) { delete next.item_weights[entry.itemId]; if (!Object.keys(next.item_weights).length) delete next.item_weights; } } else next.item_weights = {...next.item_weights, [entry.itemId]:value}; })));
+            if (group.mode === "random") n.append(weightInput(candidateWeight(group, entry.itemId), `${item?.name || entry.itemId}の抽選重み`, value => editGroup(group.id, next => { if (value === 1) { if (next.item_weights) { delete next.item_weights[entry.itemId]; if (!Object.keys(next.item_weights).length) delete next.item_weights; } } else next.item_weights = {...next.item_weights, [entry.itemId]:value}; }), true));
             n.append(up, down); return n;
         });
         orderLists.push(list); list.set(group.item_ids.map((id, index) => ({ key: id, itemId: id, index, height: 42 })));
@@ -609,10 +658,31 @@ export function openSharedEditor(session, options = {}) {
         content.classList.toggle("se-set-view", mode === "sets");
         if (mode === "sets") renderSets(); else renderList(); updateStatus(); refreshing = false;
     }
-    const switchMode = next => { releaseActive(); pref.scroll = 0; pref.query = ""; pref.tags = []; mode = next; render(); };
+    const switchMode = next => { releaseActive(); mode = next; render(); };
+    const undo = () => { releaseActive(); session.undo(); render(); };
+    const redo = () => { releaseActive(); session.redo(); render(); };
+    // 他のダイアログ（確認・拡大編集・ピッカーなど）が前面にあるときは、そちらに任せる。
+    const isTopmost = () => {
+        const overlay = close?.overlay; if (!overlay?.isConnected || overlay.style.display === "none") return false;
+        for (let next = overlay.nextElementSibling; next; next = next.nextElementSibling) if (next.style?.zIndex === "10000" && next.style.display !== "none") return false;
+        return true;
+    };
+    const onKeydown = event => {
+        if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || !isTopmost()) return;
+        if (event.key === "Escape") {
+            event.preventDefault();
+            const popup = content?.querySelector(".se-tag-filter[open]");
+            if (popup) popup.open = false; else close();
+        } else if ((event.ctrlKey || event.metaKey) && !event.altKey && !isTextEntry(event.target)) {
+            const key = event.key.toLowerCase(), redoing = (key === "z" && event.shiftKey) || (key === "y" && event.ctrlKey && !event.shiftKey);
+            if (!redoing && !(key === "z" && !event.shiftKey)) return;
+            event.preventDefault(); event.stopPropagation(); if (redoing) redo(); else undo();
+        }
+    };
+    document.addEventListener("keydown", onKeydown);
     close = showDialog({ title: `SAX Text Catalog V2 — ${doc().name}`, width: 1200, maxHeight: "97vh", className: "sax-shared-editor", onClose() {
         pref.candidateQuery = candidateQuery; pref.candidateTags = [...candidateTags];
-        document.removeEventListener("pointerdown", dismissTagFilter, true);
+        document.removeEventListener("pointerdown", dismissTagFilter, true); document.removeEventListener("keydown", onKeydown);
         for (const list of orderLists.splice(0)) list.destroy();
         releaseActive(); clearTimeout(saveTimer); unsubscribe?.(); virtual?.destroy(); for (const t of content?.querySelectorAll("textarea") ?? []) detachAutoComplete(t); openEditors.delete(session); void session.flush().catch(() => {});
     }, build(dlg, end) {
@@ -620,12 +690,12 @@ export function openSharedEditor(session, options = {}) {
         const style = el("style"); style.textContent = STYLE; dlg.append(style);
         status = row(el("span"), btn("保存を再試行", () => safeAsync(() => session.retry()))); status.classList.add("se-status", "se-muted");
         const title = el("strong", "", doc().name); title.title = `SAX Text Catalog V2 — ${doc().name}`;
-        const header = row(title, btn("アイテム", () => switchMode("items")), btn("テキストセット", () => switchMode("sets")), ...(result ? [btn("前回の実行結果", () => switchMode("results"))] : []), status, btn("元に戻す", () => { releaseActive(); session.undo(); render(); }), btn("やり直す", () => { releaseActive(); session.redo(); render(); }), btn("閉じる", end)); header.classList.add("se-header");
+        const header = row(title, btn("アイテム", () => switchMode("items")), btn("テキストセット", () => switchMode("sets")), ...(result ? [btn("前回の実行結果", () => switchMode("results"))] : []), status, btn("元に戻す", undo), btn("やり直す", redo), btn("閉じる", end)); header.classList.add("se-header");
         errorMessage = el("div", "se-error se-error-message"); errorMessage.setAttribute("role", "alert"); errorMessage.hidden = true;
         conflict = row(el("span", "", "他の編集と競合しています。編集内容を保持しています。"), btn("最新を読み込み", async () => { if (await showConfirmDialog({ title: "最新データを読み込み", message: "この画面の未保存の編集を取り消し、保存済みの最新データを読み込みます。", okLabel: "読み込み" })) await safeAsync(() => session.reload()); render(); }), btn("最新に編集を再適用", () => safeAsync(() => session.reapply()))); conflict.classList.add("se-conflict"); conflict.hidden = true;
         dlg.append(header, errorMessage, conflict); content = el("div", "se-pane"); content.style.flex = "1"; dlg.append(content); render();
     } });
     unsubscribe = session.subscribe(() => { updateStatus(); scheduleRefresh(); });
-    openEditors.set(session, { close, open(next) { if (next.result) result = next.result; if (next.recipeId) { if (next.mode === "items") { pref.recipeFilter = next.recipeId; pref.query = ""; pref.tags = []; pref.scroll = 0; } else pref.recipeId = next.recipeId; } if (next.mode && next.mode !== mode) { pref.query = ""; pref.tags = []; pref.scroll = 0; } mode = next.mode ?? mode; render(); close.show(); } });
+    openEditors.set(session, { close, open(next) { if (next.result) { if (next.result !== result) pref.results = { query: "", tags: [], scroll: 0 }; result = next.result; } if (next.recipeId) { if (next.mode === "items") { pref.recipeFilter = next.recipeId; pref.query = ""; pref.tags = []; pref.scroll = 0; } else pref.recipeId = next.recipeId; } mode = next.mode ?? mode; render(); close.show(); } });
     return close;
 }

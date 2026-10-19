@@ -91,6 +91,51 @@ export function groupItemIds(groups) {
     return [...walkGroups(groups)].flatMap(group => group.kind === "nested" ? [] : group.item_ids);
 }
 
+// アイテムを参照している構成要素数とセットを集計する。削除確認（1-4）と使用数表示で共通に使う。
+export function itemUsage(recipes) {
+    const usage = new Map();
+    for (const recipe of recipes) for (const group of walkGroups(recipe.groups)) {
+        if (group.kind === "nested") continue;
+        for (const id of new Set(group.item_ids)) {
+            let entry = usage.get(id);
+            if (!entry) usage.set(id, entry = { groups: 0, recipeIds: new Set() });
+            entry.groups++; entry.recipeIds.add(recipe.id);
+        }
+    }
+    return usage;
+}
+
+export function deletionImpact(usage, ids) {
+    let groups = 0; const recipeIds = new Set();
+    for (const id of ids) { const entry = usage.get(id); if (!entry) continue; groups += entry.groups; for (const recipeId of entry.recipeIds) recipeIds.add(recipeId); }
+    return { groups, recipes: recipeIds.size };
+}
+
+// 全角・半角と大文字小文字を区別せず、空白区切りの全語を含むものに一致させる。
+export function normalizeSearch(text) {
+    return String(text ?? "").normalize("NFKC").toLowerCase();
+}
+
+export function searchTokens(query) {
+    return normalizeSearch(query).split(/\s+/u).filter(Boolean);
+}
+
+const searchTexts = new WeakMap();
+export function matchesSearch(item, tokens) {
+    if (!tokens.length) return true;
+    if (!item) return false;
+    let text = searchTexts.get(item);
+    if (text === undefined) { text = normalizeSearch(`${item.name ?? ""}\n${item.text ?? ""}\n${item.tags?.join(" ") ?? ""}`); searchTexts.set(item, text); }
+    return tokens.every(token => text.includes(token));
+}
+
+// タグの上限エラーを欄の近くへ具体的に示すための検査。問題がなければ空文字を返す。
+export function tagsError(tags) {
+    if (tags.length > LIMITS.tags) return `タグは最大${LIMITS.tags}件までです（現在${tags.length}件）`;
+    if (tags.some(tag => typeof tag === "string" && [...tag].length > LIMITS.name)) return `タグは各${LIMITS.name}文字までです`;
+    return "";
+}
+
 export function validateGroups(groups, itemIds) {
     const ids = new Set();
     let total = 0;
