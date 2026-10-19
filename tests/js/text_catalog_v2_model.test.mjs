@@ -228,3 +228,40 @@ test("debounceの待機前でもserialize相当のflushは最新入力を返す"
     config.text = "破棄"; buffer.changed(); buffer.cancel();
     assert.equal(JSON.parse(buffer.flush()).text, "日本語変換中");
 });
+
+import { itemUsage, deletionImpact, normalizeSearch, searchTokens, matchesSearch, tagsError } from "../../js/sax_text_catalog_v2_model.js";
+
+test("検索は空白区切りのAND・全角半角と大文字小文字を区別しない", () => {
+    const item = { name: "Masterpiece 傑作", text: "高品質なポートレート", tags: ["ＡＢＣ", "背景"] };
+    const hit = query => matchesSearch(item, searchTokens(query));
+    assert.equal(hit(""), true);
+    assert.equal(hit("masterpiece  高品質"), true);
+    assert.equal(hit("MASTERPIECE　ﾎﾟｰﾄﾚｰﾄ"), true, "全角空白区切り・半角カナ・大文字");
+    assert.equal(hit("abc 背景"), true, "タグの全角英字");
+    assert.equal(hit("masterpiece 存在しない"), false, "一語でも欠けたら不一致");
+    assert.equal(matchesSearch(undefined, searchTokens("a")), false);
+    assert.equal(normalizeSearch("Ｆｕｌｌ ＷＩＤＴＨ１２"), "full width12");
+    item.name = "別名"; assert.equal(hit("masterpiece"), true, "同一オブジェクトの検索文字列はキャッシュされる");
+    assert.equal(matchesSearch({ ...item }, searchTokens("masterpiece")), false, "複製した別オブジェクトは再計算される");
+});
+
+test("使用集計は構成要素数とセット数を数え、削除の影響と一致する", () => {
+    const group = (id, ids, extra = {}) => ({ id, name: id, mode: "all", on: true, count: 1, item_ids: ids, ...extra });
+    const recipes = [
+        { id: "r1", name: "A", groups: [group("g1", ["a", "b"]), { id: "n", name: "入れ子", kind: "nested", mode: "all", on: true, count: 1, groups: [group("g2", ["a"])] }] },
+        { id: "r2", name: "B", groups: [group("g3", ["a", "c"])] },
+    ];
+    const usage = itemUsage(recipes);
+    assert.deepEqual([usage.get("a").groups, usage.get("a").recipeIds.size], [3, 2]);
+    assert.deepEqual([usage.get("b").groups, usage.get("b").recipeIds.size], [1, 1]);
+    assert.equal(usage.has("unused"), false);
+    assert.deepEqual(deletionImpact(usage, ["a", "c"]), { groups: 4, recipes: 2 });
+    assert.deepEqual(deletionImpact(usage, ["unused"]), { groups: 0, recipes: 0 });
+});
+
+test("タグの上限エラーは件数と文字数を具体的に示す", () => {
+    assert.equal(tagsError(Array.from({ length: 8 }, (_, i) => `t${i}`)), "");
+    assert.match(tagsError(Array.from({ length: 9 }, (_, i) => `t${i}`)), /最大8件.*9件/);
+    assert.match(tagsError(["あ".repeat(257)]), /256文字/);
+    assert.equal(tagsError(["あ".repeat(256)]), "");
+});

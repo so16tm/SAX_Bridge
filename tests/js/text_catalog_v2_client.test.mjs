@@ -136,3 +136,13 @@ test("10000件の編集でも本文全件を送信せず、同じカタログの
     await second.flush(); assert.equal(second.document.catalog.items[9999].text, "変更");
     assert.ok(backend.calls[1].options.body.length < 300);
 });
+
+test("タグの上限超過は具体的な理由で拒否し、文書を変更しない", () => {
+    const session = new CatalogSession(fixture(), { request: server().request, debounceMs: 10000 });
+    const put = tags => session.mutate([edit("原文", { tags })]);
+    put(Array.from({ length: 8 }, (_, i) => `t${i}`));
+    assert.throws(() => put(Array.from({ length: 9 }, (_, i) => `t${i}`)), /最大8件/);
+    assert.throws(() => put(["あ".repeat(257)]), /256文字/);
+    assert.throws(() => put(["重複", "重複"]), /タグが不正/);
+    assert.equal(session.document.catalog.items[0].tags.length, 8);
+});

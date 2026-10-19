@@ -1,7 +1,7 @@
-import { getComfyTheme, txt, autoResize, showDialog, showPromptDialog, showAlertDialog } from "./sax_ui_base.js";
+import { getComfyTheme, txt, autoResize, showDialog, showPromptDialog, showAlertDialog, showConfirmDialog } from "./sax_ui_base.js";
 import { listCatalogs, createCatalog, importCatalog, getSession } from "./sax_text_catalog_v2_client.js";
 import { openSharedEditor } from "./sax_text_catalog_v2_editor.js";
-import { sortedNamedOptions, newId } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, newId, normalizeSearch, searchTokens } from "./sax_text_catalog_v2_model.js";
 import { makeSharedSetWidget, makeSharedCatalogWidget } from "./sax_text_catalog_v2_widget.js";
 
 const controls = new WeakMap();
@@ -47,10 +47,17 @@ export function installSharedControls(node) {
     const choose = (title, entries, callback) => showDialog({ title, width: 440, build(dialog, close) {
         const search = document.createElement("input"); search.placeholder = "検索"; dialog.append(search);
         const list = document.createElement("div"); list.style.cssText = "max-height:50vh;overflow:auto;display:grid;gap:6px"; dialog.append(list);
-        const render = () => { list.replaceChildren(); for (const entry of sortedNamedOptions(entries).filter(e => e.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()))) {
+        const render = () => { list.replaceChildren(); for (const entry of sortedNamedOptions(entries).filter(e => { const name = normalizeSearch(e.name); return searchTokens(search.value).every(token => name.includes(token)); })) {
             const button = document.createElement("button"); button.textContent = entry.name || "無題"; button.onclick = act(async () => { await callback(entry.id); close(); }); list.append(button);
         } }; search.oninput = render; render();
     } });
+    // カタログを替えるとこのノードのセット行は引き継がれない。失われる行があるときだけ確認する。
+    const confirmDiscardRows = async (title, okLabel) => {
+        const count = readReference(node).rows.length; if (!count) return true;
+        return showConfirmDialog({ title, message: `このノードで使用中のテキストセット ${count}行をクリアします。\nカタログ内のアイテムやセットは削除されません。`, danger: true, okLabel, cancelLabel: "キャンセル" });
+    };
+    // 新規作成は既定セットを、インポートはセットが1件のときだけ、最初の行として使う。
+    const initialRows = (doc, onlySingle) => doc.recipes.length && (!onlySingle || doc.recipes.length === 1) ? [{ id: newId(), recipe_id: doc.recipes[0].id, on: true }] : [];
     const open = act(async (mode, recipeId) => {
         const session = mode === "results" && controller.result?.selection?.catalog_id
             ? await getSession(controller.result.selection.catalog_id) : controller.session;
@@ -62,6 +69,15 @@ export function installSharedControls(node) {
     const catalogWidget = hidden(node.addWidget("combo", "カタログ", "読み込み中", act(async label => {
         const catalog = controller.catalogs.find(c => `${c.name} · ${c.id.slice(0, 8)}` === label);
         if (!catalog) return;
+        const current = readReference(node);
+        if (catalog.id === current.catalog_id) return;
+        const confirmed = await confirmDiscardRows("カタログを切り替え", "切り替え");
+        if (controller.disposed) return;
+        if (!confirmed) {
+            // セレクトボックスの表示を現在のカタログへ戻す。
+            catalogWidget.value = catalogWidget.options.values[controller.catalogs.findIndex(c => c.id === current.catalog_id)] ?? "カタログを選択／作成";
+            controller.catalogToolbar?.refresh(controller.catalogs, current.catalog_id); return;
+        }
         if (controller.session) await controller.session.flush();
         write({ version: 3, catalog_id: catalog.id, rows: [] }); await controller.reload();
     }), { values: [], serialize: false }));
@@ -127,8 +143,9 @@ export function installSharedControls(node) {
     const resultWidget = hidden(node.addWidget("button", "前回の実行結果", null, () => open("results"), { serialize: false }));
     const managementWidget = hidden(node.addWidget("button", "カタログ作成・入出力", null, () => showDialog({ title: "カタログ作成・入出力", build(dialog, close) {
         for (const [label, callback] of [["新しいカタログ", async () => {
+            if (!await confirmDiscardRows("カタログを作成", "作成")) return;
             const name = await showPromptDialog({ title: "カタログ名", defaultValue: "共通カタログ" }); if (name === null) return;
-            const doc = await createCatalog({ name }); write({ version: 3, catalog_id: doc.id, rows: [] }); await controller.reload(); close();
+            const doc = await createCatalog({ name }); if (controller.disposed) return; write({ version: 3, catalog_id: doc.id, rows: initialRows(doc, false) }); await controller.reload(); close();
         }], ["カタログ名を変更", async () => {
             const session = controller.session; if (!session) throw new Error("カタログを選択してください");
             const name = await showPromptDialog({ title: "カタログ名", defaultValue: session.document.name }); if (name === null) return;
@@ -139,7 +156,7 @@ export function installSharedControls(node) {
             const link = document.createElement("a"); link.href = url; link.download = `${controller.session.document.name}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         }]]) { const button = document.createElement("button"); button.textContent = label; button.onclick = act(callback); dialog.append(button); }
         const file = document.createElement("input"); file.type = "file"; file.accept = ".json,application/json";
-        file.onchange = act(async () => { if (!file.files[0]) return; const doc = await importCatalog(JSON.parse(await file.files[0].text())); write({ version: 3, catalog_id: doc.id, rows: [] }); await controller.reload(); close(); });
+        file.onchange = act(async () => { if (!file.files[0]) return; try { const source = JSON.parse(await file.files[0].text()); if (!await confirmDiscardRows("カタログをインポート", "インポート")) return; const doc = await importCatalog(source); if (controller.disposed) return; write({ version: 3, catalog_id: doc.id, rows: initialRows(doc, true) }); await controller.reload(); close(); } finally { file.value = ""; } });
         const label = document.createElement("label"); label.textContent = "インポート（新しいカタログとして追加）"; label.append(file); dialog.append(label);
     } }), { serialize: false }));
     controller.reload = act(async () => {
