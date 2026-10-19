@@ -1,5 +1,6 @@
 import { sortedNamedOptions, newId } from "./sax_text_catalog_v2_model.js";
 import { PAD, GAP, ROW_H, HEADER_H, BTN_RADIUS, getComfyTheme } from "./sax_ui_base.js";
+import { choosePicker } from "./sax_text_catalog_v2_dialogs.js";
 
 const CSS = `
 .sax-shared-sets{width:100%;box-sizing:border-box;color:var(--input-text,var(--ssw-text,#ddd));font:11px/16px sans-serif;padding:0 ${PAD + 7}px 4px;background:transparent;display:flex;flex-direction:column;gap:${GAP}px;overflow:visible}
@@ -10,12 +11,12 @@ const CSS = `
 .sax-shared-sets .ssw-entry[data-off=true]{opacity:.62}
 .sax-shared-sets .ssw-entry[data-drop=true]{outline:2px solid var(--primary-background,#5686d6)}
 .sax-shared-sets .ssw-entry[data-drag=true]{opacity:.4}
-.sax-shared-sets select,.sax-shared-sets button{font:inherit;color:inherit;border:1px solid var(--border-color,#45454b);border-radius:${BTN_RADIUS}px;background:var(--comfy-input-bg,#222222);padding:1px 6px;min-width:0;height:${ROW_H}px}
+.sax-shared-sets button{font:inherit;color:inherit;border:1px solid var(--border-color,#45454b);border-radius:${BTN_RADIUS}px;background:var(--comfy-input-bg,#222222);padding:1px 6px;min-width:0;height:${ROW_H}px}
 .sax-shared-sets button{cursor:pointer;white-space:nowrap}
 .sax-shared-sets button:hover{border-color:var(--primary-background,#5686d6)}
 .sax-shared-sets button:disabled{opacity:.4;cursor:default}
 .sax-shared-sets :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:1px}
-.sax-shared-sets select{flex:1;width:0;text-overflow:ellipsis}
+.sax-shared-sets .ssw-name{flex:1;width:0;text-align:left;overflow:hidden;text-overflow:ellipsis}
 .sax-shared-sets input[type=checkbox]{width:15px;height:15px;margin:0;flex:none;accent-color:var(--primary-background,#5686d6)}
 .sax-shared-sets .ssw-handle{cursor:grab;touch-action:none;width:20px;padding:0;flex:none;border-color:transparent;background:transparent;font-size:17px}
 .sax-shared-sets .ssw-remove{width:${ROW_H}px;padding:0;flex:none;font-size:16px}
@@ -115,11 +116,28 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
         const root = element("div", "ssw-entry"); root.dataset.rowId = id;
         const on = element("input"); on.type = "checkbox";
         const handle = button("≡", "ssw-handle"); handle.draggable = true; handle.setAttribute("aria-label", "ドラッグまたは上下キーで並び替え"); handle.title = "ドラッグで並び替え · 上下キーでも移動できます";
-        const select = element("select"), del = button("×", "ssw-remove");
+        const name = button("", "ssw-name"), del = button("×", "ssw-remove");
+        name.setAttribute("aria-haspopup", "dialog");
         const edit = editIcon("セット編集", "M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4");
         const items = editIcon("アイテム編集", "M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8M13 3v5h5M13 3l5 5M8 10h3M8 14h2M13 17l6-6 2 2-6 6-3 1 1-3");
         on.addEventListener("change", () => update(id, row => { row.on = on.checked; }));
-        select.addEventListener("change", () => selectRecipe(id, select.value)); select.addEventListener("blur", () => refresh());
+        // クリックで検索付きピッカー、ダブルクリックでセット編集。ダブルクリックの1回目でピッカーを開かないよう、マウスのクリックだけ少し待つ。
+        let clickTimer = null;
+        const pick = async () => {
+            clickTimer = null; if (disposed) return;
+            const current = displayRows().find(row => row.id === id), recipes = readRecipes() ?? [];
+            if (!current || !recipes.length) return;
+            const chosen = await choosePicker({ title: "テキストセットを選択", entries: sortedNamedOptions(recipes), current: current.recipe_id });
+            if (chosen === null || !elements.has(id)) return;
+            if (chosen !== current.recipe_id) selectRecipe(id, chosen);
+            elements.get(id)?.name.focus({ preventScroll: true });
+        };
+        name.addEventListener("click", event => {
+            if (event.detail > 1) { clearTimeout(clickTimer); clickTimer = null; return; }
+            if (event.detail === 0) { pick(); return; }
+            clearTimeout(clickTimer); clickTimer = setTimeout(pick, 400);
+        });
+        name.addEventListener("dblclick", () => { clearTimeout(clickTimer); clickTimer = null; open(openSet); });
         del.addEventListener("click", () => remove(id));
         const open = callback => { const current = rows().find(row => row.id === id); if (!current || !(readRecipes() ?? []).some(recipe => recipe.id === current.recipe_id)) return; try { const result = callback(current.recipe_id); result?.catch?.(fail); } catch (error) { fail(error); } };
         edit.addEventListener("click", () => open(openSet)); items.addEventListener("click", () => open(openItems));
@@ -131,7 +149,7 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
         handle.addEventListener("dragstart", event => { if (drafts.has(id)) { event.preventDefault(); return; } event.stopPropagation(); drag = { id, target: id, native: true }; root.dataset.drag = "true"; event.dataTransfer?.setData("text/plain", id); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; });
         root.addEventListener("dragover", event => { if (!drag || drafts.has(id)) return; event.preventDefault(); event.stopPropagation(); drag.target = id; highlight(id); if (event.dataTransfer) event.dataTransfer.dropEffect = "move"; });
         root.addEventListener("drop", event => { if (!drag || drafts.has(id)) return; event.preventDefault(); event.stopPropagation(); const source = drag.id; clearDrag(); move(source, id); }); handle.addEventListener("dragend", clearDrag);
-        root.append(on, handle, select, edit, items, del); return { root, on, handle, select, del, edit, items, optionSignature: null };
+        root.append(on, handle, name, edit, items, del); return { root, on, handle, name, del, edit, items, pick };
     }
     function resize() {
         if (disposed) return; const count = displayRows().length;
@@ -152,23 +170,18 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
         const valid = new Set(current.map(row => row.id));
         for (const [id, value] of elements) if (!valid.has(id)) { value.root.remove(); elements.delete(id); }
         const recipeList = sortedNamedOptions(recipes ?? []); const recipesById = new Map(recipeList.map(recipe => [recipe.id, recipe]));
-        const signature = JSON.stringify(recipeList.map(recipe => [recipe.id, recipe.name]));
         let missing = 0;
         for (const [index, currentRow] of current.entries()) {
             let value = elements.get(currentRow.id); if (!value) { value = createRow(currentRow.id); elements.set(currentRow.id, value); }
             const draft = drafts.has(currentRow.id); const recipe = recipesById.get(currentRow.recipe_id); if (!draft && !recipe && recipes !== null) missing++;
             const label = recipe?.name || (draft ? "追加するセット" : "参照先が見つからないセット");
             value.on.checked = currentRow.on; value.on.setAttribute("aria-label", `${label}を使用`); value.root.dataset.off = String(!currentRow.on);
-            value.select.setAttribute("aria-label", `${label}のテキストセットを選択`); value.del.setAttribute("aria-label", `${label}を行から削除`);
+            value.name.setAttribute("aria-label", `${label}のテキストセットを選択（Enterで検索、ダブルクリックで編集）`); value.del.setAttribute("aria-label", `${label}を行から削除`);
             value.edit.setAttribute("aria-label", `${label}のセット編集`); value.items.setAttribute("aria-label", `${label}のアイテム編集`);
-            const optionSignature = `${signature}:${currentRow.recipe_id}:${recipes === null}`;
-            if (value.optionSignature !== optionSignature && document.activeElement !== value.select) {
-                value.select.replaceChildren(); const placeholder = element("option", "", recipes === null ? "カタログを読み込み中…" : draft ? "テキストセットを選択…" : !recipe ? `参照先なし：${currentRow.recipe_id}` : "テキストセットを選択…"); placeholder.value = !draft && !recipe ? currentRow.recipe_id : ""; placeholder.disabled = !draft; value.select.append(placeholder);
-                for (const r of recipeList) { const option = element("option", "", r.name || "名前なしのセット"); option.value = r.id; value.select.append(option); }
-                value.select.value = currentRow.recipe_id; value.optionSignature = optionSignature;
-            }
-            value.select.disabled = recipes === null || !recipeList.length; value.edit.disabled = !recipe; value.items.disabled = !recipe; value.handle.disabled = draft;
-            // Moving existing elements retains focus and avoids resetting native select interaction.
+            const caption = recipes === null ? "カタログを読み込み中…" : recipe ? recipe.name || "名前なしのセット" : draft ? "テキストセットを選択…" : `参照先なし：${currentRow.recipe_id}`;
+            value.name.textContent = `${caption} ▾`; value.name.title = recipe ? `${caption}\nクリック：セットを検索して変更 / ダブルクリック：セット編集` : caption;
+            value.name.disabled = recipes === null || !recipeList.length; value.edit.disabled = !recipe; value.items.disabled = !recipe; value.handle.disabled = draft;
+            // Moving existing elements retains focus.
             const expected = list.children[index]; if (expected !== value.root) list.insertBefore(value.root, expected ?? null);
         }
         if (!message.classList.contains("ssw-error")) { message.textContent = recipes === null ? "カタログを読み込んでいます" : missing ? `${missing}行の参照先が見つかりません。セットを選び直してください。` : !current.length ? "使うセットを追加し、上から出力順に並べます" : drafts.size ? "セットを選択するとワークフローに追加されます" : ""; message.hidden = !message.textContent; }
@@ -178,10 +191,10 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
     function addDraft() {
         const recipes = readRecipes(); if (recipes === null) return;
         if (!recipes.length) { try { openSet(null)?.catch?.(fail); } catch (error) { fail(error); } return; }
-        const id = newId(); drafts.set(id, { id, recipe_id: "", on: true }); refresh(); queueMicrotask(() => elements.get(id)?.select.focus());
+        const id = newId(); drafts.set(id, { id, recipe_id: "", on: true }); refresh(); queueMicrotask(() => elements.get(id)?.pick());
     }
     add.addEventListener("click", addDraft);
-    // Node canvas listeners must not interpret a select, checkbox, or edit click as a node drag.
+    // Node canvas listeners must not interpret a button, checkbox, or edit click as a node drag.
     const stop = event => event.stopPropagation(); for (const event of ["pointerdown", "mousedown", "dblclick", "wheel", "keydown", "keyup"]) panel.addEventListener(event, stop);
     const widget = node.addDOMWidget("__sax_shared_sets", "sax-shared-sets", panel, {
         serialize: false, hideOnZoom: false, selectOn: [], margin: 0,

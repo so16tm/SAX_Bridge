@@ -265,3 +265,49 @@ test("タグの上限エラーは件数と文字数を具体的に示す", () =>
     assert.match(tagsError(["あ".repeat(257)]), /256文字/);
     assert.equal(tagsError(["あ".repeat(256)]), "");
 });
+
+import { usageSummary, recipeItemIds, appendItemGroups, tagCounts, suggestTags, applyTagSuggestion, validateGroups } from "../../js/sax_text_catalog_v2_model.js";
+
+test("使用数の文言は削除確認と共通で、件数は同じ集計から出る", () => {
+    const group = (id, ids) => ({ id, name: id, mode: "all", on: true, count: 1, item_ids: ids });
+    const recipes = [{ id: "r1", name: "A", groups: [group("g1", ["a"]), group("g2", ["a"])] }, { id: "r2", name: "B", groups: [group("g3", ["a"])] }];
+    assert.equal(usageSummary(deletionImpact(itemUsage(recipes), ["a"])), "使用中の構成要素 3件・セット 2件");
+    assert.equal(usageSummary(deletionImpact(itemUsage(recipes), ["x"])), "どのセットでも使用されていません");
+    assert.deepEqual([...recipeItemIds(recipes[0])], ["a"]);
+    assert.deepEqual([...recipeItemIds(recipes[0], "g1")], ["a"], "他の構成要素が使っていれば数える");
+    assert.deepEqual([...recipeItemIds({ groups: [group("g", ["a", "b"])] }, "g")], [], "編集中の構成要素自身の候補は数えない");
+});
+
+test("一覧とセット画面で共通の追加処理: まとめる・アイテムごと・ネスト直下・不正な親", () => {
+    const base = () => ({ id: "r", name: "R", groups: [{ id: "n", name: "入れ子", kind: "nested", mode: "all", on: true, count: 0, groups: [] }] });
+    const names = { a: "甲", b: "" };
+    const combined = appendItemGroups(base(), ["a", "b"], { mode: "random", bounds: { count_min: 1, count: 2 }, nameOf: id => names[id] });
+    assert.deepEqual(combined.groups.slice(1).map(({ id, ...rest }) => rest), [{ name: "甲", on: true, mode: "random", count_min: 1, count: 2, item_ids: ["a", "b"] }]);
+    const separate = appendItemGroups(base(), ["a", "b"], { separate: true, mode: "random", bounds: { count: 1 }, nameOf: id => names[id] });
+    assert.deepEqual(separate.groups.slice(1).map(({ id, ...rest }) => rest), [
+        { name: "甲", on: true, mode: "all", count: 1, item_ids: ["a"] },
+        { name: "構成要素", on: true, mode: "all", count: 1, item_ids: ["b"] }], "アイテムごとは常に「すべて使う」、名前が空なら既定名");
+    assert.equal(new Set(separate.groups.map(g => g.id)).size, 3, "IDは重複しない");
+    const nested = appendItemGroups(base(), ["a"], { parentId: "n", nameOf: id => names[id] });
+    assert.deepEqual(nested.groups[0].groups.map(g => g.item_ids), [["a"]]);
+    assert.throws(() => appendItemGroups(base(), ["a"], { parentId: "missing" }), /見つかりません/);
+    assert.doesNotThrow(() => validateGroups(combined.groups, new Set(["a", "b"])), "追加結果は保存時の検証を通る");
+    const full = { id: "r", name: "R", groups: Array.from({ length: 31 }, (_, i) => ({ id: `f${i}`, name: "f", mode: "all", on: true, count: 1, item_ids: ["a"] })) };
+    assert.throws(() => validateGroups(appendItemGroups(full, ["a", "b"], { separate: true }).groups, new Set(["a", "b"])), /./, "構成要素の上限超過は検証で全件拒否される");
+});
+
+test("タグ補完は最後の語で絞り込み、入力済みを除き、使用数の多い順に出して最後の語だけ置き換える", () => {
+    const counts = tagCounts([{ tags: ["風景", "人物", "Sky"] }, { tags: ["風景", "Cloud"] }, { tags: ["風景", "Skyline"] }, { tags: ["Sky"] }]);
+    assert.deepEqual(suggestTags(counts, "").slice(0, 3).map(s => s.tag), ["風景", "Sky", "Cloud"], "空欄は使用数順→名前順");
+    assert.deepEqual(suggestTags(counts, "人物, sk").map(s => s.tag), ["Sky", "Skyline"], "大文字小文字を区別せず、入力済みの語は出さない");
+    assert.deepEqual(suggestTags(counts, "風景, ").map(s => s.tag).includes("風景"), false, "入力済みのタグは出さない");
+    assert.deepEqual(suggestTags(counts, "ｓｋｙ").map(s => s.tag), ["Sky", "Skyline"], "全角でも絞り込める");
+    assert.deepEqual(suggestTags(counts, "Sky").map(s => s.tag), ["Skyline"], "完全一致は出さない");
+    assert.deepEqual(suggestTags(counts, "yli").map(s => s.tag), ["Skyline"], "前方一致でなくても含めば出す");
+    assert.deepEqual(suggestTags(counts, "", 2).map(s => s.count), [3, 2]);
+    assert.equal(applyTagSuggestion("人物, 風", "風景"), "人物, 風景, ");
+    assert.equal(applyTagSuggestion("人物、風", "風景"), "人物、 風景, ");
+    assert.equal(applyTagSuggestion("風", "風景"), "風景, ");
+    assert.equal(applyTagSuggestion("a\nb", "風景"), "a\n風景, ");
+    assert.deepEqual(parseTags(applyTagSuggestion("人物, 風", "風景")), ["人物", "風景"]);
+});

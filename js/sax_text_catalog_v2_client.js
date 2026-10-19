@@ -210,11 +210,16 @@ export class CatalogSession {
         if (this.inFlight) await this.inFlight.catch(() => {});
         const latest = copy(validateDocument(await requestJson(this.request, `${BASE}/${encodeURIComponent(this.document.id)}`)));
         const operations = copy(this.pending); applyOperations(latest, operations);
-        this.document = latest; this.error = null; this.conflict = false; this.status = "pending";
+        this.document = latest; this.generation++; this.error = null; this.conflict = false; this.status = "pending";
         // 外部変更後は古い逆操作を適用しない。
         this.undoStack = []; this.redoStack = []; this.notify(); return this.flush();
     }
     async retry() { if (this.conflict) throw this.error; this.error = null; return this.flush(); }
+    // 実行と同じ抽選をサーバーで1セット分だけ行う。未保存の編集は先に保存し、カタログ・Queue・キャッシュは変更しない。
+    async preview({ recipeId, seed = 0 }) {
+        await this.flush();
+        return requestJson(this.request, `${BASE}/${encodeURIComponent(this.document.id)}/preview`, "POST", { recipe_id: recipeId, seed });
+    }
 }
 export async function listCatalogs({ request = defaultRequest } = {}) { return (await requestJson(request, BASE)).catalogs; }
 export async function createCatalog(value, { request = defaultRequest, catalog, recipes } = {}) {

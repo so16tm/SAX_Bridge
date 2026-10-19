@@ -262,6 +262,12 @@ def register_routes():
                     result = await asyncio.to_thread(register_v1, payload)
                 elif action == "create":
                     result = await asyncio.to_thread(create, payload)
+                elif action == "preview":
+                    from .text_catalog_v2 import preview_recipe
+                    if not isinstance(payload, dict):
+                        raise ValueError("オブジェクトが必要です")
+                    result = await asyncio.to_thread(preview_recipe, request.match_info["catalog_id"],
+                                                     payload.get("recipe_id"), payload.get("seed", 0))
                 else:
                     if not isinstance(payload, dict):
                         raise ValueError("オブジェクトが必要です")
@@ -291,6 +297,10 @@ def register_routes():
     @routes.get(prefix + "/{catalog_id}")
     async def catalog_get(request):
         return await handle(request, "get")
+
+    @routes.post(prefix + "/{catalog_id}/preview")
+    async def catalog_preview(request):
+        return await handle(request, "preview")
 
     @routes.patch(prefix + "/{catalog_id}")
     async def catalog_update(request):

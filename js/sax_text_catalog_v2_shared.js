@@ -1,7 +1,8 @@
 import { getComfyTheme, txt, autoResize, showDialog, showPromptDialog, showAlertDialog, showConfirmDialog } from "./sax_ui_base.js";
 import { listCatalogs, createCatalog, importCatalog, getSession } from "./sax_text_catalog_v2_client.js";
 import { openSharedEditor } from "./sax_text_catalog_v2_editor.js";
-import { sortedNamedOptions, newId, normalizeSearch, searchTokens } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, newId } from "./sax_text_catalog_v2_model.js";
+import { choosePicker } from "./sax_text_catalog_v2_dialogs.js";
 import { makeSharedSetWidget, makeSharedCatalogWidget } from "./sax_text_catalog_v2_widget.js";
 
 const controls = new WeakMap();
@@ -44,13 +45,7 @@ export function installSharedControls(node) {
     const configWidget = node.widgets.find(w => w.name === "config_json");
     const write = ref => { configWidget.value = JSON.stringify(ref); node.graph?.change?.(); redraw(); };
     const redraw = () => { controller.setWidget?.refresh(); node.setDirtyCanvas?.(true, true); if (node.graph && node.computeSize && node.setSize) autoResize(node); };
-    const choose = (title, entries, callback) => showDialog({ title, width: 440, build(dialog, close) {
-        const search = document.createElement("input"); search.placeholder = "検索"; dialog.append(search);
-        const list = document.createElement("div"); list.style.cssText = "max-height:50vh;overflow:auto;display:grid;gap:6px"; dialog.append(list);
-        const render = () => { list.replaceChildren(); for (const entry of sortedNamedOptions(entries).filter(e => { const name = normalizeSearch(e.name); return searchTokens(search.value).every(token => name.includes(token)); })) {
-            const button = document.createElement("button"); button.textContent = entry.name || "無題"; button.onclick = act(async () => { await callback(entry.id); close(); }); list.append(button);
-        } }; search.oninput = render; render();
-    } });
+    const choose = (title, entries, callback) => choosePicker({ title, entries: sortedNamedOptions(entries) }).then(id => id === null ? undefined : act(callback)(id));
     // カタログを替えるとこのノードのセット行は引き継がれない。失われる行があるときだけ確認する。
     const confirmDiscardRows = async (title, okLabel) => {
         const count = readReference(node).rows.length; if (!count) return true;

@@ -269,3 +269,74 @@ def test_nested_shared_snapshot_order_edit_and_recursive_delete():
     assert store.get(document["id"])["recipes"][0]["groups"][0]["groups"][0]["item_ids"] == ["i2"]
     assert node.resolve_catalog(workflow(document))[0] == "text2"
     assert node.resolve_catalog(workflow(document, [{"id": "row", "recipe_id": "r", "on": False}]))[0] == ""
+
+
+def test_preview_uses_resolve_catalog_and_matches_actual_run(monkeypatch):
+    data = source(8)
+    data["recipes"].insert(0, {"id": "other", "name": "別", "groups": [
+        {"id": "o", "name": "別", "mode": "random", "on": True, "count": 3, "item_ids": [f"i{i}" for i in range(8)]}]})
+    document = store.create(data)
+    calls = []
+    original = node.resolve_catalog
+    monkeypatch.setattr(node, "resolve_catalog", lambda *args: calls.append(args) or original(*args))
+    fingerprint = store.fingerprint(document["id"])
+    for seed in (0, 7, 123456789):
+        preview = node.preview_recipe(document["id"], "r", seed)
+        # 実際の実行は複数行の 2 行目。行が違っても同じセット・同じ seed の抽選は変わらない。
+        text, _ = original(workflow(document, [{"id": "a", "recipe_id": "other", "on": True}, {"id": "b", "recipe_id": "r", "on": True}]), seed)
+        assert text.splitlines()[-2:] == preview["text"].splitlines()
+        assert preview["seed"] == seed and preview["revision"] == document["revision"]
+    assert len(calls) == 3 and all(json.loads(args[0])["rows"][0]["recipe_id"] == "r" for args in calls)
+    # 保存内容・キャッシュ指紋を変えない
+    assert store.get(document["id"])["revision"] == document["revision"]
+    assert store.fingerprint(document["id"]) == fingerprint
+
+
+def test_preview_reports_errors_like_a_run():
+    data = source(1)
+    data["recipes"][0]["groups"][0]["count"] = 2
+    document = store.create(data)
+    with pytest.raises(ValueError, match="候補数"):
+        node.preview_recipe(document["id"], "r", 1)
+    with pytest.raises(ValueError, match="見つかりません"):
+        node.preview_recipe(document["id"], "missing", 1)
+    with pytest.raises(ValueError):
+        node.preview_recipe(document["id"], "r", True)
+    with pytest.raises(ValueError):
+        node.preview_recipe(document["id"], "r", -1)
+    with pytest.raises(ValueError):
+        node.preview_recipe("unknown", "r", 1)
+
+
+def test_http_preview_route(monkeypatch):
+    import asyncio
+    from aiohttp import web
+    routes = web.RouteTableDef()
+    monkeypatch.setitem(sys.modules, "server", types.SimpleNamespace(
+        PromptServer=types.SimpleNamespace(instance=types.SimpleNamespace(routes=routes))))
+    store.register_routes()
+    document = store.create(source())
+    handler = {(route.method, route.path): route.handler for route in routes}[("POST", "/sax/text-catalog/v2/catalogs/{catalog_id}/preview")]
+
+    async def call(payload, identifier=None):
+        data = json.dumps(payload).encode()
+        async def chunks(size):
+            yield data
+        request = types.SimpleNamespace(content_length=len(data), content=types.SimpleNamespace(iter_chunked=chunks),
+                                        match_info={"catalog_id": identifier or document["id"]})
+        response = await handler(request)
+        return response.status, json.loads(response.body)
+
+    async def scenario():
+        status, body = await call({"recipe_id": "r", "seed": 5})
+        assert status == 200
+        assert body["text"] == node.preview_recipe(document["id"], "r", 5)["text"]
+        assert (await call({"recipe_id": "r"}))[1]["seed"] == 0
+        status, body = await call({"recipe_id": "nothing", "seed": 5})
+        assert status == 400 and "見つかりません" in body["error"]
+        assert (await call({"recipe_id": "r", "seed": "x"}))[0] == 400
+        assert (await call([1]))[0] == 400
+        assert (await call({"recipe_id": "r"}, "unknown"))[0] == 400
+        assert store.get(document["id"])["revision"] == 1
+
+    asyncio.run(scenario())
