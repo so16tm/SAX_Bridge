@@ -1,7 +1,7 @@
 import { getComfyTheme, txt, autoResize, showDialog, showPromptDialog, showAlertDialog, showConfirmDialog } from "./sax_ui_base.js";
 import { listCatalogs, createCatalog, importCatalog, getSession } from "./sax_text_catalog_v2_client.js";
 import { openSharedEditor } from "./sax_text_catalog_v2_editor.js";
-import { sortedNamedOptions, newId } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, newId, catalogLabel, recipeEntries, rowOutputText } from "./sax_text_catalog_v2_model.js";
 import { choosePicker } from "./sax_text_catalog_v2_dialogs.js";
 import { makeSharedSetWidget, makeSharedCatalogWidget } from "./sax_text_catalog_v2_widget.js";
 
@@ -45,7 +45,7 @@ export function installSharedControls(node) {
     const configWidget = node.widgets.find(w => w.name === "config_json");
     const write = ref => { configWidget.value = JSON.stringify(ref); node.graph?.change?.(); redraw(); };
     const redraw = () => { controller.setWidget?.refresh(); node.setDirtyCanvas?.(true, true); if (node.graph && node.computeSize && node.setSize) autoResize(node); };
-    const choose = (title, entries, callback) => choosePicker({ title, entries: sortedNamedOptions(entries) }).then(id => id === null ? undefined : act(callback)(id));
+    const choose = (title, recipes, callback) => choosePicker({ title, entries: recipeEntries(recipes) }).then(id => id === null ? undefined : act(callback)(id));
     // カタログを替えるとこのノードのセット行は引き継がれない。失われる行があるときだけ確認する。
     const confirmDiscardRows = async (title, okLabel) => {
         const count = readReference(node).rows.length; if (!count) return true;
@@ -53,6 +53,21 @@ export function installSharedControls(node) {
     };
     // 新規作成は既定セットを、インポートはセットが1件のときだけ、最初の行として使う。
     const initialRows = (doc, onlySingle) => doc.recipes.length && (!onlySingle || doc.recipes.length === 1) ? [{ id: newId(), recipe_id: doc.recipes[0].id, on: true }] : [];
+    // 編集中のカタログの名前と件数を、選択肢の表示にも反映する（更新日時は読み込み時の値のまま）。
+    const syncSummary = session => {
+        const doc = session.document, index = controller.catalogs.findIndex(c => c.id === doc.id), current = controller.catalogs[index];
+        if (!current || current.error || (current.name === doc.name && current.items === doc.catalog.items.length && current.recipes === doc.recipes.length)) return;
+        controller.catalogs[index] = { ...current, name: doc.name, items: doc.catalog.items.length, recipes: doc.recipes.length };
+        catalogWidget.options.values = controller.catalogs.map(catalogLabel); catalogWidget.value = catalogLabel(controller.catalogs[index]);
+        controller.catalogToolbar?.refresh(controller.catalogs, doc.id);
+    };
+    // 前回の実行結果のうち、この行が出力した本文（行ホバーの表示用）。別のカタログの結果や、まだ実行していないときは null。
+    const rowOutput = rowId => {
+        const selection = controller.result?.selection;
+        if (!selection?.rows || selection.catalog_id !== readReference(node).catalog_id) return null;
+        const row = selection.rows.find(value => value.id === rowId); if (!row) return null;
+        return { text: row.on ? rowOutputText(row) : "", off: !row.on, seed: selection.seed, stale: selection.revision !== null && controller.session && controller.session.document.revision !== selection.revision };
+    };
     const open = act(async (mode, recipeId) => {
         const session = mode === "results" && controller.result?.selection?.catalog_id
             ? await getSession(controller.result.selection.catalog_id) : controller.session;
@@ -62,7 +77,7 @@ export function installSharedControls(node) {
         openSharedEditor(session, { mode, recipeId, result: controller.result ? { ...controller.result.selection, text: controller.result.text } : null });
     });
     const catalogWidget = hidden(node.addWidget("combo", "カタログ", "読み込み中", act(async label => {
-        const catalog = controller.catalogs.find(c => `${c.name} · ${c.id.slice(0, 8)}` === label);
+        const catalog = controller.catalogs.find(c => catalogLabel(c) === label);
         if (!catalog) return;
         const current = readReference(node);
         if (catalog.id === current.catalog_id) return;
@@ -83,7 +98,7 @@ export function installSharedControls(node) {
         readRecipes: () => controller.session?.document.recipes ?? (readReference(node).catalog_id ? null : []),
         writeRows: rows => { const ref = readReference(node); ref.rows = rows; write(ref); },
         openSet: id => open("sets", id), openItems: id => open("items", id),
-        showHeading: false,
+        showHeading: false, readRowOutput: rowOutput,
         onResize: () => { if (node.graph && node.computeSize && node.setSize) autoResize(node); node.setDirtyCanvas?.(true, true); },
     });
     const rowsWidget = hidden({ name: "__sax_shared_sets", type: "custom", draw(ctx, currentNode, width, y) {
@@ -137,6 +152,7 @@ export function installSharedControls(node) {
     }, { serialize: false }));
     const resultWidget = hidden(node.addWidget("button", "前回の実行結果", null, () => open("results"), { serialize: false }));
     const managementWidget = hidden(node.addWidget("button", "カタログ作成・入出力", null, () => showDialog({ title: "カタログ作成・入出力", build(dialog, close) {
+        dialog.append(Object.assign(document.createElement("div"), { textContent: "カタログの一覧・複製・アーカイブは「SAX Text Catalog Manager」ノードで行います。", style: "font-size:12px;opacity:.7" }));
         for (const [label, callback] of [["新しいカタログ", async () => {
             if (!await confirmDiscardRows("カタログを作成", "作成")) return;
             const name = await showPromptDialog({ title: "カタログ名", defaultValue: "共通カタログ" }); if (name === null) return;
@@ -159,12 +175,12 @@ export function installSharedControls(node) {
         controller.unsubscribe?.(); controller.unsubscribe = null; controller.session = null;
         const catalogs = await listCatalogs(); if (token !== controller.token) return;
         controller.catalogs = sortedNamedOptions(catalogs.catalogs ?? catalogs);
-        catalogWidget.options.values = controller.catalogs.map(c => `${c.name} · ${c.id.slice(0, 8)}`);
+        catalogWidget.options.values = controller.catalogs.map(catalogLabel);
         catalogWidget.value = catalogWidget.options.values[controller.catalogs.findIndex(c => c.id === ref.catalog_id)] ?? "カタログを選択／作成";
         controller.catalogToolbar?.refresh(controller.catalogs, ref.catalog_id);
         const session = ref.catalog_id ? await getSession(ref.catalog_id) : null;
         if (token !== controller.token) return;
-        controller.unsubscribe?.(); controller.session = session; controller.unsubscribe = session?.subscribe(redraw); redraw();
+        controller.unsubscribe?.(); controller.session = session; controller.unsubscribe = session?.subscribe(value => { syncSummary(value); redraw(); }); redraw();
     });
     controller.dispose = () => {
         controller.disposed = true;
@@ -178,7 +194,7 @@ export function installSharedControls(node) {
     if (typeof node.addDOMWidget === "function") controller.catalogToolbar = makeSharedCatalogWidget(node, {
         chooseCatalog: id => {
             const catalog = controller.catalogs.find(c => c.id === id);
-            if (catalog) return catalogWidget.callback(`${catalog.name} · ${catalog.id.slice(0, 8)}`);
+            if (catalog) return catalogWidget.callback(catalogLabel(catalog));
         },
         openItems: () => open("items"), openManagement: managementWidget.callback,
     });

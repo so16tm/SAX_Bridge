@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CatalogSession, applyOperations, getSession } from "../../js/sax_text_catalog_v2_client.js";
+import { CatalogSession, applyOperations, getSession, duplicateCatalog, archiveCatalog, restoreCatalog, listArchivedCatalogs, releaseSession } from "../../js/sax_text_catalog_v2_client.js";
 
 const fixture = () => ({ version: 3, id: "shared", name: "共通", revision: 1, catalog: { items: [{ id: "a", name: "森", text: "原文", tags: [] }] }, recipes: [{ id: "r", name: "背景", groups: [{ id: "g", name: "固定", mode: "all", count: 1, on: true, item_ids: ["a"] }] }] });
 function server(initial = fixture()) {
@@ -173,4 +173,36 @@ test("プレビューが失敗しても編集は止まらず、保存の競合�
     session.mutate([edit("ローカル")]); backend.update([{ type: "catalog.rename", name: "外部変更" }]);
     await assert.rejects(session.preview({ recipeId: "r", seed: 1 }), /競合/); assert.equal(previewed, 0);
     assert.equal(session.conflict, true);
+});
+
+test("カタログの複製・アーカイブ・復元は専用の経路へ送り、失敗は理由つきの例外にする", async () => {
+    const calls = [];
+    const request = async (path, options) => { calls.push([options.method, path, options.body]); return path.includes("missing") ? { ok: false, status: 400, json: async () => ({ error: "見つかりません" }) } : { ok: true, json: async () => ({ id: "a b", catalogs: [] }) }; };
+    await duplicateCatalog("a b", undefined, { request }); await duplicateCatalog("a b", "別名", { request });
+    await archiveCatalog("a b", { request }); await restoreCatalog("a b", { request });
+    assert.deepEqual(await listArchivedCatalogs({ request }), []);
+    assert.deepEqual(calls, [
+        ["POST", "/sax/text-catalog/v2/catalogs/a%20b/duplicate", "{}"],
+        ["POST", "/sax/text-catalog/v2/catalogs/a%20b/duplicate", JSON.stringify({ name: "別名" })],
+        ["POST", "/sax/text-catalog/v2/catalogs/a%20b/archive", "{}"],
+        ["POST", "/sax/text-catalog/v2/archive/a%20b/restore", "{}"],
+        ["GET", "/sax/text-catalog/v2/archive", undefined],
+    ]);
+    await assert.rejects(archiveCatalog("missing", { request }), /見つかりません/);
+});
+
+test("セッションの解放は未保存の編集を保存してから忘れ、保存できなければ残す", async () => {
+    const backend = server(), id = "release-ok";
+    const document = { ...fixture(), id };
+    const session = await getSession(id, { request: async (path, options) => options.method === "GET" ? { ok: true, json: async () => structuredClone(document) } : backend.request(path, options), debounceMs: 10000 });
+    session.mutate([edit("解放前の編集")]);
+    await releaseSession(id);
+    assert.equal(backend.calls.at(-1).options.method, "PATCH", "解放前に保存される");
+    assert.notEqual(await getSession(id, { request: async () => ({ ok: true, json: async () => ({ ...document, id }) }) }), session, "古いセッションは使い回さない");
+    const failing = "release-fail";
+    const kept = await getSession(failing, { request: async (path, options) => options.method === "GET" ? { ok: true, json: async () => ({ ...fixture(), id: failing }) } : { ok: false, status: 500, json: async () => ({ error: "保存できません" }) }, debounceMs: 10000 });
+    kept.mutate([edit("保存できない編集")]);
+    await assert.rejects(releaseSession(failing), /保存できません/);
+    assert.equal(await getSession(failing), kept, "保存できないときはセッションと未保存の編集を残す");
+    await releaseSession("never-loaded");
 });

@@ -1,5 +1,5 @@
-import { showDialog, showConfirmDialog } from "./sax_ui_base.js";
-import { LIMITS, candidateWeight, parseSelectionWeight, parseRandomCount, formatRandomCount, sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds, itemUsage, deletionImpact, usageSummary, recipeItemIds, appendItemGroups, tagCounts, suggestTags, applyTagSuggestion, normalizeSearch, searchTokens, matchesSearch, tagsError } from "./sax_text_catalog_v2_model.js";
+import { showDialog, showConfirmDialog, showPromptDialog } from "./sax_ui_base.js";
+import { LIMITS, candidateWeight, parseSelectionWeight, parseRandomCount, formatRandomCount, newId, parseTags, walkGroups, groupItemIds, itemUsage, deletionImpact, usageSummary, recipeItemIds, appendItemGroups, tagCounts, suggestTags, applyTagSuggestion, normalizeSearch, searchTokens, matchesSearch, tagsError, compareText, sortItems as sortItemList, selectItems, warmSearchIndex, recipeEntries, duplicateNames, duplicateGroups, nameKey, parseTextItems, parseItemsJson, importCapacityError, countDuplicateTexts, tagStats, planTagChange, groupProbabilities, formatPercent } from "./sax_text_catalog_v2_model.js";
 import { buildPickerList, choosePicker, isTopmostOverlay } from "./sax_text_catalog_v2_dialogs.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { openWildcardPicker } from "./sax_text_catalog_v2_wildcards.js";
@@ -79,6 +79,8 @@ const STYLE = `
 .sax-shared-editor .se-used-badge{flex:none;font-size:10px;line-height:16px;padding:0 6px;border-radius:9px;border:1px solid var(--primary-background,#5686d6);color:var(--primary-background,#80adf2)}
 .sax-shared-editor .se-preview{flex:none;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--border-color,#45454b);padding-top:6px}.sax-shared-editor .se-preview textarea{min-height:80px;height:110px;line-height:1.5;font-size:13px}.sax-shared-editor .se-preview input{height:28px;font-size:12px;padding:3px 7px}
 .sax-shared-editor .se-notice{display:flex;gap:8px;align-items:center;padding:4px 8px;border:1px solid var(--border-color,#45454b);border-radius:6px;font-size:12px}.sax-shared-editor .se-notice[data-tone=warn]{border-color:var(--warning-text,#e0b050)}.sax-shared-editor .se-notice button{padding:2px 8px;font-size:12px}
+.sax-shared-editor .se-dup-note{font-size:11px;line-height:15px;color:var(--warning-text,#e0b050)}.sax-shared-editor .se-dup-badge{flex:none;font-size:10px;line-height:16px;padding:0 6px;border-radius:9px;border:1px solid var(--warning-text,#e0b050);color:var(--warning-text,#e0b050)}.sax-shared-editor .se-warning{color:var(--warning-text,#e0b050);font-size:11px}.sax-shared-editor .se-prob{flex:none;min-width:44px;text-align:right;font-size:11px}
+.sax-shared-dialog textarea{font:inherit;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#242426);border:1px solid var(--border-color,#45454b);border-radius:6px;padding:6px 8px;width:100%;min-height:150px;resize:vertical}.sax-shared-dialog .se-tag-list{display:flex;flex-direction:column;gap:4px;overflow:auto;max-height:46vh;min-height:0}.sax-shared-dialog .se-tag-entry{display:flex;gap:8px;align-items:center;padding:3px 6px;border:1px solid var(--border-color,#45454b);border-radius:6px}.sax-shared-dialog .se-tag-entry>strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sax-shared-dialog .se-danger{color:var(--error-text,#ed9494)}.sax-shared-dialog input[type=checkbox]{width:16px;height:16px;padding:0;accent-color:var(--primary-background,#5686d6)}.sax-shared-dialog .se-status-line{display:flex;gap:8px;align-items:center;min-height:24px;font-size:12px}
 .se-suggest-host{position:relative;display:block;min-width:0}.se-row>.se-suggest-host{flex:1;min-width:110px}
 .se-suggest{position:absolute;left:0;top:100%;z-index:40;min-width:180px;max-width:320px;max-height:220px;overflow:auto;padding:2px;background:var(--comfy-menu-bg,#171718);border:1px solid var(--border-color,#45454b);border-radius:6px;box-shadow:0 4px 12px #0006;color:var(--input-text,#ddd);font:12px/18px sans-serif}
 .se-suggest-option{display:flex;justify-content:space-between;gap:12px;padding:2px 6px;border-radius:4px;cursor:pointer;white-space:nowrap}.se-suggest-option>span+span{opacity:.6}
@@ -94,9 +96,9 @@ function input(value, callback, type = "text") { const n = el("input"); n.type =
 function select(options, value, fn) { const n = el("select"); for (const [id, name] of options) { const o = el("option", "", name); o.value = id; n.append(o); } n.value = value; n.addEventListener("change", () => fn(n.value)); return n; }
 // セットのように件数の多い選択肢向け。クリックで検索付きピッカーを開く（キーボードでは Enter／Space）。
 function pickerSelect(options, value, fn, label) {
-    const entries = options.map(([id, name]) => ({ id, name }));
+    const entries = options.map(([id, name, hint]) => ({ id, name, hint }));
     const n = el("button", "se-picker"); n.type = "button"; n.setAttribute("aria-label", label); n.setAttribute("aria-haspopup", "dialog");
-    const paint = () => { n.textContent = `${entries.find(entry => entry.id === value)?.name ?? ""} ▾`; n.title = `${label}（クリックで検索して選択）`; n.dataset.value = value; };
+    const paint = () => { const current = entries.find(entry => entry.id === value); n.textContent = `${current?.name ?? ""}${current?.hint ? `（${current.hint}）` : ""} ▾`; n.title = `${label}（クリックで検索して選択）`; n.dataset.value = value; };
     n.addEventListener("click", async () => { const chosen = await choosePicker({ title: label, entries, current: value }); if (chosen !== null && chosen !== value) { value = chosen; paint(); fn(chosen); (document.querySelector(`.se-picker[aria-label="${label}"]`) ?? n).focus?.({ preventScroll: true }); } });
     paint(); return n;
 }
@@ -172,6 +174,8 @@ export function openSharedEditor(session, options = {}) {
     const orderLists = [];
     const showCandidates = new Set();
     const doc = () => session.document;
+    // 大きなカタログでは最初の検索で全件の正規化が走るため、開いた直後に少しずつ済ませておく。
+    const stopWarm = doc().catalog.items.length > 500 ? warmSearchIndex(doc().catalog.items) : () => {};
     // アイテム一覧と実行結果は検索語・タグ・スクロール位置を別々に保持する。
     const resultKey = value => value ? `${value.catalog_id}|${value.revision ?? value.catalog_revision}|${value.seed}|${value.text}` : "";
     const view = () => mode === "results" ? pref.results : pref;
@@ -186,24 +190,46 @@ export function openSharedEditor(session, options = {}) {
         if (!usageCache || usageCache.epoch !== session.editEpoch || usageCache.refs.length !== recipes.length || recipes.some((value, index) => value !== usageCache.refs[index])) usageCache = { epoch: session.editEpoch, refs: [...recipes], map: itemUsage(recipes) };
         return usageCache.map;
     };
+    // 同名アイテム（名前を正規化して比較）のグループ。編集のたびに1回だけ計算する。
+    let dupCache = null;
+    const duplicateItems = () => { const items = doc().catalog.items; if (dupCache?.items !== items || dupCache.epoch !== session.editEpoch) dupCache = { items, epoch: session.editEpoch, groups: duplicateGroups(items) }; return dupCache.groups; };
+    // 直前の操作だけを取り消す。その後に別の編集をしていたら何もしない（通知の「元に戻す」で別の編集まで戻さないため）。
+    function undoLatest(entry) {
+        if (!entry || session.undoStack.at(-1) !== entry) { localError = "その後に編集したため、ここからは元に戻せません。ヘッダーの「元に戻す」で順に戻してください"; updateStatus(); return false; }
+        undo(); return true;
+    }
+    // 取り込み・タグ管理のダイアログ。Esc は一番上にあるときだけ閉じる。
+    function openSharedDialog({ onClose, ...options }) {
+        let onKey;
+        const close = showDialog({ ...options, onClose() { document.removeEventListener("keydown", onKey); onClose?.(); } });
+        onKey = event => { if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229 && isTopmostOverlay(close.overlay)) { event.preventDefault(); close(); } };
+        document.addEventListener("keydown", onKey); return close;
+    }
+    // ランダム候補の確率（1件を抽選するとき）。重みを変えたら paintProbabilities で表示を更新する。
+    const PROBABILITY_TITLE = "1件を抽選するときに選ばれる確率（重みの合計に対する割合）。2件以上を抽選する場合は、この値とは一致しません";
+    function paintProbability(span, cache = new Map()) {
+        const ownerId = span.dataset.probOwner;
+        if (!cache.has(ownerId)) { const owner = locateGroup(recipe()?.groups ?? [], ownerId)?.group; cache.set(ownerId, owner ? groupProbabilities(owner) : null); }
+        const percent = cache.get(ownerId)?.get(span.dataset.probKey);
+        span.textContent = percent === undefined ? "" : formatPercent(percent);
+    }
+    function probabilityLabel(ownerId, key) {
+        const span = el("span", "se-muted se-prob"); span.dataset.probOwner = ownerId; span.dataset.probKey = key; span.title = PROBABILITY_TITLE; span.setAttribute("aria-label", "1件抽選時の確率");
+        paintProbability(span); return span;
+    }
+    function paintProbabilities() {
+        const cache = new Map();
+        for (const span of content?.querySelectorAll(".se-prob") ?? []) paintProbability(span, cache);
+    }
     function showNotice(message, { tone = "info", action = null } = {}) {
         if (!noticeEl) return;
         clearTimeout(noticeTimer); noticeEl.replaceChildren(el("span", "se-grow", message)); noticeEl.dataset.tone = tone; noticeEl.hidden = false;
         if (action) noticeEl.append(btn(action.label, () => { noticeEl.hidden = true; action.run(); }));
         noticeTimer = setTimeout(() => { noticeEl.hidden = true; }, 10000);
     }
-    function sortItems(values, resolve = value => value) {
-        const tagKeys = pref.sort === "tags" ? itemTagSortKeys(values.map(resolve)) : null;
-        const ranks = pref.sort === "catalog" ? new Map(doc().catalog.items.map((item, index) => [item.id, index])) : null;
-        const counts = pref.sort === "usage" ? usage() : null;
-        return values.sort((a, b) => {
-            const left = resolve(a), right = resolve(b);
-            if (tagKeys) { const difference = compareItemTagKeys(tagKeys.get(left.id), tagKeys.get(right.id)); if (difference) return difference; }
-            if (ranks) { const difference = (ranks.get(left.id) ?? Infinity) - (ranks.get(right.id) ?? Infinity); if (difference) return difference; }
-            if (counts) { const difference = (counts.get(right.id)?.groups ?? 0) - (counts.get(left.id)?.groups ?? 0); if (difference) return difference; }
-            return left.name.localeCompare(right.name, "ja") || left.id.localeCompare(right.id);
-        });
-    }
+    const sortItems = (values, resolve) => pref.sort === "catalog" || pref.sort === "usage"
+        ? sortItemList(values, { sort: pref.sort, resolve, order: pref.sort === "catalog" ? new Map(doc().catalog.items.map((item, index) => [item.id, index])) : null, usage: pref.sort === "usage" ? usage() : null })
+        : sortItemList(values, { sort: pref.sort, resolve });
     const sortControl = onChange => {
         const control = select([["catalog", "登録順"], ["name", "名前順"], ["tags", "タグ順"], ["usage", "利用数順"]], pref.sort, value => { releaseActive(); pref.sort = value; onChange(); });
         control.setAttribute("aria-label", "アイテムの並び順"); return control;
@@ -253,7 +279,7 @@ export function openSharedEditor(session, options = {}) {
         if (virtual && (mode === "items" || mode === "results")) { virtual.set(entries(), true); syncBadges(); }
         else if (mode === "sets" && !content.contains(document.activeElement)) render();
     }
-    function scheduleRefresh() { clearTimeout(saveTimer); saveTimer = setTimeout(refresh, 80); }
+    function scheduleRefresh(delay = 80) { clearTimeout(saveTimer); saveTimer = setTimeout(refresh, delay); }
     function wildcardButton(area, { commit, current, inline = false } = {}) {
         const control = btn("＋ ワイルドカード", async () => {
             const target = inline ? active : null;
@@ -276,9 +302,8 @@ export function openSharedEditor(session, options = {}) {
     function entries() {
         if (mode === "items") {
             let ids = null; const r = doc().recipes.find(r => r.id === pref.recipeFilter); if (r) ids = new Set(groupItemIds(r.groups));
-            const tokens = searchTokens(pref.query);
-            const values = doc().catalog.items.filter(i => (!ids || ids.has(i.id)) && matchesItem(i, tokens, pref.tags));
-            return sortItems(values).map(i => ({ key: i.id, itemId: i.id, height: Math.max(33, 13 + pref.lines * 18) }));
+            const values = selectItems(doc().catalog.items, { tokens: searchTokens(pref.query), tags: pref.tags, ids, sort: pref.sort, usage: pref.sort === "usage" ? usage() : null });
+            return values.map(i => ({ key: i.id, itemId: i.id, height: Math.max(33, 13 + pref.lines * 18) }));
         }
         const list = []; const tokens = searchTokens(pref.results.query), resultTags = pref.results.tags;
         for (const [ri, r] of (result?.rows ?? []).entries()) {
@@ -338,7 +363,7 @@ export function openSharedEditor(session, options = {}) {
         // 編集中の欄が残ると管理外になるので描き直す。編集中でなければ押したボタンを残し、閉じたあとフォーカスが戻るようにする。
         const editing = Boolean(active); releaseActive(); if (editing) refresh();
         const item = itemMap.get(itemId), entry = usage().get(itemId); if (!item || !entry) return;
-        const recipes = sortedNamedOptions(doc().recipes.filter(value => entry.recipeIds.has(value.id)));
+        const recipes = recipeEntries(doc().recipes.filter(value => entry.recipeIds.has(value.id)));
         const id = await choosePicker({ title: `「${item.name || "アイテム"}」の使用先 — ${usageSummary(deletionImpact(usage(), [itemId]))}`, entries: recipes });
         if (id !== null) openSetEditor(id);
     }
@@ -346,7 +371,7 @@ export function openSharedEditor(session, options = {}) {
     function addSelectedToSet() {
         releaseActive(); refresh();
         const ids = doc().catalog.items.filter(item => selected.has(item.id)).map(item => item.id); if (!ids.length) return;
-        const entries = sortedNamedOptions(doc().recipes);
+        const entries = recipeEntries(doc().recipes);
         if (!entries.length) { localError = "テキストセットがありません。「テキストセット」で作成してください"; updateStatus(); return; }
         const valid = id => entries.some(entry => entry.id === id);
         let recipeId = [pref.addRecipeId, pref.recipeFilter, pref.recipeId].find(valid) ?? "", separate = false, mode = "all", countText = "1";
@@ -478,7 +503,16 @@ export function openSharedEditor(session, options = {}) {
             }
             return c;
         }
-        const nameWrap = el("div", "se-name-wrap"); nameWrap.append(cell("name", shown?.name ?? "")); if (current) nameWrap.append(usageButton(entry.itemId, shown?.name)); n.append(nameWrap);
+        const nameWrap = el("div", "se-name-wrap"); nameWrap.append(cell("name", shown?.name ?? "")); if (current) nameWrap.append(usageButton(entry.itemId, shown?.name));
+        const nameColumn = el("div"); nameColumn.append(nameWrap);
+        // 同名のアイテムがあるときは、見分けられるようタグ（と他の同名の内容）を添える。
+        const twins = current ? duplicateItems().get(nameKey(current.name)) : null;
+        if (twins) {
+            const note = el("div", "se-dup-note", `⚠ 同名${twins.length}件 · タグ: ${current.tags.join(", ") || "なし"}`);
+            note.title = `同じ名前のアイテムが${twins.length}件あります。ほかの同名アイテム:\n${twins.filter(value => value.id !== current.id).slice(0, 8).map(value => `・タグ: ${value.tags.join(", ") || "なし"} / ${value.text.replace(/\s+/g, " ").slice(0, 40)}`).join("\n")}`;
+            nameColumn.append(note);
+        }
+        n.append(nameColumn);
         const textWrap = el("div"); textWrap.append(cell("text", shown?.text ?? ""));
         if (entry.candidate) textWrap.append(el("span", "se-badge", "未選択候補"));
         if (entry.snapshot) { textWrap.append(el("span", "se-badge", !current ? "削除済み・編集できません" : current.text !== entry.snapshot.text || current.name !== entry.snapshot.name ? "編集済み・次回実行に反映" : "実行時の内容")); const details = el("details"); details.append(el("summary", "se-muted", "実行時の本文"), el("div", "se-cell", entry.snapshot.text)); textWrap.append(details); }
@@ -511,7 +545,7 @@ export function openSharedEditor(session, options = {}) {
         const control = el("details", "se-tag-filter"), summary = el("summary"), popup = el("div", "se-tag-popup");
         summary.setAttribute("aria-label", "タグで絞り込み");
         const options = el("div", "se-tag-options");
-        const tags = [...new Set([...doc().catalog.items.flatMap(i => i.tags), ...getTags()])].sort((a,b) => a.localeCompare(b,"ja"));
+        const tags = [...new Set([...doc().catalog.items.flatMap(i => i.tags), ...getTags()])].sort(compareText);
         const updateSummary = () => { const chosen = getTags(); summary.textContent = chosen.length ? `タグ：${chosen.join("・")} ▾` : "タグ：すべて ▾"; summary.title = chosen.length ? `すべてに一致（AND）：${chosen.join("、")}` : "複数のタグを選んで絞り込み"; };
         const search = input("", value => { const tokens = searchTokens(value); for (const option of options.children) option.hidden = !tokens.every(token => normalizeSearch(option.dataset.tag).includes(token)); }); search.placeholder = "絞り込みタグを検索";
         for (const tag of tags) {
@@ -528,18 +562,134 @@ export function openSharedEditor(session, options = {}) {
     }
     function filters() {
         const state = view();
-        const q = input(state.query, value => { state.query = value; releaseActive(); scheduleRefresh(); }); q.placeholder = "名前・本文・タグを検索（空白区切りで AND）"; q.className = "se-grow";
+        const q = input(state.query, value => { state.query = value; releaseActive(); scheduleRefresh(30); }); q.placeholder = "名前・本文・タグを検索（空白区切りで AND）"; q.className = "se-grow";
         const tag = tagFilter(() => state.tags, tags => { state.tags = tags; });
-        const sets = [["", "セット：すべて"], ...sortedNamedOptions(doc().recipes).map(r => [r.id, r.name])];
+        const sets = [["", "セット：すべて"], ...recipeEntries(doc().recipes).map(r => [r.id, r.name, r.hint])];
         const set = pickerSelect(sets, mode === "results" ? resultRecipe : pref.recipeFilter, value => { releaseActive(); if (mode === "results") resultRecipe = value; else pref.recipeFilter = value; refresh(); }, "テキストセットで絞り込み");
         const lines = select([["1", "本文1行"], ["3", "本文3行"], ["6", "本文6行"]], String(pref.lines), value => { releaseActive(); pref.lines = Number(value); virtual.heights.clear(); refresh(); });
         const bar = row(q, tag, set, lines, sortControl(refresh)); bar.classList.add("se-filterbar"); return bar;
+    }
+    // 貼り付けたテキストまたは部分JSONを、既存のカタログへまとめて追加する。追加は1回の操作で、上限超過などで保存できないときは1件も追加しない。
+    function openImportDialog() {
+        releaseActive();
+        const existing = doc().catalog.items;
+        let format = "blank", parsed = { items: [], recipes: 0, error: "" }, timer = null, baseBytes = null;
+        const encoder = new TextEncoder(), sizeOf = value => encoder.encode(JSON.stringify(value)).length;
+        openSharedDialog({ title: "アイテムを取り込み", width: 680, className: "sax-shared-dialog", onClose() { clearTimeout(timer); }, build(dlg, end) {
+            const formatSelect = select([["blank", "テキスト（空行区切り）"], ["line", "テキスト（1行1アイテム）"], ["json", "JSON（アイテム配列・{ items } ・カタログ）"]], format, value => { format = value; analyze(); }); formatSelect.setAttribute("aria-label", "取り込み形式");
+            const area = el("textarea"); area.setAttribute("aria-label", "取り込む内容"); area.placeholder = "ここに貼り付け、またはファイルを選択\nテキスト：空行で区切ったブロックが1アイテム（先頭行が名前、全体が本文）\nJSON：[{ \"name\": \"…\", \"text\": \"…\", \"tags\": [\"…\"] }, …]";
+            const file = el("input"); file.type = "file"; file.accept = ".txt,.json,.csv,text/plain,application/json"; file.setAttribute("aria-label", "ファイルから読み込み");
+            file.addEventListener("change", async () => {
+                const chosen = file.files[0]; if (!chosen) return;
+                try { area.value = await chosen.text(); if (/\.json$/i.test(chosen.name)) { format = "json"; formatSelect.value = "json"; } else if (format === "json") { format = "blank"; formatSelect.value = "blank"; } analyze(); }
+                catch (error) { problem.textContent = `ファイルを読み込めません：${error.message}`; } finally { file.value = ""; }
+            });
+            const tagEdit = input("", () => analyze()); tagEdit.placeholder = "全件に付けるタグ（カンマ区切り・省略可）"; tagEdit.setAttribute("aria-label", "全件に付けるタグ");
+            const summary = el("div", "se-muted"), warning = el("div", "se-warning"), problem = el("div", "se-error"), submit = btn("取り込む", run, "se-primary"); problem.setAttribute("role", "alert"); summary.setAttribute("role", "status");
+            function analyze() {
+                clearTimeout(timer); problem.textContent = ""; setFieldError(tagEdit, "");
+                const tags = parseTags(tagEdit.value), tagProblem = tagsError(tags);
+                parsed = { items: [], recipes: 0, error: "" };
+                if (tagProblem) { setFieldError(tagEdit, tagProblem, tagEdit.parentElement); parsed.error = tagProblem; }
+                else if (area.value.trim()) {
+                    try {
+                        if (format === "json") {
+                            let source; try { source = JSON.parse(area.value); } catch { throw new Error("JSONとして読み込めません。形式を確認してください"); }
+                            Object.assign(parsed, parseItemsJson(source, { tags }));
+                        } else parsed.items = parseTextItems(area.value, { split: format, tags });
+                    } catch (error) { parsed = { items: [], recipes: 0, error: error.message }; }
+                }
+                if (!parsed.error) {
+                    if (parsed.items.length) baseBytes ??= sizeOf(doc());
+                    parsed.error = importCapacityError(existing.length, parsed.items.length, parsed.items.length ? baseBytes + sizeOf(parsed.items) : 0);
+                }
+                problem.textContent = parsed.error;
+                const duplicated = countDuplicateTexts(existing, parsed.items);
+                summary.textContent = parsed.items.length ? `${parsed.items.length}件を追加します（現在${existing.length}件 → ${existing.length + parsed.items.length}件）。IDは新しく発行します` : area.value.trim() ? (parsed.error ? "" : "取り込めるアイテムがありません") : "";
+                warning.textContent = [duplicated ? `既存と同じ本文が${duplicated}件あります（そのまま追加されます）` : "", parsed.recipes ? `カタログのセット${parsed.recipes}件は取り込みません（アイテムのみ）` : ""].filter(Boolean).join(" / ");
+                submit.disabled = !parsed.items.length || Boolean(parsed.error);
+            }
+            area.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(analyze, 150); });
+            function run() {
+                analyze(); if (submit.disabled) return;
+                // 追加は1回の操作（Undoも1回）。検証に失敗したときは1件も追加せず、ダイアログと入力を残す。
+                if (!mutate(parsed.items.map(item => ({ type: "item.put", item })))) { problem.textContent = localError; return; }
+                const entry = session.undoStack.at(-1), count = parsed.items.length;
+                pref.query = ""; pref.tags = []; pref.recipeFilter = ""; end(); render();
+                showNotice(`${count}件のアイテムを取り込みました`, { action: { label: "元に戻す", run: () => undoLatest(entry) } });
+            }
+            dlg.append(row(el("span", "se-muted", "形式"), formatSelect, file), area, tagEdit, summary, warning, problem, row(submit, btn("キャンセル", end)));
+            submit.disabled = true; queueMicrotask(() => area.focus());
+        } });
+    }
+    // タグを件数つきで一覧し、名前変更・統合・削除を行う。1回の操作は1回の「元に戻す」で戻る。
+    function openTagManager() {
+        releaseActive();
+        const checked = new Set(); let query = "", paint = () => {};
+        openSharedDialog({ title: "タグ管理", width: 620, className: "sax-shared-dialog", build(dlg, end) {
+            const search = input("", value => { query = value; paint(); }); search.placeholder = "タグを検索（空白区切りで AND）"; search.setAttribute("aria-label", "タグを検索");
+            const list = el("div", "se-tag-list"), statusLine = el("div", "se-status-line"); statusLine.setAttribute("role", "status");
+            const say = (message, entry = null, restore = null) => { statusLine.replaceChildren(el("span", "", message)); if (entry) statusLine.append(btn("元に戻す", () => { if (undoLatest(entry)) { restore?.(); render(); statusLine.replaceChildren(el("span", "", "元に戻しました")); paint(); } })); };
+            const sayError = message => { statusLine.replaceChildren(el("span", "se-error", message)); };
+            async function apply(froms, to) {
+                const plan = planTagChange(doc().catalog.items, froms, to);
+                if (plan.error) { sayError(plan.error); return; }
+                if (!plan.changed.length) { say("変更するアイテムがありません"); return; }
+                const names = froms.length === 1 ? `「${froms[0]}」` : `${froms.length}個のタグ`;
+                const merging = to && (froms.length > 1 || doc().catalog.items.some(item => item.tags.includes(to)));
+                if (!to || merging) {
+                    const message = !to ? `${names}を${plan.changed.length}件のアイテムから外します。タグの定義が消えるだけで、アイテムは削除されません。` : `${names}を「${to}」に統合します（${plan.changed.length}件のアイテムを更新）。`;
+                    if (!await showConfirmDialog({ title: !to ? "タグを削除" : "タグを統合", message: `${message}\n「元に戻す」で復元できます。`, danger: !to, okLabel: !to ? "削除" : "統合", cancelLabel: "キャンセル" })) return;
+                }
+                const latest = planTagChange(doc().catalog.items, froms, to);
+                if (latest.error || !mutate(latest.changed.map(item => ({ type: "item.put", item })))) { sayError(latest.error || localError); return; }
+                const entry = session.undoStack.at(-1);
+                // 絞り込み中のタグも付け替える。
+                const remap = tags => [...new Set(tags.map(tag => froms.includes(tag) ? to : tag).filter(Boolean))];
+                const before = { items: pref.tags, candidates: candidateTags, results: pref.results.tags };
+                pref.tags = remap(pref.tags); candidateTags = remap(candidateTags); pref.results.tags = remap(pref.results.tags); checked.clear(); render();
+                say(!to ? `${names}を${latest.changed.length}件から外しました` : merging ? `${names}を「${to}」に統合しました（${latest.changed.length}件）` : `${names}を「${to}」に変更しました（${latest.changed.length}件）`, entry, () => { pref.tags = before.items; candidateTags = before.candidates; pref.results.tags = before.results; }); paint();
+            }
+            async function rename(tag) {
+                const to = await showPromptDialog({ title: `タグ「${tag}」の名前を変更`, defaultValue: tag, okLabel: "変更", cancelLabel: "キャンセル", validate: value => value.trim() ? planTagChange(doc().catalog.items, [tag], value).error : "タグ名を入力してください" });
+                if (to !== null && to.trim() !== tag) await apply([tag], to.trim());
+            }
+            async function mergeChecked() {
+                const tags = [...checked]; if (tags.length < 2) { sayError("統合するタグを2つ以上選んでください"); return; }
+                const stats = new Map(tagStats(doc().catalog.items).map(entry => [entry.tag, entry.count]));
+                const to = await showPromptDialog({ title: `${tags.length}個のタグを統合`, defaultValue: [...tags].sort((a, b) => (stats.get(b) ?? 0) - (stats.get(a) ?? 0))[0], okLabel: "統合", cancelLabel: "キャンセル", validate: value => value.trim() ? planTagChange(doc().catalog.items, tags, value).error : "統合後のタグ名を入力してください" });
+                if (to !== null) await apply(tags, to.trim());
+            }
+            paint = () => {
+                const stats = tagStats(doc().catalog.items), tokens = searchTokens(query);
+                for (const tag of [...checked]) if (!stats.some(entry => entry.tag === tag)) checked.delete(tag);
+                const shown = stats.filter(entry => tokens.every(token => normalizeSearch(entry.tag).includes(token)));
+                list.replaceChildren();
+                if (!stats.length) list.append(el("div", "se-muted", "タグがありません"));
+                for (const entry of shown.slice(0, 300)) {
+                    const box = check(checked.has(entry.tag), yes => { if (yes) checked.add(entry.tag); else checked.delete(entry.tag); }); box.setAttribute("aria-label", `${entry.tag}を選択`);
+                    const name = el("strong", "", entry.tag); name.title = entry.tag;
+                    const line = el("div", "se-tag-entry"); line.dataset.tag = entry.tag;
+                    line.append(box, name, el("span", "se-muted", `${entry.count}件`));
+                    if (entry.variants.length) { const warn = el("span", "se-warning", "表記ゆれ？"); warn.title = `表記が近いタグ: ${entry.variants.join("、")}（全角半角・大文字小文字の違い）。統合すると1つにまとまります`; line.append(warn); }
+                    const renameButton = btn("名前変更・統合", () => rename(entry.tag)), remove = btn("削除", () => apply([entry.tag], ""), "se-danger");
+                    renameButton.setAttribute("aria-label", `${entry.tag}の名前を変更または統合`); remove.setAttribute("aria-label", `${entry.tag}を削除`);
+                    line.append(renameButton, remove); list.append(line);
+                }
+                if (shown.length > 300) list.append(el("div", "se-muted", `ほか${shown.length - 300}個のタグ。検索で絞り込んでください`));
+                if (stats.length && !shown.length) list.append(el("div", "se-muted", "一致するタグがありません"));
+            };
+            dlg.append(row(search), list, row(btn("選んだタグを統合…", mergeChecked), btn("選んだタグを削除", () => { if (!checked.size) sayError("削除するタグを選んでください"); else apply([...checked], ""); }, "se-danger")), statusLine, btn("閉じる", end));
+            paint(); queueMicrotask(() => search.focus());
+        } });
     }
     function renderList() {
         const filterBar = filters(); content.append(filterBar);
         if (mode === "items") {
             const newItem = btn("＋ アイテム", () => { const item = { id: newId(), name: "新しいアイテム", text: "", tags: [] }; if (mutate([{ type: "item.put", item }])) revealNewItem(item, true, true); });
-            filterBar.append(newItem);
+            const importButton = btn("取り込み", openImportDialog); importButton.title = "テキスト（空行区切り・1行1アイテム）または部分JSONから、このカタログへまとめて追加";
+            const tagButton = btn("タグ管理", openTagManager); tagButton.title = "タグを件数つきで一覧し、名前変更・統合・削除";
+            filterBar.append(newItem, importButton, tagButton);
         } else {
             const meta = el("div", "se-muted", result ? `カタログ改訂 ${result.revision ?? result.catalog_revision ?? "—"} · Seed ${result.seed ?? "—"} · 本文の修正は次回実行に反映` : "まだ実行結果がありません。ワークフローを実行してください。");
             content.append(row(meta, btn(outputTab ? "アイテム一覧" : "出力テキスト", () => { outputTab = !outputTab; render(); })));
@@ -585,6 +735,7 @@ export function openSharedEditor(session, options = {}) {
             const current = locateGroup(recipe().groups, label.dataset.countGroupId)?.group;
             if (current) label.textContent = `${eligibleCandidateCount(current)}有効 / ${current.kind === "nested" ? current.groups.length : current.item_ids.length}候補`;
         }
+        paintProbabilities();
     }
     function editAffixes(groupId) {
         const g = locateGroup(recipe().groups, groupId)?.group; if (!g) return;
@@ -604,12 +755,13 @@ export function openSharedEditor(session, options = {}) {
     }
     function renderSets() {
         const r = recipe(); if (r) pref.recipeId = r.id;
-        const setSelect = pickerSelect(sortedNamedOptions(doc().recipes).map(s => [s.id, s.name]), r?.id ?? "", value => { selectRecipe(value); render(); }, "編集するテキストセット");
+        const setSelect = pickerSelect(recipeEntries(doc().recipes).map(s => [s.id, s.name, s.hint]), r?.id ?? "", value => { selectRecipe(value); render(); }, "編集するテキストセット");
         const create = () => { const next = { id: newId(), name: "新しいテキストセット", groups: [] }; if (putRecipe(next)) { pref.recipeId = next.id; render(); } };
         content.append(row(el("strong", "", "テキストセット"), setSelect, btn("＋ 作成", create), btn("コピー", () => { if (!r) return; const next = structuredClone(r); next.id = newId(); next.name += " コピー"; for (const g of walkGroups(next.groups)) g.id = newId(); if (putRecipe(next)) { pref.recipeId = next.id; render(); } }), btn("削除", async () => { if (r && await showConfirmDialog({ title: "テキストセットを削除", message: `${r.name}を共有カタログから削除します。参照しているワークフローではセットの選び直しが必要です。`, danger: true, okLabel: "削除" })) { mutate([{ type: "recipe.delete", id: r.id }]); pref.recipeId = null; render(); } })));
         if (!r) { content.append(el("div", "se-empty", "「＋ 作成」でテキストセットを作成してください。")); return; }
         const name = input(r.name, value => { const next = structuredClone(recipe()); next.name = value; putRecipe(next); }); name.maxLength = 256; name.className = "se-grow"; name.setAttribute("aria-label", "セット名");
         const meta = content.lastChild; meta.classList.add("se-set-meta"); meta.insertBefore(name, meta.children[2]);
+        if (duplicateNames(doc().recipes).has(nameKey(r.name))) { const warn = el("span", "se-warning", "⚠ 同名のセットがあります"); warn.title = "同じ名前のテキストセットがあります。ピッカーでは構成要素数が併記されます"; meta.append(warn); }
         const previewToggle = btn("プレビュー", () => { previewState.open = !previewState.open; render(); }); previewToggle.setAttribute("aria-pressed", String(previewState.open)); previewToggle.title = "このセットを指定のSeedで試行して出力を確かめる（カタログは変更しません）"; meta.append(previewToggle);
         const layout = el("div", "se-layout"), left = el("div", "se-pane"), right = el("div", "se-pane"); layout.append(left, right); content.append(layout);
         if (targetParent && !locateGroup(r.groups,targetParent)) targetParent = "";
@@ -637,13 +789,14 @@ export function openSharedEditor(session, options = {}) {
             const copy = el("div", "se-candidate-copy"), title = el("span", "", i.name), body = el("span", "se-muted", i.text.replace(/\s+/g, " "));
             title.title = i.name; body.title = i.text; copy.append(title, body);
             const tags = el("span", "se-muted se-candidate-tags", i.tags.join(", ")); tags.title = tags.textContent;
-            n.append(checkbox, copy, ...(usedIds.has(i.id) ? [el("span", "se-used-badge", "使用中")] : []), tags); n.addEventListener("click", event => { if (!event.target.closest("input")) chooseCandidate(i.id, !candidateSelection.has(i.id), event.shiftKey); });
+            const twins = duplicateItems().get(nameKey(i.name)), twinBadge = twins ? el("span", "se-dup-badge", `同名${twins.length}`) : null; if (twinBadge) twinBadge.title = `同じ名前のアイテムが${twins.length}件あります。タグ・本文で見分けてください`;
+            n.append(checkbox, copy, ...(twinBadge ? [twinBadge] : []), ...(usedIds.has(i.id) ? [el("span", "se-used-badge", "使用中")] : []), tags); n.addEventListener("click", event => { if (!event.target.closest("input")) chooseCandidate(i.id, !candidateSelection.has(i.id), event.shiftKey); });
             return n;
         });
         virtual = candidateVirtual;
         const renderCandidates = () => {
             const tokens = searchTokens(candidateQuery);
-            candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidatesOnly || candidateSelection.has(i.id)) && (!unusedOnly || !usedIds.has(i.id)) && matchesItem(i, tokens, candidateTags))).map(i => ({ key: i.id, itemId: i.id, height: 48 })));
+            candidateVirtual.set(selectItems(doc().catalog.items, { tokens, tags: candidateTags, selectedIds: candidatesOnly ? candidateSelection : null, unusedIds: unusedOnly ? usedIds : null, sort: pref.sort, usage: pref.sort === "usage" ? usage() : null }).map(i => ({ key: i.id, itemId: i.id, height: 48 })));
             for (const [id, n] of candidateVirtual.nodes) { n.querySelector("input").checked = candidateSelection.has(id); n.dataset.selected = String(candidateSelection.has(id)); }
             if (number._fieldError) validateCount(); const overlap = [...candidateSelection].filter(id => usedIds.has(id)).length; count.textContent = `${candidateSelection.size}件選択`; overlapNote.textContent = overlap ? `（うち使用中${overlap}件・追加すると重複します）` : ""; matched.textContent = `${candidateVirtual.entries.length}件一致`;
         };
@@ -708,7 +861,7 @@ export function openSharedEditor(session, options = {}) {
             const parentGroup = locateGroup(recipe().groups, g.id).parentId;
             if (parentGroup && locateGroup(recipe().groups, parentGroup).group.mode === "random") {
                 const weight = weightInput(g.weight ?? 1, `${g.name || "構成要素"}の抽選重み`, value => editGroup(g.id, next => { if (value === 1) delete next.weight; else next.weight = value; }));
-                header.append(el("span", "se-muted", "重み"), weight);
+                header.append(el("span", "se-muted", "重み"), weight, probabilityLabel(parentGroup, g.id));
             }
             if (single) {
                 const itemName = el("span", "se-muted se-group-preview", itemMap.get(g.item_ids[0])?.name ?? "削除済み"); itemName.title = itemName.textContent;
@@ -808,6 +961,7 @@ export function openSharedEditor(session, options = {}) {
             up.disabled = entry.index === 0; down.disabled = entry.index === group.item_ids.length - 1;
             n.append(handle, position, copy);
             if (group.mode === "random") n.append(weightInput(candidateWeight(group, entry.itemId), `${item?.name || entry.itemId}の抽選重み`, value => editGroup(group.id, next => { if (value === 1) { if (next.item_weights) { delete next.item_weights[entry.itemId]; if (!Object.keys(next.item_weights).length) delete next.item_weights; } } else next.item_weights = {...next.item_weights, [entry.itemId]:value}; }), true));
+            if (group.mode === "random") n.append(probabilityLabel(group.id, entry.itemId));
             n.append(up, down); return n;
         });
         orderLists.push(list); list.set(group.item_ids.map((id, index) => ({ key: id, itemId: id, index, height: 42 })));
@@ -849,7 +1003,7 @@ export function openSharedEditor(session, options = {}) {
     document.addEventListener("keydown", onKeydown);
     close = showDialog({ title: `SAX Text Catalog V2 — ${doc().name}`, width: 1200, maxHeight: "97vh", className: "sax-shared-editor", onClose() {
         pref.candidateQuery = candidateQuery; pref.candidateTags = [...candidateTags];
-        document.removeEventListener("pointerdown", dismissTagFilter, true); document.removeEventListener("keydown", onKeydown);
+        stopWarm(); document.removeEventListener("pointerdown", dismissTagFilter, true); document.removeEventListener("keydown", onKeydown);
         for (const list of orderLists.splice(0)) list.destroy();
         releaseActive(); clearTimeout(saveTimer); clearTimeout(noticeTimer); unsubscribe?.(); virtual?.destroy(); for (const t of content?.querySelectorAll("textarea") ?? []) detachAutoComplete(t); openEditors.delete(session); void session.flush().catch(() => {});
     }, build(dlg, end) {

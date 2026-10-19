@@ -1,6 +1,7 @@
 import { LIMITS, validateConfig, validateGroups, groupItemIds, walkGroups, tagsError } from "./sax_text_catalog_v2_model.js";
 
 const BASE = "/sax/text-catalog/v2/catalogs";
+const ARCHIVE = "/sax/text-catalog/v2/archive";
 const sessions = new Map();
 const copy = value => structuredClone(value);
 async function defaultRequest(path, options) {
@@ -227,6 +228,29 @@ export async function createCatalog(value, { request = defaultRequest, catalog, 
     return validateDocument(await requestJson(request, BASE, "POST", body));
 }
 export async function importCatalog(document, { request = defaultRequest } = {}) { return validateDocument(await requestJson(request, BASE, "POST", { document })); }
+// カタログ管理（P3）。複製は新しいカタログの一覧用メタ情報、アーカイブは削除せず別フォルダーへ移す。復元で一覧へ戻る。
+export async function duplicateCatalog(id, name, { request = defaultRequest } = {}) {
+    return requestJson(request, `${BASE}/${encodeURIComponent(id)}/duplicate`, "POST", name === undefined ? {} : { name });
+}
+export async function archiveCatalog(id, { request = defaultRequest } = {}) {
+    return requestJson(request, `${BASE}/${encodeURIComponent(id)}/archive`, "POST", {});
+}
+export async function restoreCatalog(id, { request = defaultRequest } = {}) {
+    return requestJson(request, `${ARCHIVE}/${encodeURIComponent(id)}/restore`, "POST", {});
+}
+export async function listArchivedCatalogs({ request = defaultRequest } = {}) { return (await requestJson(request, ARCHIVE)).catalogs; }
+// 読み込み済みの編集セッションがあれば、未保存の編集を保存する（複製の前に呼ぶ）。
+export async function flushCatalog(id) {
+    const pending = sessions.get(id); if (!pending) return;
+    await (await pending.catch(() => null))?.flush();
+}
+// 読み込み済みの編集セッションを保存してから忘れる。アーカイブ前に呼び、未保存の編集を失わず、古いセッションを残さない。保存できないときは例外にして中止する。
+export async function releaseSession(id) {
+    const pending = sessions.get(id); if (!pending) return;
+    const session = await pending.catch(() => null);
+    await session?.flush();
+    if (sessions.get(id) === pending) sessions.delete(id);
+}
 export async function getSession(id, options = {}) {
     if (!sessions.has(id)) {
         const promise = requestJson(options.request ?? defaultRequest, `${BASE}/${encodeURIComponent(id)}`).then(document => new CatalogSession(document, options));

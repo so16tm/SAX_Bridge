@@ -1,4 +1,4 @@
-import { sortedNamedOptions, newId } from "./sax_text_catalog_v2_model.js";
+import { sortedNamedOptions, newId, recipeEntries, catalogLabel } from "./sax_text_catalog_v2_model.js";
 import { PAD, GAP, ROW_H, HEADER_H, BTN_RADIUS, getComfyTheme } from "./sax_ui_base.js";
 import { choosePicker } from "./sax_text_catalog_v2_dialogs.js";
 
@@ -39,6 +39,15 @@ function editIcon(title, path) {
     const shape = document.createElementNS("http://www.w3.org/2000/svg", "path"); shape.setAttribute("d", path); svg.append(shape); n.append(svg); return n;
 }
 const ROW_ESTIMATE = ROW_H + 4 + GAP;
+const TIP_LENGTH = 300;
+// 行にマウスを重ねたときに出す、前回の実行でこの行が出力した本文の先頭。リロード後は復元しない。
+export function outputTip(output) {
+    if (!output) return "";
+    if (output.off) return "前回の実行：この行は無効のため出力なし";
+    if (!output.text) return "前回の実行：この行の出力は空でした";
+    const chars = [...output.text], head = chars.slice(0, TIP_LENGTH).join("");
+    return `前回の実行${Number.isSafeInteger(output.seed) ? `（Seed ${output.seed}）` : ""}の出力${output.stale ? "（実行後にカタログが更新されています）" : ""}:\n${head}${chars.length > TIP_LENGTH ? "…（以降省略）" : ""}`;
+}
 
 /** Catalog actions share one row; set count does not affect their position. */
 export function makeSharedCatalogWidget(node, { chooseCatalog, openItems, openManagement }) {
@@ -66,7 +75,7 @@ export function makeSharedCatalogWidget(node, { chooseCatalog, openItems, openMa
     function refresh(catalogs, id) {
         select.replaceChildren();
         const placeholder = element("option", "", "カタログを選択／作成"); placeholder.value = ""; placeholder.disabled = true; select.append(placeholder);
-        for (const catalog of sortedNamedOptions(catalogs)) { const option = element("option", "", `${catalog.name} · ${catalog.id.slice(0, 8)}`); option.value = catalog.id; select.append(option); }
+        for (const catalog of sortedNamedOptions(catalogs)) { const option = element("option", "", catalogLabel(catalog)); option.value = catalog.id; select.append(option); }
         select.value = catalogs.some(c => c.id === id) ? id : "";
     }
     refresh([], "");
@@ -74,7 +83,7 @@ export function makeSharedCatalogWidget(node, { chooseCatalog, openItems, openMa
 }
 
 /** The workflow stores references only. Unselected draft rows stay in this widget. */
-export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, openSet, openItems, onResize, readCatalogId, showHeading = true }) {
+export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, openSet, openItems, onResize, readCatalogId, readRowOutput, showHeading = true }) {
     const panel = element("div", "sax-shared-sets"); const style = element("style"); style.textContent = CSS;
     const heading = element("h3", "ssw-heading", "使用するテキストセット");
     heading.hidden = !showHeading;
@@ -127,7 +136,7 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
             clickTimer = null; if (disposed) return;
             const current = displayRows().find(row => row.id === id), recipes = readRecipes() ?? [];
             if (!current || !recipes.length) return;
-            const chosen = await choosePicker({ title: "テキストセットを選択", entries: sortedNamedOptions(recipes), current: current.recipe_id });
+            const chosen = await choosePicker({ title: "テキストセットを選択", entries: recipeEntries(recipes), current: current.recipe_id });
             if (chosen === null || !elements.has(id)) return;
             if (chosen !== current.recipe_id) selectRecipe(id, chosen);
             elements.get(id)?.name.focus({ preventScroll: true });
@@ -169,7 +178,7 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
         try { current = displayRows(); recipes = readRecipes(); } catch (error) { fail(error); return; }
         const valid = new Set(current.map(row => row.id));
         for (const [id, value] of elements) if (!valid.has(id)) { value.root.remove(); elements.delete(id); }
-        const recipeList = sortedNamedOptions(recipes ?? []); const recipesById = new Map(recipeList.map(recipe => [recipe.id, recipe]));
+        const recipeList = recipeEntries(recipes ?? []); const recipesById = new Map(recipeList.map(recipe => [recipe.id, recipe]));
         let missing = 0;
         for (const [index, currentRow] of current.entries()) {
             let value = elements.get(currentRow.id); if (!value) { value = createRow(currentRow.id); elements.set(currentRow.id, value); }
@@ -178,8 +187,9 @@ export function makeSharedSetWidget(node, { readRows, readRecipes, writeRows, op
             value.on.checked = currentRow.on; value.on.setAttribute("aria-label", `${label}を使用`); value.root.dataset.off = String(!currentRow.on);
             value.name.setAttribute("aria-label", `${label}のテキストセットを選択（Enterで検索、ダブルクリックで編集）`); value.del.setAttribute("aria-label", `${label}を行から削除`);
             value.edit.setAttribute("aria-label", `${label}のセット編集`); value.items.setAttribute("aria-label", `${label}のアイテム編集`);
-            const caption = recipes === null ? "カタログを読み込み中…" : recipe ? recipe.name || "名前なしのセット" : draft ? "テキストセットを選択…" : `参照先なし：${currentRow.recipe_id}`;
-            value.name.textContent = `${caption} ▾`; value.name.title = recipe ? `${caption}\nクリック：セットを検索して変更 / ダブルクリック：セット編集` : caption;
+            const caption = recipes === null ? "カタログを読み込み中…" : recipe ? (recipe.name || "名前なしのセット") + (recipe.hint ? `（${recipe.hint}）` : "") : draft ? "テキストセットを選択…" : `参照先なし：${currentRow.recipe_id}`;
+            const tip = draft ? "" : outputTip(readRowOutput?.(currentRow.id));
+            value.name.textContent = `${caption} ▾`; value.name.title = (recipe ? `${caption}\nクリック：セットを検索して変更 / ダブルクリック：セット編集` : caption) + (tip ? `\n\n${tip}` : ""); value.root.title = tip;
             value.name.disabled = recipes === null || !recipeList.length; value.edit.disabled = !recipe; value.items.disabled = !recipe; value.handle.disabled = draft;
             // Moving existing elements retains focus.
             const expected = list.children[index]; if (expected !== value.root) list.insertBefore(value.root, expected ?? null);

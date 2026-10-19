@@ -26,7 +26,7 @@
 | [Output](#output) | Output and preview | [SAX Output](#sax-output) / [SAX Image Preview](#sax-image-preview) |
 | [Collect](#collect) | Node / image / pipe aggregation | [SAX Image Collector](#sax-image-collector) / [SAX Node Collector](#sax-node-collector) / [SAX Pipe Collector](#sax-pipe-collector) |
 | [Debug](#debug) | Debugging & testing | [SAX Debug Controller](#sax-debug-controller) / [SAX Assert](#sax-assert) / [SAX Assert Pipe](#sax-assert-pipe) / [SAX Debug Inspector](#sax-debug-inspector) / [SAX Debug Text](#sax-debug-text) |
-| [Utility](#utility) | Pipe-internal helpers and tag dictionary updates | [SAX Tag Dictionary](#sax-tag-dictionary) / [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Text Catalog V2](#sax-text-catalog-v2) / [SAX Text Catalog Converter](#sax-text-catalog-converter) / [SAX Wildcard Editor](#sax-wildcard-editor) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
+| [Utility](#utility) | Pipe-internal helpers and tag dictionary updates | [SAX Tag Dictionary](#sax-tag-dictionary) / [SAX Primitive Store](#sax-primitive-store) / [SAX Text Catalog](#sax-text-catalog) / [SAX Text Catalog V2](#sax-text-catalog-v2) / [SAX Text Catalog Converter](#sax-text-catalog-converter) / [SAX Text Catalog Manager](#sax-text-catalog-manager) / [SAX Wildcard Editor](#sax-wildcard-editor) / [SAX Cache](#sax-cache) / [SAX Toggle Manager](#sax-toggle-manager) |
 
 ---
 
@@ -1260,6 +1260,7 @@ Nested component example (select one immediate child, then use all its items):
 #### UI and Editing
 
 - The node is ordered as execution settings, catalog management, then set composition. Seed and previous results stay above the growing set list. Catalog selection, items, and the management menu (⋯) share one row.
+- Duplicating, archiving, and restoring catalogs is done in the separate provisional "SAX Text Catalog Manager" node, not here; the V2 node has no deletion UI.
 - Select a catalog on the node, then choose sets by each row's set name (click for a searchable picker, double-click to open that set's editor). Toggle the checkbox, drag the handle or use arrow keys to reorder, and remove a row with ×. Set-edit and item-edit icons appear to the right of the set name, keeping each set on one line. Tooltips explain both icons. All rows are displayed without paging. An added draft row is excluded from the workflow until a set is selected. Seed and post-run seed behavior remain on the node.
 - Each row's set-edit action opens that set directly. Edit candidates, counts, enabled components, and component order, or switch/create sets in the same editor. Item text fields are separate.
 - Components use compact two-line controls with candidate counts and short previews. Candidate rows show text previews and support row clicks, Shift ranges, selecting or clearing all filtered matches, and a selected-only view. Selection survives search/tag changes, and selected items can be added as one combined component or as a separate component per item. Separate components use each item name and all mode; combined components support all or random-N selection. Additions exceeding component limits are rejected together while retaining the selection. Changing candidates opens their selected-only list directly.
@@ -1291,6 +1292,13 @@ Nested component example (select one immediate child, then use all its items):
 - Variable-height virtualization renders nearby rows. Search, scroll, and text display density persist. Undo/Redo, IME input, tag completion, Shift range selection, select all, and bulk tagging/deletion are supported.
 - Text-set and catalog choices use name order across views, with IDs breaking equal-name ties. Stored set rows, component order, and execution output remain unchanged.
 - Item lists, set candidate lists, and items within each result section share the same sort setting. The default is name order; registration, tag, and usage order choices carry across these views. Tag order compares alphabetically sorted tag lists, breaks ties by item name, and places untagged items last. Display sorting does not change set definitions or execution output order.
+- The item list has "Import" and "Tags" (tag manager) buttons. "Import" adds many items to the open catalog at once from text (blank-line-separated blocks, or one item per line) or partial JSON (an item array, `{"items": [...]}`, or a catalog document). Entries with neither a name nor text, and tags containing commas or line breaks, are rejected. IDs are newly issued on import and source IDs are ignored. You can add common tags, and the dialog shows the item count, how many texts already exist, and what is ignored before anything is added. If the item count (10,000) or the whole-catalog size (32 MiB) limit would be exceeded nothing is added (all or nothing), and a single Undo reverts the whole import. Set definitions inside JSON are not imported; their count is reported.
+- The tag manager lists every tag with its count and supports rename, merge (renaming to an existing tag merges), and delete. You can also select several tags to merge or delete in bulk. Delete and merge show a confirmation with the affected item count and can be undone. A change that would leave any item with more than 8 tags is rejected as a whole. Active tag filters follow the renamed or merged tag.
+- Random candidates show, next to the weight field, the effective probability (%) of a single draw: the weight divided by the sum of weights. Weight 0 (and the case where every weight is 0) shows 0%, and disabled nested children are excluded. The final selection rate of multi-item or ranged draws also depends on the count and the other candidates, so the tooltip notes that it does not match for 2 or more.
+- Items sharing a name show "⚠ Same name ×N · Tags: …" under the name in the list and a "Same name N" badge in set candidate rows (names are compared ignoring width, case, and surrounding spaces); the tooltip lists the tags and text head of the other items. Sets sharing a name show "⚠ A set with the same name exists" in the set view, and set pickers (node rows, switcher, filter) append the component count so they can be told apart. Same names are allowed; storage and output are unchanged.
+- Hovering a set row on the node shows the first 300 characters of that row's output from the last run as a tooltip, together with its Seed, a note that the catalog changed since the run (it may be stale), or that the row was disabled and produced no output. Only results from the current browser session are shown; they are not restored after a reload.
+- Catalog selectors show the item count, set count, updated time, and the first 8 characters of the ID next to the name, so same-named catalogs can be told apart.
+- Search with 10,000 items targets 100 ms or less from typing to rendered list (measured with `tests/bench/text_catalog_v2_search.bench.mjs --assert`; the median is a few ms in local Node). It uses cached lowercase search strings and a shared `Intl.Collator` for sorting. The data format and draw results are unchanged.
 - Previous execution results use the same name/text list, divided into sections following the set/component hierarchy. Unselected child components and item candidates can be revealed. Inline text edits update the shared original and are marked as applying to the next run.
 - Executed text and previous output remain immutable. Repeated occurrences stay visible and synchronize shared edits. Deleted items retain their executed text for viewing but cannot be edited.
 
@@ -1329,6 +1337,24 @@ Sample: `tests/workflows/24_text_catalog_converter.json`.
 **Outputs**: `catalog_json` STRING
 
 [↑ Top](#top)
+
+---
+
+### SAX Text Catalog Manager
+
+`SAX_Bridge_Text_Catalog_Manager` — A provisional management node for listing, duplicating, archiving, and restoring shared V2 catalogs. Running the node is not required (`SAX/Bridge/Utility`). Everything that removes a catalog lives here.
+
+**Outputs**: None
+
+1. Add the node and press the catalog list / duplicate / archive button.
+2. The list shows each catalog's name, item count, set count, updated time, and the first 8 characters of its ID. Catalogs sharing a name are flagged.
+3. "Duplicate" creates a new catalog with the same content (name = original + " コピー", a new ID, revision 1). Any pending unsaved edit is saved first.
+4. "Archive" does not delete the catalog; it moves it to `archive/` under the `sax_text_catalog` system user directory. The confirmation shows the item and set counts and how many V2 nodes in this workflow use the catalog. **Other workflows that reference the catalog cannot be detected**; running them after archiving fails because the catalog is not found. Right after archiving, "Undo" restores it.
+5. Open "Archived" to list moved catalogs and "Restore" them. Restore is refused (never overwrites) when an active catalog with the same ID exists.
+
+Archiving is not permanent deletion. To remove a catalog from disk, delete its file in the `archive` folder manually (this cannot be undone). A broken catalog can also be archived, after confirmation, to set it aside.
+
+[↑ Back to top](#top)
 
 ---
 
