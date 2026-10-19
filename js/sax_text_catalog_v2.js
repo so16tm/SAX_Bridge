@@ -608,6 +608,7 @@ app.registerExtension({
             if (shared) {
                 try { shared.result = { text: message.text?.[0] ?? "", selection: JSON.parse(message.selection_json?.[0] ?? "{}") }; }
                 catch { shared.result = null; }
+                shared.setWidget?.refresh();
                 return result;
             }
             const state = stateFor(this);

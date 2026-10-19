@@ -60,6 +60,25 @@ def test_update_conflict_retains_saved_revision():
     assert error.value.current["name"] == "新版"
 
 
+def test_batch_put_delete_put_keeps_order_and_replaces_in_place():
+    document = store.create(source())
+    first = document["catalog"]["items"][0]
+    def extra(n):
+        return {"id": f"bulk-{n}", "name": f"N{n}", "text": f"T{n}", "tags": []}
+
+    operations = [{"type": "item.put", "item": extra(n)} for n in range(5)]
+    operations += [{"type": "item.put", "item": {**extra(2), "text": "replaced"}},
+                   {"type": "item.delete", "id": "bulk-1"},
+                   {"type": "item.put", "item": extra(1)},
+                   {"type": "item.delete", "id": first["id"]}]
+    result = store.update(document["id"], 1, operations)
+    ids = [item["id"] for item in result["catalog"]["items"]]
+    assert "bulk-1" in ids and first["id"] not in ids
+    assert ids.index("bulk-0") < ids.index("bulk-2") < ids.index("bulk-3") < ids.index("bulk-4") < ids.index("bulk-1")
+    assert next(item for item in result["catalog"]["items"] if item["id"] == "bulk-2")["text"] == "replaced"
+    assert len(ids) == len(set(ids))
+
+
 def test_simultaneous_updates_have_one_winner():
     document = store.create(source())
     def change(index):
@@ -338,5 +357,126 @@ def test_http_preview_route(monkeypatch):
         assert (await call([1]))[0] == 400
         assert (await call({"recipe_id": "r"}, "unknown"))[0] == 400
         assert store.get(document["id"])["revision"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_list_reports_counts_and_update_time():
+    document = store.create(source(4))
+    entry = store.list_catalogs()[0]
+    assert (entry["id"], entry["name"], entry["revision"], entry["items"], entry["recipes"]) == (document["id"], "共通", 1, 4, 1)
+    assert entry["updated_at"] == (store.directory() / (document["id"] + ".json")).stat().st_mtime
+    assert "catalog" not in entry  # 本文は一覧へ含めない
+
+
+def test_duplicate_is_independent_and_keeps_inner_ids():
+    document = store.create(source())
+    copied = store.duplicate(document["id"])
+    assert copied["id"] != document["id"] and copied["name"] == "共通 コピー"
+    assert (copied["items"], copied["recipes"], copied["revision"]) == (6, 1, 1)
+    duplicate = store.get(copied["id"])
+    # セットIDは保たれ、同じ行構成のワークフローがそのまま使える。元のカタログは変わらない。
+    assert [r["id"] for r in duplicate["recipes"]] == ["r"] and duplicate["catalog"] == store.get(document["id"])["catalog"]
+    store.update(copied["id"], 1, [{"type": "item.delete", "id": "i0"}])
+    assert len(store.get(document["id"])["catalog"]["items"]) == 6
+    assert store.duplicate(document["id"], "別名")["name"] == "別名"
+    long = store.create({**source(), "name": "あ" * 256})
+    assert len(store.duplicate(long["id"])["name"]) == 256
+    with pytest.raises(ValueError):
+        store.duplicate(document["id"], 5)
+    with pytest.raises(ValueError):
+        store.duplicate("unknown")
+
+
+def test_archive_hides_without_deleting_and_restore_returns():
+    document = store.create(source())
+    other = store.create(source(2))
+    result = store.archive(document["id"])
+    assert result == {"id": document["id"], "name": "共通"}
+    assert [c["id"] for c in store.list_catalogs()] == [other["id"]]
+    with pytest.raises(ValueError, match="見つかりません"):
+        store.get(document["id"])  # 実行も参照先なしの明示エラーになり、空データへ置き換えない
+    archived = store.list_archived()
+    assert [(c["id"], c["items"], c["recipes"]) for c in archived] == [(document["id"], 6, 1)]
+    restored = store.restore(document["id"])
+    assert restored["id"] == document["id"] and restored["revision"] == 1
+    assert store.get(document["id"]) == document  # 内容は変わらない
+    assert store.list_archived() == []
+    assert {c["id"] for c in store.list_catalogs()} == {document["id"], other["id"]}
+
+
+def test_archive_and_restore_refuse_overwrite_and_unknown():
+    document = store.create(source())
+    store.archive(document["id"])
+    with pytest.raises(ValueError, match="見つかりません"):
+        store.archive(document["id"])
+    again = copy.deepcopy(document)
+    store._write(again)  # 同じIDが一覧側に再び存在する状況
+    with pytest.raises(ValueError, match="既にあります"):
+        store.restore(document["id"])
+    assert store.get(document["id"]) == document
+    with pytest.raises(ValueError, match="既にあります"):
+        store.archive(document["id"])
+    assert len(store.list_archived()) == 1
+    with pytest.raises(ValueError):
+        store.restore("unknown")
+    with pytest.raises(ValueError):
+        store.archive("../escape")
+    with pytest.raises(ValueError):
+        store.restore("../escape")
+
+
+def test_broken_catalog_can_be_archived_and_restored():
+    (store.directory() / "broken.json").write_text("{", encoding="utf-8")
+    assert store.list_catalogs()[0]["error"]
+    assert store.archive("broken") == {"id": "broken", "name": "broken"}
+    assert store.list_catalogs() == []
+    assert store.list_archived()[0]["error"]
+    assert store.restore("broken")["error"]
+
+
+def test_archive_drops_cache_so_restored_file_is_reread():
+    document = store.create(source())
+    store.get(document["id"])
+    store.archive(document["id"])
+    assert document["id"] not in store._cache
+    store.restore(document["id"])
+    store.update(document["id"], 1, [{"type": "catalog.rename", "name": "復元後"}])
+    assert store.get(document["id"])["name"] == "復元後"
+
+
+def test_http_routes_duplicate_archive_restore(monkeypatch):
+    import asyncio
+    from aiohttp import web
+    routes = web.RouteTableDef()
+    monkeypatch.setitem(sys.modules, "server", types.SimpleNamespace(
+        PromptServer=types.SimpleNamespace(instance=types.SimpleNamespace(routes=routes))))
+    store.register_routes()
+    handlers = {(route.method, route.path): route.handler for route in routes}
+    document = store.create(source())
+
+    async def call(method, path, payload=None, identifier=None):
+        data = json.dumps(payload if payload is not None else {}).encode()
+        async def chunks(size):
+            yield data
+        request = types.SimpleNamespace(content_length=len(data), content=types.SimpleNamespace(iter_chunked=chunks),
+                                        match_info={"catalog_id": identifier or document["id"]})
+        response = await handlers[(method, path)](request)
+        return response.status, json.loads(response.body)
+
+    prefix = "/sax/text-catalog/v2/catalogs"
+    async def scenario():
+        status, body = await call("POST", prefix + "/{catalog_id}/duplicate", {"name": "複製"})
+        assert status == 200 and body["name"] == "複製" and body["items"] == 6
+        assert (await call("POST", prefix + "/{catalog_id}/duplicate", {"name": 3}))[0] == 400
+        assert (await call("POST", prefix + "/{catalog_id}/duplicate", identifier="unknown"))[0] == 400
+        assert (await call("POST", prefix + "/{catalog_id}/archive"))[1] == {"id": document["id"], "name": "共通"}
+        assert (await call("POST", prefix + "/{catalog_id}/archive"))[0] == 400
+        status, body = await call("GET", "/sax/text-catalog/v2/archive")
+        assert status == 200 and [c["id"] for c in body["catalogs"]] == [document["id"]]
+        status, body = await call("POST", "/sax/text-catalog/v2/archive/{catalog_id}/restore")
+        assert status == 200 and body["id"] == document["id"]
+        assert (await call("POST", "/sax/text-catalog/v2/archive/{catalog_id}/restore"))[0] == 400
+        assert {c["id"] for c in (await call("GET", prefix))[1]["catalogs"]} >= {document["id"]}
 
     asyncio.run(scenario())

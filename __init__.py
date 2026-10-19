@@ -9,6 +9,7 @@ from .nodes import primitive_store as primitive_store_node
 from .nodes import text_catalog as text_catalog_node
 from .nodes import text_catalog_v2 as text_catalog_v2_node
 from .nodes import text_catalog_converter as text_catalog_converter_node
+from .nodes import text_catalog_manager as text_catalog_manager_node
 from .nodes import text_catalog_v2_store
 from .nodes import tag_dictionary
 from .nodes import wildcard_editor
@@ -90,6 +91,7 @@ for v3_node in [
     text_catalog_node.SAX_Bridge_Text_Catalog,
     text_catalog_v2_node.SAX_Bridge_Text_Catalog_V2,
     text_catalog_converter_node.SAX_Bridge_Text_Catalog_Converter,
+    text_catalog_manager_node.SAX_Bridge_Text_Catalog_Manager,
     tag_dictionary.SAX_Bridge_Tag_Dictionary,
     wildcard_editor_node.SAX_Bridge_Wildcard_Editor,
     toggle_manager_node.SAX_Bridge_Toggle_Manager,

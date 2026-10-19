@@ -168,15 +168,97 @@ def create(payload):
     return copy.deepcopy(document)
 
 
+def _summary(document, path):
+    """一覧用のメタ情報。本文は含めず、アイテム数・セット数・更新日時（秒）だけを返す。"""
+    return {"id": document["id"], "name": document["name"], "revision": document["revision"],
+            "items": len(document["catalog"]["items"]), "recipes": len(document["recipes"]),
+            "updated_at": path.stat().st_mtime}
+
+
 def list_catalogs():
     results = []
     for path in sorted(directory().glob("*.json")):
         try:
-            doc = snapshot(path.stem)
-            results.append({key: doc[key] for key in ("id", "name", "revision")})
+            results.append(_summary(snapshot(path.stem), path))
         except (ValueError, OSError) as exc:
             # 壊れたファイルを隠して、新規作成を促さない。
             results.append({"id": path.stem, "name": path.stem, "error": str(exc)})
+    return results
+
+
+def duplicate(catalog_id, name=None):
+    """カタログを別IDの新しいカタログとして複製する。元のカタログは変更しない。"""
+    from .text_catalog_v2 import MAX_NAME_LENGTH
+    source = get(catalog_id)
+    if name is None:
+        suffix = " コピー"
+        name = source["name"][:MAX_NAME_LENGTH - len(suffix)] + suffix
+    created = create({"document": {**source, "name": name}})
+    return _summary(created, _path(created["id"]))
+
+
+def archive_directory():
+    return directory() / "archive"
+
+
+def _archived_path(catalog_id):
+    _path(catalog_id)  # IDの形式検査
+    return archive_directory() / (catalog_id + ".json")
+
+
+def archive(catalog_id):
+    """削除せず、別フォルダー（archive）へ移す。一覧と実行からは見えなくなり、restore で戻せる。"""
+    with _lock(catalog_id):
+        path, target = _path(catalog_id), _archived_path(catalog_id)
+        if not path.exists():
+            raise ValueError("参照先の共有カタログが見つかりません")
+        if target.exists():
+            raise ValueError("同じIDのアーカイブが既にあります")
+        try:
+            name = _load(catalog_id)["name"]
+        except ValueError:
+            name = catalog_id  # 壊れたカタログも整理できるようにする
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(path, target)
+        with _guard:
+            _cache.pop(catalog_id, None)
+    return {"id": catalog_id, "name": name}
+
+
+def restore(catalog_id):
+    """アーカイブしたカタログを一覧へ戻す。同じIDのカタログが既にあれば上書きしない。"""
+    with _lock(catalog_id):
+        path, source = _path(catalog_id), _archived_path(catalog_id)
+        if not source.exists():
+            raise ValueError("アーカイブにカタログが見つかりません")
+        if path.exists():
+            raise ValueError("同じIDのカタログが既にあります")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source, path)
+    try:
+        return _summary(snapshot(catalog_id), path)
+    except ValueError as exc:
+        return {"id": catalog_id, "name": catalog_id, "error": str(exc)}
+
+
+def list_archived():
+    from .text_catalog_v2 import MAX_JSON_BYTES
+    results = []
+    for path in sorted(archive_directory().glob("*.json")):
+        try:
+            _path(path.stem)
+            with path.open("rb") as stream:
+                raw = stream.read(MAX_JSON_BYTES + 1)
+            if len(raw) > MAX_JSON_BYTES:
+                raise ValueError("カタログが32 MiBを超えています")
+            document = json.loads(raw)
+            if not isinstance(document, dict) or document.get("id") != path.stem:
+                raise ValueError("カタログIDと保存ファイルが一致しません")
+            results.append({"id": path.stem, "name": str(document.get("name", path.stem)),
+                            "items": len(document["catalog"]["items"]), "recipes": len(document["recipes"]),
+                            "updated_at": path.stat().st_mtime})
+        except (ValueError, OSError, KeyError, TypeError, UnicodeError, RecursionError):
+            results.append({"id": path.stem, "name": path.stem, "error": "共有カタログを読み込めません"})
     return results
 
 
@@ -188,6 +270,8 @@ def update(catalog_id, base_revision, operations):
         if current["revision"] != base_revision:
             raise CatalogConflict(copy.deepcopy(current))
         document = copy.deepcopy(current)
+        # ID→位置。1万件の取り込みで操作ごとに線形探索すると遅いため、種別ごとに1度だけ作り、削除したときだけ作り直す。
+        positions = {}
         for op in operations:
             if not isinstance(op, dict):
                 raise ValueError("変更操作が不正です")
@@ -203,16 +287,22 @@ def update(catalog_id, base_revision, operations):
             identifier = entry.get("id") if isinstance(entry, dict) else op.get("id")
             if not isinstance(identifier, str) or not identifier:
                 raise ValueError("変更対象IDが不正です")
-            index = next((i for i, value in enumerate(target) if value["id"] == identifier), None)
+            if is_item not in positions:
+                positions[is_item] = {}
+                for i, value in enumerate(target):
+                    positions[is_item].setdefault(value["id"], i)
+            index = positions[is_item].get(identifier)
             if kind.endswith("put"):
                 if not isinstance(entry, dict):
                     raise ValueError("変更対象が不正です")
                 if index is None:
+                    positions[is_item][identifier] = len(target)
                     target.append(copy.deepcopy(entry))
                 else:
                     target[index] = copy.deepcopy(entry)
             elif index is not None:
                 target.pop(index)
+                del positions[is_item]
                 if is_item:
                     from .text_catalog_v2 import iter_groups
                     for recipe in document["recipes"]:
@@ -246,6 +336,9 @@ def register_routes():
             if action == "list":
                 result = await asyncio.to_thread(list_catalogs)
                 return web.json_response({"catalogs": result})
+            if action == "list_archived":
+                result = await asyncio.to_thread(list_archived)
+                return web.json_response({"catalogs": result})
             if action == "get":
                 result = await asyncio.to_thread(get, request.match_info["catalog_id"])
             else:
@@ -262,6 +355,14 @@ def register_routes():
                     result = await asyncio.to_thread(register_v1, payload)
                 elif action == "create":
                     result = await asyncio.to_thread(create, payload)
+                elif action in ("duplicate", "archive", "restore"):
+                    if not isinstance(payload, dict):
+                        raise ValueError("オブジェクトが必要です")
+                    if action == "duplicate":
+                        result = await asyncio.to_thread(duplicate, request.match_info["catalog_id"], payload.get("name"))
+                    else:
+                        result = await asyncio.to_thread(archive if action == "archive" else restore,
+                                                         request.match_info["catalog_id"])
                 elif action == "preview":
                     from .text_catalog_v2 import preview_recipe
                     if not isinstance(payload, dict):
@@ -301,6 +402,23 @@ def register_routes():
     @routes.post(prefix + "/{catalog_id}/preview")
     async def catalog_preview(request):
         return await handle(request, "preview")
+
+    @routes.post(prefix + "/{catalog_id}/duplicate")
+    async def catalog_duplicate(request):
+        return await handle(request, "duplicate")
+
+    @routes.post(prefix + "/{catalog_id}/archive")
+    async def catalog_archive(request):
+        return await handle(request, "archive")
+
+    # アーカイブは一覧とは別の経路にして、カタログIDと名前が衝突しないようにする。
+    @routes.get("/sax/text-catalog/v2/archive")
+    async def catalog_archived_list(request):
+        return await handle(request, "list_archived")
+
+    @routes.post("/sax/text-catalog/v2/archive/{catalog_id}/restore")
+    async def catalog_restore(request):
+        return await handle(request, "restore")
 
     @routes.patch(prefix + "/{catalog_id}")
     async def catalog_update(request):

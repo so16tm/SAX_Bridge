@@ -9,7 +9,8 @@ tests/bench/
 ├── hooks.mjs             # `../../scripts/app.js` → stubs/comfy_app.js に差し替え
 ├── stubs/comfy_app.js    # ComfyUI `app` の最小スタブ
 ├── env.mjs               # DOM / canvas ctx / LiteGraph モックと計測ユーティリティ
-└── slot_scaling.bench.mjs
+├── slot_scaling.bench.mjs
+└── text_catalog_v2_search.bench.mjs
 ```
 
 ## 実行方法
@@ -46,3 +47,14 @@ Text Catalog のスロット上限拡大（catalog items 32 → 256 / relations 
 3. `DynamicSlotCoordinator.applyAfterCapture`（capture → mutate → sync → restore）
 4. `+ Add Relation` を 32 回押したときの累積
 5. Manage Texts ダイアログのオープン / アイテムクリック / 検索 1 打鍵
+
+## text_catalog_v2_search.bench.mjs
+
+Text Catalog V2 共有エディタ（10,000 件・本文 540 文字）で、検索 1 回あたりの絞り込み＋並べ替えの JS 時間を測る。
+改善前の方式（毎回の正規化・`localeCompare('ja')`）の簡易再現と並べて表示する。`--assert` を付けると、
+中央値が 100ms を超えたときに終了コード 1 になる（P3 3-7 の目標）。DOM の生成・描画は含まない。
+ブラウザでの「入力→描画」は `text_catalog_v2_p3_browser.cjs` の 3-7 が実測する（Playwright が必要）。
+
+```bash
+node tests/bench/text_catalog_v2_search.bench.mjs --assert
+```
