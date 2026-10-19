@@ -34,9 +34,9 @@ let browser;
  await page.evaluate(()=>Object.defineProperty(globalThis.crypto,'randomUUID',{value:undefined,configurable:true}));
  await page.getByRole('button',{name:'＋ テキストセットを追加',exact:true}).click();
  assert.equal(await page.evaluate(()=>JSON.parse(testNode.widgets.find(w=>w.name==='config_json').value).rows.length),2);
- await page.locator('.ssw-entry').last().locator('select').selectOption('portrait');
+ await page.locator('.sax-picker-dialog').getByRole('option',{name:'旅人のポートレート',exact:true}).click(); // 追加直後はピッカーが開く
  const added=await page.evaluate(()=>JSON.parse(testNode.widgets.find(w=>w.name==='config_json').value).rows.at(-1));assert.match(added.id,/^v2_/);assert.equal(added.recipe_id,'portrait');
- await page.locator('.ssw-entry').first().locator('select').selectOption('watercolor');
+ await page.locator('.ssw-entry').first().locator('.ssw-name').click();await page.locator('.sax-picker-dialog').getByRole('option',{name:'水彩の風景',exact:true}).click();
  assert.equal(await page.locator('.sax-shared-editor').count(),0);
  await page.locator('[data-row-id="r1"] .ssw-handle').focus();await page.keyboard.press('ArrowDown');
  assert.equal(await page.evaluate(()=>JSON.parse(testNode.widgets.find(w=>w.name==='config_json').value).rows[1].id),'r1');

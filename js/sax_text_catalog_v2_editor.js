@@ -1,5 +1,6 @@
 import { showDialog, showConfirmDialog } from "./sax_ui_base.js";
-import { LIMITS, candidateWeight, parseSelectionWeight, parseRandomCount, formatRandomCount, sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds, itemUsage, deletionImpact, normalizeSearch, searchTokens, matchesSearch, tagsError } from "./sax_text_catalog_v2_model.js";
+import { LIMITS, candidateWeight, parseSelectionWeight, parseRandomCount, formatRandomCount, sortedNamedOptions, newId, parseTags, itemTagSortKeys, compareItemTagKeys, walkGroups, groupItemIds, itemUsage, deletionImpact, usageSummary, recipeItemIds, appendItemGroups, tagCounts, suggestTags, applyTagSuggestion, normalizeSearch, searchTokens, matchesSearch, tagsError } from "./sax_text_catalog_v2_model.js";
+import { buildPickerList, choosePicker, isTopmostOverlay } from "./sax_text_catalog_v2_dialogs.js";
 import { attachAutoComplete, detachAutoComplete } from "./sax_text_autocomplete.js";
 import { openWildcardPicker } from "./sax_text_catalog_v2_wildcards.js";
 
@@ -73,6 +74,17 @@ const STYLE = `
 .sax-shared-editor .se-order-item>input{width:54px;flex:none}.sax-shared-editor .se-order-item .se-candidate-copy>span{font-size:11px}
 .sax-shared-editor .se-order-handle{cursor:grab}.sax-shared-editor .se-order-item[data-drop=true]{outline:1px solid var(--primary-background,#5686d6)}
 @media(max-width:760px){.sax-shared-editor .se-layout{grid-template-columns:1fr}.sax-shared-editor .se-set-meta{flex-wrap:wrap}.sax-shared-editor .se-set-meta>input{min-width:160px}.sax-shared-editor .se-candidate-tags{display:none}}
+.sax-shared-editor .se-picker{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.sax-shared-editor .se-name-wrap{display:flex;gap:4px;align-items:flex-start;min-width:0}.sax-shared-editor .se-name-wrap>.se-cell{flex:1;min-width:0}.sax-shared-editor .se-usage{flex:none;padding:0 5px;font-size:11px;line-height:18px;min-height:0;height:20px;white-space:nowrap}
+.sax-shared-editor .se-used-badge{flex:none;font-size:10px;line-height:16px;padding:0 6px;border-radius:9px;border:1px solid var(--primary-background,#5686d6);color:var(--primary-background,#80adf2)}
+.sax-shared-editor .se-preview{flex:none;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--border-color,#45454b);padding-top:6px}.sax-shared-editor .se-preview textarea{min-height:80px;height:110px;line-height:1.5;font-size:13px}.sax-shared-editor .se-preview input{height:28px;font-size:12px;padding:3px 7px}
+.sax-shared-editor .se-notice{display:flex;gap:8px;align-items:center;padding:4px 8px;border:1px solid var(--border-color,#45454b);border-radius:6px;font-size:12px}.sax-shared-editor .se-notice[data-tone=warn]{border-color:var(--warning-text,#e0b050)}.sax-shared-editor .se-notice button{padding:2px 8px;font-size:12px}
+.se-suggest-host{position:relative;display:block;min-width:0}.se-row>.se-suggest-host{flex:1;min-width:110px}
+.se-suggest{position:absolute;left:0;top:100%;z-index:40;min-width:180px;max-width:320px;max-height:220px;overflow:auto;padding:2px;background:var(--comfy-menu-bg,#171718);border:1px solid var(--border-color,#45454b);border-radius:6px;box-shadow:0 4px 12px #0006;color:var(--input-text,#ddd);font:12px/18px sans-serif}
+.se-suggest-option{display:flex;justify-content:space-between;gap:12px;padding:2px 6px;border-radius:4px;cursor:pointer;white-space:nowrap}.se-suggest-option>span+span{opacity:.6}
+.se-suggest-option[aria-selected=true],.se-suggest-option:hover{background:color-mix(in srgb,var(--primary-background,#5686d6) 28%,transparent)}
+.sax-shared-dialog{--se-gap:8px}.sax-shared-dialog [hidden]{display:none!important}.sax-shared-dialog button,.sax-shared-dialog input,.sax-shared-dialog select{font:inherit;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#242426);border:1px solid var(--border-color,#45454b);border-radius:6px;padding:5px 8px;min-width:0}.sax-shared-dialog button{cursor:pointer}.sax-shared-dialog :focus-visible{outline:2px solid var(--primary-background,#5686d6);outline-offset:2px}
+.sax-shared-dialog .se-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sax-shared-dialog .se-muted{opacity:.68;font-size:12px}.sax-shared-dialog .se-primary{background:var(--primary-background,#386cb8);color:#fff}.sax-shared-dialog .se-error,.sax-shared-dialog .se-field-error{color:var(--error-text,#ed9494);font-size:12px;white-space:pre-wrap}.sax-shared-dialog .se-warning{color:var(--warning-text,#e0b050);font-size:12px}.sax-shared-dialog .se-invalid{border-color:var(--error-text,#ed9494)!important}
 `;
 
 function el(tag, cls = "", text = "") { const n = document.createElement(tag); n.className = cls; n.textContent = text; return n; }
@@ -80,6 +92,14 @@ function row(...children) { const n = el("div", "se-row"); n.append(...children)
 function btn(text, fn, cls = "") { const n = el("button", cls, text); n.type = "button"; n.addEventListener("click", fn); return n; }
 function input(value, callback, type = "text") { const n = el("input"); n.type = type; n.value = value; n.addEventListener("input", () => callback(n.value)); return n; }
 function select(options, value, fn) { const n = el("select"); for (const [id, name] of options) { const o = el("option", "", name); o.value = id; n.append(o); } n.value = value; n.addEventListener("change", () => fn(n.value)); return n; }
+// セットのように件数の多い選択肢向け。クリックで検索付きピッカーを開く（キーボードでは Enter／Space）。
+function pickerSelect(options, value, fn, label) {
+    const entries = options.map(([id, name]) => ({ id, name }));
+    const n = el("button", "se-picker"); n.type = "button"; n.setAttribute("aria-label", label); n.setAttribute("aria-haspopup", "dialog");
+    const paint = () => { n.textContent = `${entries.find(entry => entry.id === value)?.name ?? ""} ▾`; n.title = `${label}（クリックで検索して選択）`; n.dataset.value = value; };
+    n.addEventListener("click", async () => { const chosen = await choosePicker({ title: label, entries, current: value }); if (chosen !== null && chosen !== value) { value = chosen; paint(); fn(chosen); (document.querySelector(`.se-picker[aria-label="${label}"]`) ?? n).focus?.({ preventScroll: true }); } });
+    paint(); return n;
+}
 function check(value, fn) { const n = el("input"); n.type = "checkbox"; n.checked = value; n.addEventListener("change", () => fn(n.checked)); return n; }
 function label(text, control) { const n = el("label", "se-row"); n.append(control, document.createTextNode(text)); return n; }
 // 入力欄を赤枠にし、host の直後へ理由を出す。host が null なら赤枠だけにする。エラーを表示したときは true を返す。
@@ -156,15 +176,31 @@ export function openSharedEditor(session, options = {}) {
     const resultKey = value => value ? `${value.catalog_id}|${value.revision ?? value.catalog_revision}|${value.seed}|${value.text}` : "";
     const view = () => mode === "results" ? pref.results : pref;
     let newItemId = null;
+    // 候補の編集画面の「未使用のみ」、プレビュー欄、操作結果の通知。
+    let unusedOnly = false, noticeEl = null, noticeTimer = null, paintPreview = () => {};
+    const previewState = { open: false, seed: null, text: "", error: "", ran: false, busy: false, epoch: "", recipeId: "", seedUsed: 0, revision: 0 };
+    // 使用数の集計は削除確認・並べ替え・各行の「使用 N」で共有し、編集のたびに1回だけ計算する。
+    let usageCache = null;
+    const usage = () => {
+        const recipes = doc().recipes;
+        if (!usageCache || usageCache.epoch !== session.editEpoch || usageCache.refs.length !== recipes.length || recipes.some((value, index) => value !== usageCache.refs[index])) usageCache = { epoch: session.editEpoch, refs: [...recipes], map: itemUsage(recipes) };
+        return usageCache.map;
+    };
+    function showNotice(message, { tone = "info", action = null } = {}) {
+        if (!noticeEl) return;
+        clearTimeout(noticeTimer); noticeEl.replaceChildren(el("span", "se-grow", message)); noticeEl.dataset.tone = tone; noticeEl.hidden = false;
+        if (action) noticeEl.append(btn(action.label, () => { noticeEl.hidden = true; action.run(); }));
+        noticeTimer = setTimeout(() => { noticeEl.hidden = true; }, 10000);
+    }
     function sortItems(values, resolve = value => value) {
         const tagKeys = pref.sort === "tags" ? itemTagSortKeys(values.map(resolve)) : null;
         const ranks = pref.sort === "catalog" ? new Map(doc().catalog.items.map((item, index) => [item.id, index])) : null;
-        const usage = pref.sort === "usage" ? itemUsage(doc().recipes) : null;
+        const counts = pref.sort === "usage" ? usage() : null;
         return values.sort((a, b) => {
             const left = resolve(a), right = resolve(b);
             if (tagKeys) { const difference = compareItemTagKeys(tagKeys.get(left.id), tagKeys.get(right.id)); if (difference) return difference; }
             if (ranks) { const difference = (ranks.get(left.id) ?? Infinity) - (ranks.get(right.id) ?? Infinity); if (difference) return difference; }
-            if (pref.sort === "usage") { const difference = (usage.get(right.id)?.groups ?? 0) - (usage.get(left.id)?.groups ?? 0); if (difference) return difference; }
+            if (counts) { const difference = (counts.get(right.id)?.groups ?? 0) - (counts.get(left.id)?.groups ?? 0); if (difference) return difference; }
             return left.name.localeCompare(right.name, "ja") || left.id.localeCompare(right.id);
         });
     }
@@ -287,6 +323,106 @@ export function openSharedEditor(session, options = {}) {
         virtual.scroll.scrollTop = virtual.index.offsets[index]; virtual.paint();
         virtual.nodes.get(item.id)?.querySelector('[aria-label="名前を編集"]')?.click();
     }
+    // 編集するセットを切り替え、候補の選択状態など画面ごとの一時状態を初期化する。
+    function selectRecipe(id) { pref.recipeId = id; candidateGroup = null; targetParent = ""; candidateSelection.clear(); candidatesOnly = false; unusedOnly = false; candidateAnchor = null; }
+    function openSetEditor(id) { if (!close?.overlay?.isConnected || !doc().recipes.some(value => value.id === id)) return; selectRecipe(id); switchMode("sets"); }
+    function usageButton(itemId, name) {
+        const count = usage().get(itemId)?.groups ?? 0;
+        const control = btn(`使用 ${count}`, () => showUsage(itemId), "se-usage");
+        control.title = count ? "使用しているテキストセットを一覧し、選んで編集へ移動" : "どのセットでも使用されていません"; control.disabled = !count;
+        control.setAttribute("aria-label", `${name || "アイテム"}の使用先を表示（使用 ${count}）`);
+        control.addEventListener("pointerdown", event => event.preventDefault());
+        return control;
+    }
+    async function showUsage(itemId) {
+        // 編集中の欄が残ると管理外になるので描き直す。編集中でなければ押したボタンを残し、閉じたあとフォーカスが戻るようにする。
+        const editing = Boolean(active); releaseActive(); if (editing) refresh();
+        const item = itemMap.get(itemId), entry = usage().get(itemId); if (!item || !entry) return;
+        const recipes = sortedNamedOptions(doc().recipes.filter(value => entry.recipeIds.has(value.id)));
+        const id = await choosePicker({ title: `「${item.name || "アイテム"}」の使用先 — ${usageSummary(deletionImpact(usage(), [itemId]))}`, entries: recipes });
+        if (id !== null) openSetEditor(id);
+    }
+    // 一覧で選んだアイテムを、モードを切り替えずに既存のテキストセットへ追加する。構成要素の組み立てはセット画面と同じ appendItemGroups。
+    function addSelectedToSet() {
+        releaseActive(); refresh();
+        const ids = doc().catalog.items.filter(item => selected.has(item.id)).map(item => item.id); if (!ids.length) return;
+        const entries = sortedNamedOptions(doc().recipes);
+        if (!entries.length) { localError = "テキストセットがありません。「テキストセット」で作成してください"; updateStatus(); return; }
+        const valid = id => entries.some(entry => entry.id === id);
+        let recipeId = [pref.addRecipeId, pref.recipeFilter, pref.recipeId].find(valid) ?? "", separate = false, mode = "all", countText = "1";
+        showDialog({ title: `${ids.length}件をテキストセットへ追加`, width: 480, className: "sax-shared-dialog", build(dlg, end) {
+            const picker = buildPickerList(entries, { current: recipeId, label: "追加先のテキストセット", onPick: id => { recipeId = id; picker.setCurrent(id); sync(); } });
+            const addition = select([["combined", "1つの構成要素にまとめる"], ["separate", "アイテムごとに分ける"]], "combined", value => { separate = value === "separate"; sync(); }); addition.setAttribute("aria-label", "構成要素の追加方法");
+            const modeSelect = select([["all", "すべて使う"], ["random", "ランダム"]], "all", value => { mode = value; sync(); }); modeSelect.setAttribute("aria-label", "追加する構成要素の選択方式");
+            const number = input("1", value => { countText = value; setFieldError(number, ""); }); number.style.width = "85px"; number.placeholder = "0～2"; number.title = "固定件数（2）または範囲（0～2）"; number.setAttribute("aria-label", "追加する構成要素のランダム件数");
+            const unit = el("span", "se-muted", "件"), warning = el("div", "se-warning"), problem = el("div", "se-error"); problem.setAttribute("role", "alert");
+            const target = () => doc().recipes.find(value => value.id === recipeId);
+            const duplicates = () => { const used = target() ? recipeItemIds(target()) : null; return used ? ids.filter(id => used.has(id)).length : 0; };
+            function sync() {
+                modeSelect.hidden = separate; number.hidden = unit.hidden = separate || mode !== "random"; setFieldError(number, ""); problem.textContent = "";
+                const duplicated = duplicates(); warning.textContent = duplicated ? `選択中の${duplicated}件はこのセットで既に使用中です。追加すると重複しますが、そのまま追加できます。` : "";
+            }
+            const submit = () => {
+                problem.textContent = ""; const next = target();
+                if (!next) { problem.textContent = "追加先のテキストセットを選択してください"; return; }
+                let bounds = { count: 1 };
+                if (!separate && mode === "random") {
+                    try { bounds = parseRandomCount(countText); if (bounds.count > ids.length) throw new Error("ランダム件数の上限は選んだアイテム数以下にしてください"); }
+                    catch (error) { setFieldError(number, error.message, number.parentElement); return; }
+                }
+                const duplicated = duplicates();
+                // 上限超過などで保存できないときは全件を拒否し、選択とダイアログを保持する。
+                if (!mutate([{ type: "recipe.put", recipe: appendItemGroups(structuredClone(next), ids, { separate, mode, bounds, nameOf: id => itemMap.get(id)?.name }) }])) { problem.textContent = localError; return; }
+                pref.addRecipeId = recipeId; selected.clear(); end(); refresh(); updateBulk();
+                showNotice(`「${next.name || "無題"}」に${ids.length}件を${separate ? "アイテムごとの構成要素として" : "1つの構成要素として"}追加しました${duplicated ? `（うち${duplicated}件は重複）` : ""}`, { tone: duplicated ? "warn" : "info", action: { label: "セットを開く", run: () => openSetEditor(next.id) } });
+            };
+            dlg.append(picker.root, row(el("span", "se-muted", "追加方法"), addition), row(modeSelect, number, unit), warning, problem, row(btn("追加", submit, "se-primary"), btn("キャンセル", end)));
+            sync();
+        } });
+    }
+    // タグ入力欄に既存タグの候補を出す。カンマ区切りの最後の語を絞り込み、↑↓で選び、Enter／Tab（候補を選んだとき）かクリックで入れる。
+    function tagSuggestHost(control) {
+        const host = el("span", "se-suggest-host"), popup = el("div", "se-suggest"); popup.hidden = true; popup.setAttribute("role", "listbox");
+        let options = [], index = -1, counts = null;
+        const mark = () => { [...popup.children].forEach((node, i) => node.setAttribute("aria-selected", String(i === index))); };
+        const hide = () => { popup.hidden = true; index = -1; };
+        const accept = i => { const tag = options[i]?.tag; if (tag === undefined) return; control.value = applyTagSuggestion(control.value, tag); control.dispatchEvent(new Event("input", { bubbles: true })); hide(); control.focus(); };
+        const show = () => {
+            counts ??= tagCounts(doc().catalog.items); options = suggestTags(counts, control.value); index = -1; popup.replaceChildren();
+            options.forEach(({ tag, count }, i) => { const option = el("div", "se-suggest-option"); option.setAttribute("role", "option"); option.append(el("span", "", tag), el("span", "", `${count}件`)); option.addEventListener("pointerdown", event => { event.preventDefault(); accept(i); }); popup.append(option); });
+            popup.hidden = !options.length; mark();
+        };
+        control.addEventListener("focus", show); control.addEventListener("input", show);
+        control.addEventListener("blur", () => { hide(); counts = null; });
+        control.addEventListener("keydown", event => {
+            if (popup.hidden || event.isComposing || event.keyCode === 229) return;
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); index = (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length; mark(); }
+            else if ((event.key === "Enter" || event.key === "Tab") && index >= 0 && !event.shiftKey && !event.ctrlKey && !event.metaKey) { event.preventDefault(); accept(index); }
+            else if (event.key === "Escape") { event.preventDefault(); hide(); }
+        });
+        host.append(control, popup); return host;
+    }
+    // 編集中の Tab／Shift+Tab で、名前→本文→タグ→次の行の名前へ編集を移す。移動先がなければ false（通常のフォーカス移動に任せる）。
+    function moveEdit(entry, field, direction, edit) {
+        const fields = ["name", "text", "tags"], labels = { name: "名前", text: "本文", tags: "タグ" };
+        const entries = virtual?.entries ?? []; let i = entries.findIndex(value => value.key === entry.key), at = fields.indexOf(field);
+        const targets = [];
+        while (i >= 0 && targets.length < 4) {
+            at += direction; if (at < 0 || at >= fields.length) { i += direction; at = direction > 0 ? 0 : fields.length - 1; }
+            const target = entries[i]; if (!target) break;
+            if (!target.section && itemMap.has(target.itemId)) targets.push([target, fields[at]]); else at = direction > 0 ? fields.length - 1 : 0;
+        }
+        if (!targets.length) return false;
+        if (edit._fieldError) return true; // 入力エラーが残っている欄からは移動しない
+        edit.blur();
+        for (const [target, name] of targets) {
+            let node = virtual?.nodes.get(target.key);
+            if (!node) { const position = virtual?.entries.findIndex(value => value.key === target.key) ?? -1; if (position < 0) continue; virtual.scroll.scrollTop = virtual.index.offsets[position]; virtual.paint(); node = virtual.nodes.get(target.key); }
+            const cell = node?.querySelector(`[aria-label="${labels[name]}を編集"]`);
+            if (cell && cell.getClientRects().length) { cell.click(); break; }
+        }
+        return true;
+    }
     function duplicateItem(id) {
         releaseActive();
         const original = doc().catalog.items.find(item => item.id === id); if (!original) return;
@@ -313,11 +449,16 @@ export function openSharedEditor(session, options = {}) {
                 releaseActive(); virtual.pinned = entry.key; n.dataset.editing = "true";
                 const latest = itemMap.get(entry.itemId); if (!latest) return;
                 const edit = field === "text" ? el("textarea") : el("input"); edit.setAttribute("aria-label", field === "text" ? "アイテム本文" : field === "name" ? "アイテム名" : "アイテムタグ"); edit.value = field === "tags" ? latest.tags.join(", ") : latest[field]; if (field === "name") edit.maxLength = 256;
+                // 欄の下へエラーと候補を出せるよう、タグ欄だけ入力欄を包んで差し替える。候補の操作は編集欄のキー処理より先に受ける。
+                const holder = field === "tags" ? tagSuggestHost(edit) : edit;
                 const historyKey = newId(); const commit = () => { let next = edit.value; try { if (field === "tags") { next = parseTags(next); if (setFieldError(edit, tagsError(next))) return; } putItem(entry.itemId, { [field]: next }, historyKey); } catch (error) { localError = error.message; updateStatus(); } };
                 let composing = false; edit.addEventListener("compositionstart", () => { composing = true; }); edit.addEventListener("compositionend", () => { composing = false; commit(); }); edit.addEventListener("input", () => { if (!composing) commit(); });
                 edit.addEventListener("keydown", e => {
                     if (e.defaultPrevented) return;
-                    const advance = e.key === "Enter" && field !== "text" && !composing && !e.isComposing && e.keyCode !== 229;
+                    const typing = composing || e.isComposing || e.keyCode === 229;
+                    if (e.key === "Tab" && !typing && !e.ctrlKey && !e.altKey && !e.metaKey) { if (moveEdit(entry, field, e.shiftKey ? -1 : 1, edit)) e.preventDefault(); return; }
+                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !typing) { e.preventDefault(); e.stopPropagation(); edit.blur(); return; }
+                    const advance = e.key === "Enter" && field !== "text" && !typing;
                     if (!advance && !(e.key === "Escape" && !composing)) return;
                     e.preventDefault(); edit.blur();
                     // 名前の確定後は同じアイテムの本文編集へ進む。
@@ -325,8 +466,6 @@ export function openSharedEditor(session, options = {}) {
                 });
                 let pickerButton;
                 edit.addEventListener("blur", event => { if (active?.edit !== edit || active.picker || event.relatedTarget === pickerButton) return; commit(); active = null; virtual.pinned = null; refresh(); });
-                // 欄の下へエラーを出せるよう、タグ欄だけ入力欄を包んで差し替える。
-                const holder = field === "tags" ? el("div") : edit; if (holder !== edit) holder.append(edit);
                 c.replaceWith(holder); active = { edit, commit, picker: false };
                 if (field === "text") {
                     attachAutoComplete(edit);
@@ -339,7 +478,7 @@ export function openSharedEditor(session, options = {}) {
             }
             return c;
         }
-        n.append(cell("name", shown?.name ?? ""));
+        const nameWrap = el("div", "se-name-wrap"); nameWrap.append(cell("name", shown?.name ?? "")); if (current) nameWrap.append(usageButton(entry.itemId, shown?.name)); n.append(nameWrap);
         const textWrap = el("div"); textWrap.append(cell("text", shown?.text ?? ""));
         if (entry.candidate) textWrap.append(el("span", "se-badge", "未選択候補"));
         if (entry.snapshot) { textWrap.append(el("span", "se-badge", !current ? "削除済み・編集できません" : current.text !== entry.snapshot.text || current.name !== entry.snapshot.name ? "編集済み・次回実行に反映" : "実行時の内容")); const details = el("details"); details.append(el("summary", "se-muted", "実行時の本文"), el("div", "se-cell", entry.snapshot.text)); textWrap.append(details); }
@@ -350,7 +489,7 @@ export function openSharedEditor(session, options = {}) {
             const actions = el("div", "se-item-actions"); actions.append(expanded);
             if (mode === "items") { const duplicate = btn("複製", () => duplicateItem(entry.itemId)); duplicate.title = "名前・本文・タグをコピーして新しいアイテムを作成"; duplicate.addEventListener("pointerdown", event => event.preventDefault()); actions.append(duplicate); const remove = btn("削除", () => deleteItems([entry.itemId]), "se-danger"); remove.title = "このアイテムを削除（使用中のセットからも外れます）"; remove.addEventListener("pointerdown", event => event.preventDefault()); actions.append(remove); }
             tools.append(mode === "items" ? actions : expanded);
-            const tags = btn("タグ", () => { const value = input(current.tags.join(", "), () => {}); value.setAttribute("aria-label", "アイテムタグ"); showDialog({ title: "タグを編集", build(dlg, end) { dlg.append(value, btn("反映", () => { try { const parsed = parseTags(value.value); if (setFieldError(value, tagsError(parsed))) return; putItem(entry.itemId, { tags: parsed }); end(); } catch (error) { localError = error.message; updateStatus(); } })); } }); }); tags.classList.add("se-mobile-tags"); tools.append(tags);
+            const tags = btn("タグ", () => { const value = input(current.tags.join(", "), () => {}); value.setAttribute("aria-label", "アイテムタグ"); showDialog({ title: "タグを編集", build(dlg, end) { dlg.append(tagSuggestHost(value), btn("反映", () => { try { const parsed = parseTags(value.value); if (setFieldError(value, tagsError(parsed))) return; putItem(entry.itemId, { tags: parsed }); end(); } catch (error) { localError = error.message; updateStatus(); } })); } }); }); tags.classList.add("se-mobile-tags"); tools.append(tags);
         } n.append(tools); return n;
     }
     let bulkBar, bulkTagEdit, selectAllControl, selectionCount;
@@ -392,8 +531,7 @@ export function openSharedEditor(session, options = {}) {
         const q = input(state.query, value => { state.query = value; releaseActive(); scheduleRefresh(); }); q.placeholder = "名前・本文・タグを検索（空白区切りで AND）"; q.className = "se-grow";
         const tag = tagFilter(() => state.tags, tags => { state.tags = tags; });
         const sets = [["", "セット：すべて"], ...sortedNamedOptions(doc().recipes).map(r => [r.id, r.name])];
-        const set = select(sets, mode === "results" ? resultRecipe : pref.recipeFilter, value => { releaseActive(); if (mode === "results") resultRecipe = value; else pref.recipeFilter = value; refresh(); });
-        set.setAttribute("aria-label", "テキストセットで絞り込み");
+        const set = pickerSelect(sets, mode === "results" ? resultRecipe : pref.recipeFilter, value => { releaseActive(); if (mode === "results") resultRecipe = value; else pref.recipeFilter = value; refresh(); }, "テキストセットで絞り込み");
         const lines = select([["1", "本文1行"], ["3", "本文3行"], ["6", "本文6行"]], String(pref.lines), value => { releaseActive(); pref.lines = Number(value); virtual.heights.clear(); refresh(); });
         const bar = row(q, tag, set, lines, sortControl(refresh)); bar.classList.add("se-filterbar"); return bar;
     }
@@ -411,7 +549,7 @@ export function openSharedEditor(session, options = {}) {
         const selectionTools = row(btn("一覧を全選択", () => selectMatching(true)), btn("一覧の選択を解除", () => selectMatching(false)), btn("すべて解除", () => { selected.clear(); updateBulk(); }), selectionCount); selectionTools.classList.add("se-filterbar", "se-selection-tools");
         selectionTools.firstChild.title = "検索・タグ・セットに一致する全件を選択（画面外も含む）"; content.append(selectionTools);
         const tagEdit = input("", () => { setFieldError(tagEdit, ""); }); tagEdit.placeholder = "一括操作するタグ"; bulkTagEdit = tagEdit;
-        bulkBar = row(el("span", "se-muted", `${selected.size}件選択`), tagEdit, btn("タグ追加", () => bulkTags(tagEdit, true)), btn("タグ削除", () => bulkTags(tagEdit, false)), ...(mode === "items" ? [btn("削除", () => deleteItems([...selected]))] : []));
+        bulkBar = row(el("span", "se-muted", `${selected.size}件選択`), tagSuggestHost(tagEdit), btn("タグ追加", () => bulkTags(tagEdit, true)), btn("タグ削除", () => bulkTags(tagEdit, false)), ...(mode === "items" ? [btn("セットへ追加", addSelectedToSet), btn("削除", () => deleteItems([...selected]))] : []));
         bulkBar.classList.add("se-filterbar"); bulkBar.hidden = !selected.size; content.append(bulkBar);
         const columns = el("div", "se-columns"); for (const [name, cls] of [["", ""], ["名前", ""], ["本文（クリックして編集）", ""], ["タグ", "se-tags"], ["", ""]]) columns.append(el("span", cls, name)); content.append(columns);
         selectAllControl = null;
@@ -435,7 +573,7 @@ export function openSharedEditor(session, options = {}) {
         releaseActive(); ids = ids.filter(id => itemMap.has(id)); if (!ids.length) return;
         const impact = deletionImpact(itemUsage(doc().recipes), ids);
         const target = ids.length === 1 ? `「${itemMap.get(ids[0]).name || "アイテム"}」` : `${ids.length}件`;
-        const detail = impact.groups ? `使用中の構成要素 ${impact.groups}件・セット ${impact.recipes}件から外れます。` : "どのセットでも使用されていません。";
+        const detail = `${usageSummary(impact)}${impact.groups ? "から外れます" : ""}。`;
         if (!await showConfirmDialog({ title: "アイテムを削除", message: `${target}を削除します。${detail}\n「元に戻す」で参照も含めて復元できます。`, danger: true, okLabel: "削除", cancelLabel: "キャンセル" })) return;
         ids = ids.filter(id => itemMap.has(id));
         if (mutate(ids.map(id => ({ type: "item.delete", id })))) { for (const id of ids) selected.delete(id); refresh(); updateBulk(); }
@@ -466,12 +604,13 @@ export function openSharedEditor(session, options = {}) {
     }
     function renderSets() {
         const r = recipe(); if (r) pref.recipeId = r.id;
-        const setSelect = select(sortedNamedOptions(doc().recipes).map(s => [s.id, s.name]), r?.id ?? "", value => { pref.recipeId = value; candidateGroup = null; targetParent = ""; candidateSelection.clear(); candidatesOnly = false; candidateAnchor = null; render(); });
+        const setSelect = pickerSelect(sortedNamedOptions(doc().recipes).map(s => [s.id, s.name]), r?.id ?? "", value => { selectRecipe(value); render(); }, "編集するテキストセット");
         const create = () => { const next = { id: newId(), name: "新しいテキストセット", groups: [] }; if (putRecipe(next)) { pref.recipeId = next.id; render(); } };
         content.append(row(el("strong", "", "テキストセット"), setSelect, btn("＋ 作成", create), btn("コピー", () => { if (!r) return; const next = structuredClone(r); next.id = newId(); next.name += " コピー"; for (const g of walkGroups(next.groups)) g.id = newId(); if (putRecipe(next)) { pref.recipeId = next.id; render(); } }), btn("削除", async () => { if (r && await showConfirmDialog({ title: "テキストセットを削除", message: `${r.name}を共有カタログから削除します。参照しているワークフローではセットの選び直しが必要です。`, danger: true, okLabel: "削除" })) { mutate([{ type: "recipe.delete", id: r.id }]); pref.recipeId = null; render(); } })));
         if (!r) { content.append(el("div", "se-empty", "「＋ 作成」でテキストセットを作成してください。")); return; }
         const name = input(r.name, value => { const next = structuredClone(recipe()); next.name = value; putRecipe(next); }); name.maxLength = 256; name.className = "se-grow"; name.setAttribute("aria-label", "セット名");
         const meta = content.lastChild; meta.classList.add("se-set-meta"); meta.insertBefore(name, meta.children[2]);
+        const previewToggle = btn("プレビュー", () => { previewState.open = !previewState.open; render(); }); previewToggle.setAttribute("aria-pressed", String(previewState.open)); previewToggle.title = "このセットを指定のSeedで試行して出力を確かめる（カタログは変更しません）"; meta.append(previewToggle);
         const layout = el("div", "se-layout"), left = el("div", "se-pane"), right = el("div", "se-pane"); layout.append(left, right); content.append(layout);
         if (targetParent && !locateGroup(r.groups,targetParent)) targetParent = "";
         left.append(el("strong", "", candidateGroup ? `「${[...walkGroups(r.groups)].find(g => g.id === candidateGroup)?.name || "構成要素"}」の候補を変更` : "追加するアイテムを選択"));
@@ -488,6 +627,8 @@ export function openSharedEditor(session, options = {}) {
             for (const itemId of ids) { if (yes) candidateSelection.add(itemId); else candidateSelection.delete(itemId); }
             candidateAnchor = id; renderCandidates();
         }
+        // 「使用中」はこのセットの他の構成要素で使われているアイテム。候補を変更中の構成要素自身の候補は数えない。
+        const usedIds = recipeItemIds(r, candidateGroup);
         const candidateVirtual = new VirtualRows(scroll, entry => {
             const i = itemMap.get(entry.itemId), n = el("div", "se-candidate"); n.dataset.itemId = i.id;
             const checkbox = el("input"); checkbox.type = "checkbox"; checkbox.checked = candidateSelection.has(i.id); checkbox.setAttribute("aria-label", `${i.name}を候補に選択`);
@@ -496,18 +637,18 @@ export function openSharedEditor(session, options = {}) {
             const copy = el("div", "se-candidate-copy"), title = el("span", "", i.name), body = el("span", "se-muted", i.text.replace(/\s+/g, " "));
             title.title = i.name; body.title = i.text; copy.append(title, body);
             const tags = el("span", "se-muted se-candidate-tags", i.tags.join(", ")); tags.title = tags.textContent;
-            n.append(checkbox, copy, tags); n.addEventListener("click", event => { if (!event.target.closest("input")) chooseCandidate(i.id, !candidateSelection.has(i.id), event.shiftKey); });
+            n.append(checkbox, copy, ...(usedIds.has(i.id) ? [el("span", "se-used-badge", "使用中")] : []), tags); n.addEventListener("click", event => { if (!event.target.closest("input")) chooseCandidate(i.id, !candidateSelection.has(i.id), event.shiftKey); });
             return n;
         });
         virtual = candidateVirtual;
         const renderCandidates = () => {
             const tokens = searchTokens(candidateQuery);
-            candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidatesOnly || candidateSelection.has(i.id)) && matchesItem(i, tokens, candidateTags))).map(i => ({ key: i.id, itemId: i.id, height: 48 })));
+            candidateVirtual.set(sortItems(doc().catalog.items.filter(i => (!candidatesOnly || candidateSelection.has(i.id)) && (!unusedOnly || !usedIds.has(i.id)) && matchesItem(i, tokens, candidateTags))).map(i => ({ key: i.id, itemId: i.id, height: 48 })));
             for (const [id, n] of candidateVirtual.nodes) { n.querySelector("input").checked = candidateSelection.has(id); n.dataset.selected = String(candidateSelection.has(id)); }
-            if (number._fieldError) validateCount(); count.textContent = `${candidateSelection.size}件選択`; matched.textContent = `${candidateVirtual.entries.length}件一致`;
+            if (number._fieldError) validateCount(); const overlap = [...candidateSelection].filter(id => usedIds.has(id)).length; count.textContent = `${candidateSelection.size}件選択`; overlapNote.textContent = overlap ? `（うち使用中${overlap}件・追加すると重複します）` : ""; matched.textContent = `${candidateVirtual.entries.length}件一致`;
         };
-        const count = el("strong"), matched = el("span", "se-muted"); count.title = "Shift+クリックで範囲選択。検索・タグを変更しても選択は保持されます";
-        const selectionbar = row(count, label("選択済みだけ", check(candidatesOnly, yes => { candidatesOnly = yes; renderCandidates(); })), matched); selectionbar.classList.add("se-selectionbar"); left.insertBefore(selectionbar, scroll);
+        const count = el("strong"), overlapNote = el("span", "se-muted"), matched = el("span", "se-muted"); count.title = "Shift+クリックで範囲選択。検索・タグを変更しても選択は保持されます";
+        const selectionbar = row(count, overlapNote, label("選択済みだけ", check(candidatesOnly, yes => { candidatesOnly = yes; renderCandidates(); })), label("未使用のみ", check(unusedOnly, yes => { unusedOnly = yes; renderCandidates(); })), matched); selectionbar.classList.add("se-selectionbar"); left.insertBefore(selectionbar, scroll);
         const selectAll = btn("一覧を全選択", () => { for (const e of candidateVirtual.entries) candidateSelection.add(e.itemId); renderCandidates(); }); selectAll.title = "検索・タグに一致する全件を選択（画面外の行も含む）";
         left.append(row(selectAll, btn("一覧の選択を解除", () => { for (const e of candidateVirtual.entries) candidateSelection.delete(e.itemId); renderCandidates(); }), btn("すべて解除", () => { candidateSelection.clear(); renderCandidates(); })));
         const edited = [...walkGroups(r.groups)].find(g => g.id === candidateGroup), settingsKey = `${r.id}:${candidateGroup ?? ""}`;
@@ -536,10 +677,12 @@ export function openSharedEditor(session, options = {}) {
             const included = new Set(ids);
             for (const item of doc().catalog.items) if (candidateSelection.has(item.id) && !included.has(item.id)) ids.push(item.id);
             if (candidateGroup) { const g = [...walkGroups(next.groups)].find(g => g.id === candidateGroup); if (g) { Object.assign(g, { item_ids: ids, mode: chosenMode, ...bounds }); if (!Object.hasOwn(bounds,"count_min")) delete g.count_min; if (g.item_weights) { for (const id of Object.keys(g.item_weights)) if (!candidateSelection.has(id)) delete g.item_weights[id]; if (!Object.keys(g.item_weights).length) delete g.item_weights; } if (locateGroup(next.groups,g.id).parentId !== targetParent && !relocate(next, g.id, targetParent)) return; } }
-            else for (const itemIds of separate() ? ids.map(id => [id]) : [ids]) groupChildren(next, targetParent).push({ id: newId(), name: itemMap.get(itemIds[0])?.name || "構成要素", on: true, mode: separate() ? "all" : chosenMode, ...bounds, item_ids: itemIds });
-            if (putRecipe(next)) { targetParent = ""; candidateSettings = null; candidateSelection.clear(); candidateGroup = null; candidatesOnly = false; candidateAnchor = null; render(); }
+            else { try { appendItemGroups(next, ids, { separate: separate(), mode: chosenMode, bounds, parentId: targetParent, nameOf: id => itemMap.get(id)?.name }); } catch (error) { localError = error.message; updateStatus(); return; } }
+            const duplicated = candidateGroup ? 0 : ids.filter(id => usedIds.has(id)).length;
+            if (putRecipe(next)) { if (duplicated) showNotice(`${ids.length}件を追加しました。うち${duplicated}件はこのセットで既に使用中のため、出力が重複します`, { tone: "warn" }); targetParent = ""; candidateSettings = null; candidateSelection.clear(); candidateGroup = null; candidatesOnly = false; candidateAnchor = null; render(); }
         }, "se-primary"), ...(candidateGroup ? [btn("キャンセル", () => { candidateGroup = null; candidateSelection.clear(); candidatesOnly = false; render(); })] : [])));
         right.append(row(el("strong", "se-grow", `構成要素 ${[...walkGroups(r.groups)].length}件（上から出力）`), btn("＋ ネスト", () => { const next = structuredClone(recipe()); const g = {id:newId(),name:"ネスト",kind:"nested",mode:"all",count:1,on:true,groups:[]}; groupChildren(next,targetParent).push(g); if (putRecipe(next)) { targetParent = ""; render(); } }))); const groups = el("div", "se-scroll se-group-scroll"); right.append(groups);
+        if (previewState.open) right.append(previewPanel(r));
         let dragged = null;
         for (const [index, {group:g, depth}] of visibleGroups(r.groups, collapsedGroups).entries()) {
             const nested = g.kind === "nested";
@@ -592,6 +735,33 @@ export function openSharedEditor(session, options = {}) {
         }
         if (!r.groups.length) groups.append(el("div", "se-empty", "左側でアイテムを選び、「選んだアイテムを追加」で構成要素を作ります。")); renderCandidates();
         scroll.scrollTop = setScroll.candidates; candidateVirtual.paint(); groups.scrollTop = setScroll.groups;
+    }
+    // 実行と同じ抽選をサーバーで1セット分だけ行う。展開前の本文であり、カタログ・Queue・実行キャッシュには影響しない。
+    function previewPanel(r) {
+        if (previewState.recipeId !== r.id) Object.assign(previewState, { recipeId: r.id, text: "", error: "", ran: false, busy: false, token: (previewState.token ?? 0) + 1 });
+        const panel = el("div", "se-preview"); panel.setAttribute("aria-label", "出力プレビュー");
+        const defaultSeed = Number.isSafeInteger(result?.seed) && result.seed >= 0 ? result.seed : 0;
+        const seed = input(String(previewState.seed ?? defaultSeed), value => { previewState.seed = value; setFieldError(seed, ""); }, "number"); seed.min = "0"; seed.step = "1"; seed.style.width = "150px"; seed.setAttribute("aria-label", "プレビューのSeed");
+        const dice = btn("🎲", () => { seed.value = String(Math.floor(Math.random() * 2 ** 32)); previewState.seed = seed.value; setFieldError(seed, ""); }); dice.title = "ランダムなSeedにする"; dice.setAttribute("aria-label", "ランダムなSeedにする");
+        const state = el("span", "se-muted se-grow"), output = el("textarea"), error = el("div", "se-error"); output.readOnly = true; output.setAttribute("aria-label", "プレビュー結果（展開前の本文）"); error.setAttribute("role", "alert");
+        const run = btn("試行", async () => {
+            const raw = seed.value.trim(), value = Number(raw);
+            if (!/^\d+$/.test(raw) || !Number.isSafeInteger(value)) { setFieldError(seed, "Seedは0以上の整数で指定してください", seed.parentElement); return; }
+            setFieldError(seed, ""); const epoch = `${session.editEpoch}:${session.generation}`, token = (previewState.token = (previewState.token ?? 0) + 1);
+            Object.assign(previewState, { busy: true, error: "", recipeId: r.id }); paintPreview();
+            let outcome;
+            try { const out = await session.preview({ recipeId: r.id, seed: value }); outcome = { text: out.text, error: "", seedUsed: out.seed, revision: out.revision }; }
+            catch (failure) { outcome = { text: "", error: failure.message }; }
+            // 応答待ちの間にセットを切り替えた／再実行した場合、古い結果は捨てる（表示中のセットの結果にしない）。
+            if (previewState.token !== token) return;
+            Object.assign(previewState, outcome, { busy: false, ran: true, epoch }); paintPreview();
+        }, "se-primary");
+        paintPreview = () => {
+            output.value = previewState.text; error.textContent = previewState.error; error.hidden = !previewState.error; run.disabled = previewState.busy;
+            state.textContent = previewState.busy ? "試行中…（未保存の編集を保存してから実行します）" : !previewState.ran ? "" : previewState.error ? "" : previewState.epoch !== `${session.editEpoch}:${session.generation}` ? "編集後はまだ更新していません。「試行」で更新します" : `Seed ${previewState.seedUsed}・カタログ改訂 ${previewState.revision}`;
+        };
+        panel.append(row(el("strong", "", "出力プレビュー"), seed, dice, run, state), el("div", "se-muted", "展開前の本文です（Autocomplete++のワイルドカード等は展開されません）。実行と同じ抽選を使い、カタログ・Queueには影響しません。"), output, error);
+        paintPreview(); return panel;
     }
     function moveCandidate(groupId, itemId, target) {
         const keyboard = document.activeElement?.classList.contains("se-order-handle");
@@ -654,7 +824,7 @@ export function openSharedEditor(session, options = {}) {
             if (candidates) setScroll.candidates = candidates.scrollTop;
             if (groups) setScroll.groups = groups.scrollTop;
         }
-        refreshing = true; releaseActive(); virtual?.destroy(); virtual = null; bulkBar = null; selectAllControl = null; content.replaceChildren(); itemMap = new Map(doc().catalog.items.map(i => [i.id, i]));
+        paintPreview = () => {}; refreshing = true; releaseActive(); virtual?.destroy(); virtual = null; bulkBar = null; selectAllControl = null; content.replaceChildren(); itemMap = new Map(doc().catalog.items.map(i => [i.id, i]));
         content.classList.toggle("se-list-view", mode !== "sets");
         content.classList.toggle("se-set-view", mode === "sets");
         if (mode === "sets") renderSets(); else renderList(); updateStatus(); refreshing = false;
@@ -663,11 +833,7 @@ export function openSharedEditor(session, options = {}) {
     const undo = () => { releaseActive(); session.undo(); render(); };
     const redo = () => { releaseActive(); session.redo(); render(); };
     // 他のダイアログ（確認・拡大編集・ピッカーなど）が前面にあるときは、そちらに任せる。
-    const isTopmost = () => {
-        const overlay = close?.overlay; if (!overlay?.isConnected || overlay.style.display === "none") return false;
-        for (let next = overlay.nextElementSibling; next; next = next.nextElementSibling) if (next.style?.zIndex === "10000" && next.style.display !== "none") return false;
-        return true;
-    };
+    const isTopmost = () => isTopmostOverlay(close?.overlay);
     const onKeydown = event => {
         if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || !isTopmost()) return;
         if (event.key === "Escape") {
@@ -685,7 +851,7 @@ export function openSharedEditor(session, options = {}) {
         pref.candidateQuery = candidateQuery; pref.candidateTags = [...candidateTags];
         document.removeEventListener("pointerdown", dismissTagFilter, true); document.removeEventListener("keydown", onKeydown);
         for (const list of orderLists.splice(0)) list.destroy();
-        releaseActive(); clearTimeout(saveTimer); unsubscribe?.(); virtual?.destroy(); for (const t of content?.querySelectorAll("textarea") ?? []) detachAutoComplete(t); openEditors.delete(session); void session.flush().catch(() => {});
+        releaseActive(); clearTimeout(saveTimer); clearTimeout(noticeTimer); unsubscribe?.(); virtual?.destroy(); for (const t of content?.querySelectorAll("textarea") ?? []) detachAutoComplete(t); openEditors.delete(session); void session.flush().catch(() => {});
     }, build(dlg, end) {
         dlg.children[0].style.display = "none";
         const style = el("style"); style.textContent = STYLE; dlg.append(style);
@@ -694,9 +860,10 @@ export function openSharedEditor(session, options = {}) {
         const header = row(title, btn("アイテム", () => switchMode("items")), btn("テキストセット", () => switchMode("sets")), ...(result ? [btn("前回の実行結果", () => switchMode("results"))] : []), status, btn("元に戻す", undo), btn("やり直す", redo), btn("閉じる", end)); header.classList.add("se-header");
         errorMessage = el("div", "se-error se-error-message"); errorMessage.setAttribute("role", "alert"); errorMessage.hidden = true;
         conflict = row(el("span", "", "他の編集と競合しています。編集内容を保持しています。"), btn("最新を読み込み", async () => { if (await showConfirmDialog({ title: "最新データを読み込み", message: "この画面の未保存の編集を取り消し、保存済みの最新データを読み込みます。", okLabel: "読み込み" })) await safeAsync(() => session.reload()); render(); }), btn("最新に編集を再適用", () => safeAsync(() => session.reapply()))); conflict.classList.add("se-conflict"); conflict.hidden = true;
-        dlg.append(header, errorMessage, conflict); content = el("div", "se-pane"); content.style.flex = "1"; dlg.append(content); render();
+        noticeEl = el("div", "se-notice"); noticeEl.setAttribute("role", "status"); noticeEl.hidden = true;
+        dlg.append(header, errorMessage, noticeEl, conflict); content = el("div", "se-pane"); content.style.flex = "1"; dlg.append(content); render();
     } });
-    unsubscribe = session.subscribe(() => { updateStatus(); scheduleRefresh(); });
+    unsubscribe = session.subscribe(() => { updateStatus(); paintPreview(); scheduleRefresh(); });
     openEditors.set(session, { close, open(next) { if (next.result) { if (resultKey(next.result) !== resultKey(result)) pref.results = { query: "", tags: [], scroll: 0 }; result = next.result; } if (next.recipeId) { if (next.mode === "items") { pref.recipeFilter = next.recipeId; pref.query = ""; pref.tags = []; pref.scroll = 0; } else pref.recipeId = next.recipeId; } mode = next.mode ?? mode; render(); close.show(); } });
     return close;
 }

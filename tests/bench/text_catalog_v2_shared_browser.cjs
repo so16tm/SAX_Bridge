@@ -31,6 +31,7 @@ const server=http.createServer(async(req,res)=>{
 });
 (async()=>{let browser;await new Promise(r=>server.listen(0,'127.0.0.1',r));try{
  browser=await chromium.launch({headless:true,channel:'msedge'});const page=await browser.newPage({viewport:{width:1280,height:950}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const pickFilter=async name=>{await page.getByRole('button',{name:'テキストセットで絞り込み',exact:true}).click();await page.locator('.sax-picker-dialog').getByRole('option',{name,exact:true}).click()};
  page.setDefaultTimeout(10000);await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready&&window.shared()?.session);await page.evaluate(()=>draw());
  console.log('ready');await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.waitForSelector('.se-record');assert.ok(await page.locator('.se-record').count()<40);
  const compact=await page.locator('.sax-shared-editor').evaluate(e=>({height:e.querySelector('.se-scroll').clientHeight,header:e.querySelector('.se-header').clientHeight}));assert.ok(compact.height>740,JSON.stringify(compact));assert.ok(compact.header<=32,JSON.stringify(compact));assert.equal(await page.getByPlaceholder('一括操作するタグ').isVisible(),false);
@@ -208,7 +209,7 @@ const server=http.createServer(async(req,res)=>{
 
  // 複製は最新の編集中本文を取り込み、独立したIDを作る。セット参照は変更しない。
  doc=fixture(10);await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.waitForSelector('.se-record');
- await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('');
+ await pickFilter('セット：すべて');
 
 
  await page.getByPlaceholder('名前・本文・タグを検索').fill('アイテム0');
@@ -232,16 +233,16 @@ const server=http.createServer(async(req,res)=>{
  await page.locator(`[data-item-id="${copied.id}"]`).getByRole('button',{name:'本文を編集',exact:true}).click();await page.getByRole('textbox',{name:'アイテム本文',exact:true}).fill('コピーだけ変更');await page.evaluate(()=>app.queuePrompt());
  assert.equal(doc.catalog.items.find(i=>i.id==='i0').text,'複製直前の本文');assert.equal(doc.catalog.items.find(i=>i.id===copied.id).text,'コピーだけ変更');
 
- await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('s1');
+ await pickFilter('旅人');
  await page.locator('.se-record[data-item-id="i0"]').getByRole('button',{name:'複製',exact:true}).click();
  const hiddenCopy=await page.evaluate(()=>shared().session.document.catalog.items.at(-1));
  assert.equal(hiddenCopy.name,'アイテム0 コピー（2）');
  assert.equal(await page.getByPlaceholder('名前・本文・タグを検索').inputValue(),'アイテム0');
- assert.equal(await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).inputValue(),'s1');
+ assert.equal(await page.getByRole('button',{name:'テキストセットで絞り込み',exact:true}).getAttribute('data-value'),'s1');
  assert.ok(await page.locator('.se-tag-filter summary').textContent().then(t=>t.includes('tag0')));
  assert.equal(await page.locator(`[data-item-id="${hiddenCopy.id}"]`).count(),0);
  assert.deepEqual(await page.evaluate(()=>shared().session.document.recipes),beforeDuplicate.recipes);
- await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('');
+ await pickFilter('セット：すべて');
  await page.getByPlaceholder('名前・本文・タグを検索').fill('');
  await page.locator('.se-tag-filter summary').click();await page.getByRole('button',{name:'タグ絞り込みを解除',exact:true}).click();await page.locator('.se-tag-filter summary').click();
  await page.getByRole('button',{name:'閉じる',exact:true}).click();console.log('duplicate latest text/independent ID/tags/references/Undo/Redo/save passed');
@@ -250,7 +251,7 @@ const server=http.createServer(async(req,res)=>{
  for (const [count,size] of [[1000,100],[10000,100],[10000,2000]]) {
   await page.evaluate(()=>shared().session.flush());doc=fixture(count,size);const started=performance.now();
   await page.getByRole('button',{name:'アイテム',exact:true}).first().click();await page.waitForSelector('.se-record');
-  await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).selectOption('');
+  await pickFilter('セット：すべて');
   const nodes=await page.locator('.se-record').count();assert.ok(nodes<40);
   const opened=performance.now();await page.locator('.se-record').first().getByRole('button',{name:'本文を編集',exact:true}).click();
   await page.getByRole('textbox',{name:'アイテム本文',exact:true}).fill('性能確認の本文');await page.evaluate(()=>Promise.race([app.queuePrompt(),new Promise((_,reject)=>setTimeout(()=>reject(new Error(document.querySelector('.__sax_alert_dlg')?.textContent||'Queue timeout')),5000))]));

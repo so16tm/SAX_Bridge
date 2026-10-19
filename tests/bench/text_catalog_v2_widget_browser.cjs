@@ -50,11 +50,24 @@ const server = http.createServer((req, res) => {
         await page.getByRole('button', { name: '新しいカタログ', exact: true }).waitFor();
         await page.mouse.click(2, 2);
         await page.evaluate(()=>shared().setWidget.refresh());
-        assert.deepEqual(await page.locator('.ssw-entry select').first().locator('option').evaluateAll(options=>options.filter(o=>o.value).map(o=>o.value)),['a-set','s']);
+        // セット名はボタン。クリックで検索付きピッカー、ダブルクリックでセット編集（2-5）。
+        const picker=page.locator('.sax-picker-dialog'),nameButton=page.locator('.ssw-entry .ssw-name').first();
+        assert.match(await nameButton.textContent(),/^テキストセット ▾$/);
+        await nameButton.click();await picker.waitFor();assert.deepEqual(await picker.getByRole('option').allTextContents(),['A セット','テキストセット']);
+        await picker.getByPlaceholder('検索',{exact:false}).fill('ａ');assert.deepEqual(await picker.getByRole('option').allTextContents(),['A セット'],'全角半角を区別せず検索する');
+        await page.keyboard.press('Enter');await picker.waitFor({state:'detached'});
+        assert.equal(await page.evaluate(()=>JSON.parse(node.widgets[0].value).rows[0].recipe_id),'a-set','Enterで先頭の候補を選べる');
+        await nameButton.focus();await page.keyboard.press('Enter');await picker.waitFor();await page.keyboard.press('Escape');await picker.waitFor({state:'detached'});
+        assert.equal(await page.evaluate(()=>JSON.parse(node.widgets[0].value).rows[0].recipe_id),'a-set','Escでは変更しない');
+        await nameButton.click();await picker.getByRole('option',{name:'テキストセット',exact:true}).click();
+        assert.equal(await page.evaluate(()=>JSON.parse(node.widgets[0].value).rows[0].recipe_id),'s');
+        await nameButton.dblclick();await page.waitForTimeout(500);assert.equal(await picker.count(),0,'ダブルクリックではピッカーを開かない');
+        await page.locator('.se-layout').waitFor();assert.equal(await page.locator('.se-picker[aria-label="編集するテキストセット"]').getAttribute('data-value'),'s','ダブルクリックでそのセットの編集が開く');
+        await page.getByRole('button',{name:'閉じる',exact:true}).click();await page.locator('.sax-shared-editor').waitFor({state:'detached'});
         await page.locator('.sax-shared-catalog').getByRole('button', { name: 'アイテム', exact: true }).click();
         await page.locator('.se-record').first().waitFor();
         assert.equal(await page.getByRole('combobox', { name: 'アイテムの並び順' }).inputValue(), 'name');
-        assert.deepEqual(await page.getByRole('combobox',{name:'テキストセットで絞り込み',exact:true}).locator('option').evaluateAll(options=>options.filter(o=>o.value).map(o=>o.value)),['a-set','s']);
+        await page.getByRole('button',{name:'テキストセットで絞り込み',exact:true}).click();assert.deepEqual(await picker.getByRole('option').allTextContents(),['セット：すべて','A セット','テキストセット']);await page.keyboard.press('Escape');
 
         // 短い本文は3行表示でも余白を作らず、編集時だけ行が広がる。
         const compactHeight = await page.locator('.se-record').first().evaluate(n=>n.getBoundingClientRect().height);
@@ -184,6 +197,7 @@ const server = http.createServer((req, res) => {
 
         await page.getByRole('button', { name: '閉じる', exact: true }).click();
         await page.locator('.sax-shared-catalog select').selectOption('two');
+        await page.locator('.__sax_confirm_dlg').getByRole('button', { name: '切り替え', exact: true }).click(); // 使用セット行があるため確認が出る（P1）
         await page.waitForFunction(() => shared().session?.document.id === 'two');
         assert.equal(await page.locator('.ssw-entry').count(), 0);
         const controls = await page.locator('.sax-shared-catalog').evaluate(e => [...e.querySelectorAll('select,button')].map(n => n.getBoundingClientRect().top));

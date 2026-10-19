@@ -111,6 +111,56 @@ export function deletionImpact(usage, ids) {
     return { groups, recipes: recipeIds.size };
 }
 
+// 使用数の表示と削除確認で同じ文言を使い、件数が食い違わないようにする。
+export function usageSummary(impact) {
+    return impact.groups ? `使用中の構成要素 ${impact.groups}件・セット ${impact.recipes}件` : "どのセットでも使用されていません";
+}
+
+// セット内で使われているアイテムID。exceptGroupId を指定すると、その構成要素の候補は数えない（候補の編集中に自分自身を重複扱いしないため）。
+export function recipeItemIds(recipe, exceptGroupId = null) {
+    const ids = new Set();
+    for (const group of walkGroups(recipe.groups)) if (group.kind !== "nested" && group.id !== exceptGroupId) for (const id of group.item_ids) ids.add(id);
+    return ids;
+}
+
+// 選んだアイテムをセットの構成要素として追加する（recipe を直接書き換えて返す）。separate なら1アイテム1構成要素に分ける。
+// セット画面の「選んだアイテムを追加」と一覧の「セットへ追加」で共通に使う。
+export function appendItemGroups(recipe, itemIds, { separate = false, mode = "all", bounds = { count: 1 }, parentId = "", nameOf = () => "" } = {}) {
+    let children = recipe.groups;
+    if (parentId) {
+        const parent = [...walkGroups(recipe.groups)].find(group => group.id === parentId && group.kind === "nested");
+        if (!parent) throw new Error("追加先の構成要素が見つかりません");
+        children = parent.groups;
+    }
+    for (const ids of separate ? itemIds.map(id => [id]) : [itemIds]) {
+        children.push({ id: newId(), name: nameOf(ids[0]) || "構成要素", on: true, mode: separate ? "all" : mode, ...bounds, item_ids: ids });
+    }
+    return recipe;
+}
+
+// タグ入力欄の補完候補。value の最後のカンマ区切り部分を絞り込み語とし、入力済みのタグは除く。多く使われているタグを先に並べる。
+export function tagCounts(items) {
+    const counts = new Map();
+    for (const item of items) for (const tag of item.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    return counts;
+}
+
+export function suggestTags(counts, value, limit = 8) {
+    const parts = String(value).split(/[,、\n]/u), fragment = parts.at(-1).trim();
+    const chosen = new Set(parts.slice(0, -1).map(tag => tag.trim()).filter(Boolean));
+    const tokens = searchTokens(fragment), head = normalizeSearch(fragment);
+    return [...counts].filter(([tag]) => tag !== fragment && !chosen.has(tag) && tokens.every(token => normalizeSearch(tag).includes(token)))
+        .map(([tag, count]) => ({ tag, count, prefix: head && normalizeSearch(tag).startsWith(head) ? 0 : 1 }))
+        .sort((a, b) => a.prefix - b.prefix || b.count - a.count || a.tag.localeCompare(b.tag, "ja"))
+        .slice(0, limit).map(({ tag, count }) => ({ tag, count }));
+}
+
+export function applyTagSuggestion(value, tag) {
+    const text = String(value), at = Math.max(text.lastIndexOf(","), text.lastIndexOf("、"), text.lastIndexOf("\n"));
+    const head = at >= 0 ? text.slice(0, at + 1) : "";
+    return `${head}${head && !head.endsWith("\n") ? " " : ""}${tag}, `;
+}
+
 // 全角・半角と大文字小文字を区別せず、空白区切りの全語を含むものに一致させる。
 export function normalizeSearch(text) {
     return String(text ?? "").normalize("NFKC").toLowerCase();

@@ -146,3 +146,31 @@ test("タグの上限超過は具体的な理由で拒否し、文書を変更�
     assert.throws(() => put(["重複", "重複"]), /タグが不正/);
     assert.equal(session.document.catalog.items[0].tags.length, 8);
 });
+
+test("プレビューは未保存の編集を保存してから、実行と同じ抽選をサーバーへ依頼する", async () => {
+    const backend = server(); const order = [];
+    const request = async (path, options) => {
+        order.push(`${options.method} ${path.replace(/^.*\/shared/, "")}`);
+        if (path.endsWith("/preview")) return { ok: true, json: async () => ({ text: `${backend.document().catalog.items[0].text}@${JSON.parse(options.body).seed}`, revision: backend.document().revision, seed: JSON.parse(options.body).seed }) };
+        return backend.request(path, options);
+    };
+    const session = new CatalogSession(fixture(), { request, debounceMs: 10000 });
+    session.mutate([edit("プレビュー直前の編集")]);
+    const result = await session.preview({ recipeId: "r", seed: 42 });
+    assert.deepEqual(order, ["PATCH ", "POST /preview"], "保存が先、プレビューが後");
+    assert.equal(result.text, "プレビュー直前の編集@42", "保存済みの本文で抽選される");
+    assert.deepEqual(JSON.parse(backend.calls[0].options.body).operations.map(op => op.type), ["item.put"]);
+    assert.equal(session.status, "saved"); assert.equal(session.undoStack.length, 1, "プレビューは履歴・カタログを変更しない");
+});
+
+test("プレビューが失敗しても編集は止まらず、保存の競合ではプレビューを実行しない", async () => {
+    const failing = new CatalogSession(fixture(), { request: async (path) => path.endsWith("/preview") ? { ok: false, status: 400, json: async () => ({ error: "選択数が候補数を超えています" }) } : { ok: true, json: async () => ({}) }, debounceMs: 10000 });
+    await assert.rejects(failing.preview({ recipeId: "r", seed: 1 }), /候補数を超えています/);
+    assert.equal(failing.error, null, "プレビューの失敗はセッションの保存状態にしない");
+    failing.mutate([edit("続けて編集できる")]); assert.equal(failing.document.catalog.items[0].text, "続けて編集できる");
+    const backend = server(); let previewed = 0;
+    const session = new CatalogSession(fixture(), { request: async (path, options) => { if (path.endsWith("/preview")) { previewed++; return { ok: true, json: async () => ({}) }; } return backend.request(path, options); }, debounceMs: 10000 });
+    session.mutate([edit("ローカル")]); backend.update([{ type: "catalog.rename", name: "外部変更" }]);
+    await assert.rejects(session.preview({ recipeId: "r", seed: 1 }), /競合/); assert.equal(previewed, 0);
+    assert.equal(session.conflict, true);
+});

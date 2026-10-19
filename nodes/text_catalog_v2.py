@@ -398,6 +398,19 @@ def resolve_catalog(config_json=DEFAULT_CONFIG, seed=0):
     return "\n".join(output.texts), selection_json
 
 
+def preview_recipe(catalog_id, recipe_id, seed=0):
+    """編集画面のプレビュー用。1 セットだけを実行と同じ resolve_catalog で解決する。
+
+    抽選は実行時と同じ関数に任せ、ここでは行を 1 つ組み立てるだけにする。抽選は seed・セット ID・構成要素 ID から決まり、
+    行 ID には依存しないため、同じ seed なら実行結果のそのセット分と一致する。保存・キャッシュ・Queue には触れない。
+    """
+    _string(catalog_id, "catalog_id", MAX_ID_LENGTH, nonempty=True)
+    _string(recipe_id, "recipe_id", MAX_ID_LENGTH, nonempty=True)
+    config = {"version": 3, "catalog_id": catalog_id, "rows": [{"id": "preview", "recipe_id": recipe_id, "on": True}]}
+    text, selection_json = resolve_catalog(json.dumps(config), seed)
+    return {"text": text, "revision": json.loads(selection_json)["revision"], "seed": seed}
+
+
 class SAX_Bridge_Text_Catalog_V2(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
