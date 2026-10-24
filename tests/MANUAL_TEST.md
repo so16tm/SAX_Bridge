@@ -484,10 +484,11 @@
 
 ### L-7. CLIP Lora Loader
 
-事前準備: CLIP 側の重みを含む LoRA（テキストエンコーダ LoRA を含むもの）を `loras` に配置する。任意のワークフローで Loader の `CLIP`（または SAX Pipe の `CLIP` 出力）→ SAX CLIP Lora Loader → 下流の CLIP を使うノードへつなぐ。
+事前準備: CLIP 側の重みを含む LoRA（テキストエンコーダ LoRA を含むもの）を `loras` に配置する。任意のワークフローで Loader の `PIPE`（または `CLIP`）→ SAX CLIP Lora Loader → 出力の `PIPE`（または `CLIP`）を下流につなぐ。
 
 - [ ] **picker**: `lora_name` クリックで LoRA 選択ピッカーが開き、選んだ名前がノードに表示される
 - [ ] **apply**: LoRA を選び `strength_clip=1.0` で実行 → エラーなく生成でき、`strength_clip=0` / `None` の結果と異なる（CLIP 側の重みを含む LoRA の場合）
+- [ ] **outputs**: `PIPE` を Prompt 等へ、`CLIP` を CLIP Text Encode 等へ繋ぐ → どちらもパッチ済みの CLIP で動作する。`pipe` 未接続（`clip` のみ）のとき `PIPE` は空
 - [ ] **bypass**: `lora_name=None`、または `strength_clip=0` で実行 → LoRA なしの結果と一致する
 - [ ] **model untouched**: MODEL 側の LoRA は変化しない（同じ Loader の MODEL 出力を直結しても結果が変わらない）
 - [ ] **chain**: 本ノードを 2 つ直列につなぎ別々の LoRA を指定 → エラーなく実行できる

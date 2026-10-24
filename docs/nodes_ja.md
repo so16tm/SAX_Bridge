@@ -189,25 +189,28 @@
 
 ### SAX CLIP Lora Loader
 
-`SAX_Bridge_Loader_Lora_Clip` — CLIP（テキストエンコーダ）だけに LoRA を適用するノードです。Pipe を介さず、`CLIP` を受け取ってパッチ済みの `CLIP` を返します。MODEL には触れません。
+`SAX_Bridge_Loader_Lora_Clip` — CLIP（テキストエンコーダ）だけに LoRA を適用するノードです。`pipe` か `clip` のどちらか（両方でも可）を受け取り、clip をパッチ済みに差し替えた `PIPE` と、パッチ済みの `CLIP` 単体を返します。MODEL には触れません。
 
 **入力**
 
 | パラメータ | 型 | 説明 |
 |-----------|-----|------|
-| `clip` | CLIP | パッチ対象の CLIP |
+| `pipe` | PIPE_LINE (optional) | 入力パイプ。`clip` 未接続のとき、この Pipe 内の clip をパッチする |
+| `clip` | CLIP (optional) | パッチ対象の CLIP。接続されていれば Pipe 内の clip より優先する |
 | `lora_name` | Combo | LoRA 選択（`None` で何もしない） |
 | `strength_clip` | Float (-10.0〜10.0) | CLIP への適用強度 |
 
-**出力**: `CLIP`
+**出力**: `PIPE`（clip をパッチ済みに差し替えたもの。`pipe` 未接続なら空）, `CLIP`（パッチ済みの CLIP 単体）
 
 **動作**:
 - `lora_name` が `None`、または `strength_clip=0.0` のときは LoRA を読み込まず入力の `CLIP` をそのまま返す
 - 入力の `CLIP` は変更しない（複製してからパッチを当てる）
 - 選択した LoRA ファイルが見つからないときはエラーにする（SAX Lora Loader のようなスキップはしない）
 - LoRA に CLIP 側の重みが含まれない場合は何も変わらない（ComfyUI が `NOT LOADED` を警告ログに出す）
+- `pipe` と `clip` のどちらも無い（または Pipe に CLIP が無い）ときはエラーにする
 - 複数の LoRA を当てるときは本ノードを直列につなぐ
-- MODEL 側の LoRA は各 Loader や SAX Lora Loader で適用する。MiniMax H3 Loader のように `CLIP` を単体で出す Loader の後段に置く使い方を想定する。Pipe 内の CLIP に当てるときは SAX Pipe の `CLIP` 出力につなぎ、結果を SAX Pipe の `clip` 入力へ戻す
+- MODEL 側の LoRA は各 Loader や SAX Lora Loader で適用する。MiniMax H3 Loader のように `CLIP` を単体で出す Loader の後段では `clip` に繋ぎ、`CLIP` 出力を使う
+- MODEL に当たっていないため、Pipe の適用済み LoRA の記録は更新しない（Prompt の `<lora:...>` タグは同名でも別に適用される）
 
 [↑ トップへ](#top)
 

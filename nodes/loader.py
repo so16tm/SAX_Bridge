@@ -198,10 +198,13 @@ class SAX_Bridge_Loader_Lora_Clip(io.ComfyNode):
     """
     CLIP（テキストエンコーダ）だけに LoRA を適用するノード。
 
-    - Pipe を介さない。CLIP を受け取り、パッチ済みの CLIP を返す
-      （MiniMax H3 Loader のように MODEL / CLIP を個別に出す Loader の後段を想定）。
+    - 入力は `pipe` と `clip` の少なくとも一方。`clip` が接続されていればそれを、
+      なければ Pipe 内の clip をパッチ対象にする。
+    - 出力は `PIPE`（clip をパッチ済みに差し替えた Pipe。`pipe` 未接続なら None）と
+      `CLIP`（パッチ済みの CLIP 単体）。
     - MODEL には触れない。モデル側の LoRA は各 Loader / SAX Lora Loader で適用する。
-    - `lora_name == "None"` または `strength_clip == 0` のときは入力をそのまま返す。
+      そのため Pipe の applied_loras（model と clip の両方に当たった LoRA の記録）は更新しない。
+    - `lora_name == "None"` または `strength_clip == 0` のときは CLIP をそのまま返す。
     - 複数の LoRA を当てるときは本ノードを直列につなぐ。
     """
 
@@ -212,20 +215,36 @@ class SAX_Bridge_Loader_Lora_Clip(io.ComfyNode):
             display_name="SAX CLIP Lora Loader",
             category="SAX/Bridge/Loader",
             description=(
-                "Applies a LoRA to the CLIP (text encoder) only. The MODEL is not touched."
+                "Applies a LoRA to the CLIP (text encoder) only. Takes a Pipe and/or a CLIP; "
+                "returns the Pipe with the patched CLIP and the patched CLIP on its own. "
+                "The MODEL is not touched."
             ),
             inputs=[
-                io.Clip.Input("clip"),
+                PipeLine.Input("pipe", optional=True,
+                               tooltip="Pipe whose CLIP is patched. Not needed when clip is connected."),
+                io.Clip.Input("clip", optional=True,
+                              tooltip="CLIP to patch. Takes priority over the CLIP in the pipe."),
                 io.Combo.Input("lora_name", options=["None"] + folder_paths.get_filename_list("loras"),
                                tooltip="LoRA to apply to the CLIP. None passes the CLIP through."),
                 io.Float.Input("strength_clip", default=1.0, min=-10.0, max=10.0, step=0.01,
                                tooltip="Strength applied to the CLIP. 0 passes the CLIP through."),
             ],
             outputs=[
+                PipeLine.Output("PIPE"),
                 io.Clip.Output("CLIP"),
             ],
         )
 
     @classmethod
-    def execute(cls, clip, lora_name, strength_clip) -> io.NodeOutput:
-        return io.NodeOutput(apply_clip_lora(clip, lora_name, strength_clip, "CLIP Lora Loader"))
+    def execute(cls, lora_name, strength_clip, pipe=None, clip=None) -> io.NodeOutput:
+        source = clip if clip is not None else (pipe or {}).get("clip")
+        if source is None:
+            raise ValueError("[SAX_Bridge] CLIP Lora Loader: connect a clip, or a pipe that contains a CLIP.")
+
+        patched = apply_clip_lora(source, lora_name, strength_clip, "CLIP Lora Loader")
+
+        new_pipe = None
+        if pipe is not None:
+            new_pipe = pipe.copy()
+            new_pipe["clip"] = patched
+        return io.NodeOutput(new_pipe, patched)

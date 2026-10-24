@@ -189,25 +189,28 @@
 
 ### SAX CLIP Lora Loader
 
-`SAX_Bridge_Loader_Lora_Clip` — Applies a LoRA to the CLIP (text encoder) only. It works without a Pipe: it takes a `CLIP` and returns the patched `CLIP`. The MODEL is not touched.
+`SAX_Bridge_Loader_Lora_Clip` — Applies a LoRA to the CLIP (text encoder) only. It takes a `pipe` or a `clip` (or both) and returns the `PIPE` with its clip replaced by the patched one, plus the patched `CLIP` on its own. The MODEL is not touched.
 
 **Inputs**
 
 | Parameter | Type | Description |
 |-----------|-----|------|
-| `clip` | CLIP | CLIP to patch |
+| `pipe` | PIPE_LINE (optional) | Input pipe. When `clip` is not connected, the CLIP in this pipe is patched |
+| `clip` | CLIP (optional) | CLIP to patch. Takes priority over the CLIP in the pipe when connected |
 | `lora_name` | Combo | LoRA selection (`None` to do nothing) |
 | `strength_clip` | Float (-10.0 to 10.0) | Strength applied to the CLIP |
 
-**Outputs**: `CLIP`
+**Outputs**: `PIPE` (clip replaced by the patched one; empty when `pipe` is not connected), `CLIP` (the patched CLIP on its own)
 
 **Behavior**:
 - With `lora_name` set to `None` or `strength_clip=0.0`, the LoRA is not loaded and the input `CLIP` is returned as is
 - The input `CLIP` is not modified (it is cloned before patching)
 - A missing LoRA file raises an error (unlike SAX Lora Loader, which skips the entry)
 - If the LoRA has no CLIP-side weights, nothing changes (ComfyUI logs `NOT LOADED` warnings)
+- Raises an error when neither a `pipe` nor a `clip` is given (or the pipe has no CLIP)
 - Chain this node in series to apply several LoRAs
-- Apply MODEL-side LoRAs with the Loaders or SAX Lora Loader. It is meant to follow a Loader that outputs `CLIP` on its own, such as SAX MiniMax H3 Loader. To patch the CLIP inside a Pipe, take it from the `CLIP` output of SAX Pipe and feed the result back into the `clip` input of SAX Pipe
+- Apply MODEL-side LoRAs with the Loaders or SAX Lora Loader. After a Loader that outputs `CLIP` on its own, such as SAX MiniMax H3 Loader, connect it to `clip` and use the `CLIP` output
+- Because the MODEL is not patched, the pipe's applied-LoRA record is not updated (a same-name `<lora:...>` tag in Prompt is still applied separately)
 
 [↑ Back to top](#top)
 
