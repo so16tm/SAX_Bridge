@@ -206,11 +206,11 @@
 - `lora_name` が `None`、または `strength_clip=0.0` のときは LoRA を読み込まず入力の `CLIP` をそのまま返す
 - 入力の `CLIP` は変更しない（複製してからパッチを当てる）
 - 選択した LoRA ファイルが見つからないときはエラーにする（SAX Lora Loader のようなスキップはしない）
-- LoRA に CLIP 側の重みが含まれない場合は何も変わらない（ComfyUI が `NOT LOADED` を警告ログに出す）
+- LoRA に CLIP 側の重みが含まれない場合は何も変わらない。また MODEL 側の重みは適用対象外のため、ComfyUI が `lora key not loaded: ...` を警告ログに出す（ComfyUI 標準の LoRA ローダーと同じ挙動で、動作には影響しない）
 - `pipe` と `clip` のどちらも無い（または Pipe に CLIP が無い）ときはエラーにする
 - 複数の LoRA を当てるときは本ノードを直列につなぐ
 - MODEL 側の LoRA は各 Loader や SAX Lora Loader で適用する。MiniMax H3 Loader のように `CLIP` を単体で出す Loader の後段では `clip` に繋ぎ、`CLIP` 出力を使う
-- MODEL に当たっていないため、Pipe の適用済み LoRA の記録は更新しない（Prompt の `<lora:...>` タグは同名でも別に適用される）
+- MODEL に当たっていないため、Pipe の適用済み LoRA の記録は更新しない（Prompt の `<lora:...>` タグは同名でも別に適用される）。逆に、他のローダーで適用済みの LoRA を指定しても重複は検知せず、CLIP に重ねて適用される（強度を足したいときに使える）。`pipe` と `clip` の両方を繋ぐと、外部の `clip` をパッチして Pipe に差し込む（SAX Pipe の `clip` 上書きと同じ）
 
 [↑ トップへ](#top)
 

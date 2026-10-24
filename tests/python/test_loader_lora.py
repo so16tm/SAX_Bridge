@@ -331,6 +331,16 @@ class TestLoaderLoraClip:
                 pipe=pipe, lora_name="None", strength_clip=1.0,
             ).args
         assert out_clip is pipe["clip"] and out_pipe["clip"] is pipe["clip"]
+        assert out_pipe is not pipe
+        load.assert_not_called()
+
+    def test_zero_strength_passes_clip_through(self):
+        pipe = _make_pipe()
+        with patch("nodes.loader_common.comfy.sd.load_lora_for_models") as load:
+            _, out_clip = SAX_Bridge_Loader_Lora_Clip.execute(
+                pipe=pipe, lora_name="x.safetensors", strength_clip=0.0,
+            ).args
+        assert out_clip is pipe["clip"]
         load.assert_not_called()
 
     @pytest.mark.parametrize("pipe", [None, {"model": object()}, {"clip": None}])

@@ -206,11 +206,11 @@
 - With `lora_name` set to `None` or `strength_clip=0.0`, the LoRA is not loaded and the input `CLIP` is returned as is
 - The input `CLIP` is not modified (it is cloned before patching)
 - A missing LoRA file raises an error (unlike SAX Lora Loader, which skips the entry)
-- If the LoRA has no CLIP-side weights, nothing changes (ComfyUI logs `NOT LOADED` warnings)
+- If the LoRA has no CLIP-side weights, nothing changes. MODEL-side weights are out of scope, so ComfyUI logs `lora key not loaded: ...` warnings for them (same as ComfyUI's stock LoRA loaders; harmless)
 - Raises an error when neither a `pipe` nor a `clip` is given (or the pipe has no CLIP)
 - Chain this node in series to apply several LoRAs
 - Apply MODEL-side LoRAs with the Loaders or SAX Lora Loader. After a Loader that outputs `CLIP` on its own, such as SAX MiniMax H3 Loader, connect it to `clip` and use the `CLIP` output
-- Because the MODEL is not patched, the pipe's applied-LoRA record is not updated (a same-name `<lora:...>` tag in Prompt is still applied separately)
+- Because the MODEL is not patched, the pipe's applied-LoRA record is not updated (a same-name `<lora:...>` tag in Prompt is still applied separately). Conversely, a LoRA already applied by another loader is not detected as a duplicate and is stacked on the CLIP (useful to add strength). With both `pipe` and `clip` connected, the external `clip` is patched and put into the pipe (same as overriding `clip` in SAX Pipe)
 
 [↑ Back to top](#top)
 
