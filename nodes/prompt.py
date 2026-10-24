@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from typing import Any
 import torch
 
@@ -14,6 +15,22 @@ from .lora_tags import split_lora_tags
 
 
 logger = logging.getLogger("SAX_Bridge")
+
+
+def _log_patched_load(clip: Any, elapsed: float) -> None:
+    """LoRA 等でパッチ済みの CLIP をロードしたときの所要時間を残す（遅延調査用）。
+
+    パッチ済み CLIP は、パッチ前の CLIP と交互に使うたび ComfyUI が LoRA 重みを
+    再計算する。どのエンコードで時間が掛かっているかを実機ログで切り分けられるようにする。
+    """
+    patcher = getattr(clip, "patcher", None)
+    patches = getattr(patcher, "patches", None)
+    if not patches:
+        return
+    logger.info(
+        "[SAX_Bridge] CLIP load_model with %d patched keys took %.3fs (patcher=%s)",
+        len(patches), elapsed, type(patcher).__name__,
+    )
 
 
 def _encode_with_break(clip: Any, text: str) -> list:
@@ -36,7 +53,9 @@ def _encode_with_break(clip: Any, text: str) -> list:
     if clip.layer_idx is not None:
         cond_model.set_clip_options({"layer": clip.layer_idx})
 
+    load_started = time.perf_counter()
     clip.load_model(clip.tokenize(text))
+    _log_patched_load(clip, time.perf_counter() - load_started)
     cond_model.set_clip_options({"execution_device": clip.patcher.load_device})
 
     # 2. vbar 回避 (Workaround)
