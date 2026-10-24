@@ -100,6 +100,21 @@ def apply_single_lora(
     return model, clip, [lora_name]
 
 
+def apply_clip_lora(clip: Any, lora_name: str, strength: float, label: str) -> Any:
+    """LoRA を CLIP（テキストエンコーダ）だけに適用して返す。MODEL には触れない。
+
+    `lora_name == "None"` または `strength == 0` なら入力をそのまま返す（LoRA を読まない）。
+    `comfy.sd.load_lora_for_models` は clip を clone して返すため入力は変更されない。
+    """
+    if lora_name == "None" or strength == 0.0:
+        return clip
+
+    lora_path = resolve_path("loras", lora_name, f"{label}: LoRA")
+    lora = comfy.utils.load_torch_file(lora_path)
+    _, clip = comfy.sd.load_lora_for_models(None, clip, lora, 0.0, strength)
+    return clip
+
+
 def empty_latent(width: int, height: int, batch_size: int) -> dict:
     """4ch 全ゼロ・1/8 縮小の空 latent を作る（ComfyUI 標準 EmptyLatentImage と同形）。
 

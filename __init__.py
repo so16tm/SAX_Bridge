@@ -62,6 +62,7 @@ for v3_node in [
     # Loader
     loader_node.SAX_Bridge_Loader,
     loader_node.SAX_Bridge_Loader_Lora,
+    loader_node.SAX_Bridge_Loader_Lora_Clip,
     loader_diffusion_node.SAX_Bridge_Loader_Diffusion,
     minimax_h3_node.SAX_Bridge_Loader_MiniMax_H3,
     # Mask

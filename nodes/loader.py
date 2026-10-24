@@ -10,7 +10,7 @@ import comfy.utils
 from comfy_api.latest import io
 
 from .io_types import PipeLine, _APPLIED_LORAS_KEY, _normalize_lora_name, record_applied_loras
-from .loader_common import apply_single_lora, build_pipe, empty_latent, resolve_path, sampling_inputs
+from .loader_common import apply_clip_lora, apply_single_lora, build_pipe, empty_latent, resolve_path, sampling_inputs
 
 logger = logging.getLogger("SAX_Bridge")
 
@@ -192,3 +192,40 @@ class SAX_Bridge_Loader_Lora(io.ComfyNode):
         new_pipe["clip"]  = clip
         record_applied_loras(new_pipe, newly_applied)
         return io.NodeOutput(new_pipe)
+
+
+class SAX_Bridge_Loader_Lora_Clip(io.ComfyNode):
+    """
+    CLIP（テキストエンコーダ）だけに LoRA を適用するノード。
+
+    - Pipe を介さない。CLIP を受け取り、パッチ済みの CLIP を返す
+      （MiniMax H3 Loader のように MODEL / CLIP を個別に出す Loader の後段を想定）。
+    - MODEL には触れない。モデル側の LoRA は各 Loader / SAX Lora Loader で適用する。
+    - `lora_name == "None"` または `strength_clip == 0` のときは入力をそのまま返す。
+    - 複数の LoRA を当てるときは本ノードを直列につなぐ。
+    """
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SAX_Bridge_Loader_Lora_Clip",
+            display_name="SAX CLIP Lora Loader",
+            category="SAX/Bridge/Loader",
+            description=(
+                "Applies a LoRA to the CLIP (text encoder) only. The MODEL is not touched."
+            ),
+            inputs=[
+                io.Clip.Input("clip"),
+                io.Combo.Input("lora_name", options=["None"] + folder_paths.get_filename_list("loras"),
+                               tooltip="LoRA to apply to the CLIP. None passes the CLIP through."),
+                io.Float.Input("strength_clip", default=1.0, min=-10.0, max=10.0, step=0.01,
+                               tooltip="Strength applied to the CLIP. 0 passes the CLIP through."),
+            ],
+            outputs=[
+                io.Clip.Output("CLIP"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, clip, lora_name, strength_clip) -> io.NodeOutput:
+        return io.NodeOutput(apply_clip_lora(clip, lora_name, strength_clip, "CLIP Lora Loader"))

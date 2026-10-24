@@ -3,7 +3,7 @@
 import json
 import pytest
 from unittest.mock import MagicMock, patch
-from nodes.loader import SAX_Bridge_Loader_Lora
+from nodes.loader import SAX_Bridge_Loader_Lora, SAX_Bridge_Loader_Lora_Clip
 from nodes.io_types import _APPLIED_LORAS_KEY, _normalize_lora_name
 
 
@@ -286,3 +286,25 @@ class TestMalformedEntries:
             )
         assert fake.load_lora.call_count == 1
         assert fake.load_lora.call_args[0][2] == "ok.safetensors"
+
+
+class TestLoaderLoraClip:
+    """SAX_Bridge_Loader_Lora_Clip: CLIP だけに LoRA を適用する。"""
+
+    def test_returns_patched_clip(self):
+        clip, patched = MagicMock(name="clip"), MagicMock(name="patched")
+        with patch("nodes.loader.apply_clip_lora", return_value=patched) as apply:
+            result = SAX_Bridge_Loader_Lora_Clip.execute(
+                clip=clip, lora_name="x.safetensors", strength_clip=0.8,
+            )
+        assert result.args == (patched,)
+        apply.assert_called_once_with(clip, "x.safetensors", 0.8, "CLIP Lora Loader")
+
+    def test_none_passes_clip_through(self):
+        clip = MagicMock(name="clip")
+        with patch("nodes.loader_common.comfy.sd.load_lora_for_models") as load:
+            result = SAX_Bridge_Loader_Lora_Clip.execute(
+                clip=clip, lora_name="None", strength_clip=1.0,
+            )
+        assert result.args == (clip,)
+        load.assert_not_called()

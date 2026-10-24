@@ -14,7 +14,7 @@
 
 | カテゴリ | 概要 | ノード |
 |---------|------|--------|
-| [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX MiniMax H3 Loader](#sax-minimax-h3-loader) / [SAX Lora Loader](#sax-lora-loader) |
+| [Loader](#loader) | モデル・LoRA の読み込み | [SAX Loader](#sax-loader) / [SAX Diffusion Loader](#sax-diffusion-loader) / [SAX MiniMax H3 Loader](#sax-minimax-h3-loader) / [SAX Lora Loader](#sax-lora-loader) / [SAX CLIP Lora Loader](#sax-clip-lora-loader) |
 | [Sampler](#sampler) | KSampler | [SAX KSampler](#sax-ksampler) / [SAX MiniMax H3 Sampler](#sax-minimax-h3-sampler) |
 | [Pipe](#pipe) | Pipe の構築・切替 | [SAX Pipe](#sax-pipe) / [SAX Pipe Switcher](#sax-pipe-switcher) |
 | [Prompt](#prompt) | プロンプトのエンコード・結合 | [SAX Prompt](#sax-prompt) / [SAX Prompt Concat](#sax-prompt-concat) / [SAX Qwen Image Prompt](#sax-qwen-image-prompt) |
@@ -182,6 +182,32 @@
 - LoRA 読み込みに失敗した場合、警告ログを出力してそのエントリをスキップし、残りの LoRA 適用を継続する
 - `strength=0.0` のエントリはスキップする
 - `on` キーが欠落しているエントリは `True`（有効）として扱う
+
+[↑ トップへ](#top)
+
+---
+
+### SAX CLIP Lora Loader
+
+`SAX_Bridge_Loader_Lora_Clip` — CLIP（テキストエンコーダ）だけに LoRA を適用するノードです。Pipe を介さず、`CLIP` を受け取ってパッチ済みの `CLIP` を返します。MODEL には触れません。
+
+**入力**
+
+| パラメータ | 型 | 説明 |
+|-----------|-----|------|
+| `clip` | CLIP | パッチ対象の CLIP |
+| `lora_name` | Combo | LoRA 選択（`None` で何もしない） |
+| `strength_clip` | Float (-10.0〜10.0) | CLIP への適用強度 |
+
+**出力**: `CLIP`
+
+**動作**:
+- `lora_name` が `None`、または `strength_clip=0.0` のときは LoRA を読み込まず入力の `CLIP` をそのまま返す
+- 入力の `CLIP` は変更しない（複製してからパッチを当てる）
+- 選択した LoRA ファイルが見つからないときはエラーにする（SAX Lora Loader のようなスキップはしない）
+- LoRA に CLIP 側の重みが含まれない場合は何も変わらない（ComfyUI が `NOT LOADED` を警告ログに出す）
+- 複数の LoRA を当てるときは本ノードを直列につなぐ
+- MODEL 側の LoRA は各 Loader や SAX Lora Loader で適用する。MiniMax H3 Loader のように `CLIP` を単体で出す Loader の後段に置く使い方を想定する。Pipe 内の CLIP に当てるときは SAX Pipe の `CLIP` 出力につなぎ、結果を SAX Pipe の `clip` 入力へ戻す
 
 [↑ トップへ](#top)
 
