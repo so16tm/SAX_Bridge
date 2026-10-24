@@ -482,6 +482,18 @@
 - [ ] **turbo lora**: `lora_name` に FL2V turbo 4-step LoRA、`steps=4` で実行 → 4 ステップで生成できる（`ref_lora_name` は REF2VA 側に別途指定）
 - [ ] **pipe**: Sampler の `PIPE` に SAX Output 等を繋ぐ → 生成後のフレームサイズが `loader_settings` に反映される
 
+### L-7. CLIP Lora Loader
+
+事前準備: CLIP 側の重みを含む LoRA（テキストエンコーダ LoRA を含むもの）を `loras` に配置する。任意のワークフローで Loader の `PIPE`（または `CLIP`）→ SAX CLIP Lora Loader → 出力の `PIPE`（または `CLIP`）を下流につなぐ。
+
+- [ ] **picker**: `lora_name` クリックで LoRA 選択ピッカーが開き、選んだ名前がノードに表示される
+- [ ] **apply**: LoRA を選び `strength_clip=1.0` で実行 → エラーなく生成でき、`strength_clip=0` / `None` の結果と異なる（CLIP 側の重みを含む LoRA の場合）
+- [ ] **outputs**: `PIPE` を Prompt 等へ、`CLIP` を CLIP Text Encode 等へ繋ぐ → どちらもパッチ済みの CLIP で動作する。`pipe` 未接続（`clip` のみ）のとき `PIPE` は空
+- [ ] **bypass**: `lora_name=None`、または `strength_clip=0` で実行 → LoRA なしの結果と一致する
+- [ ] **model untouched**: MODEL 側の LoRA は変化しない（同じ Loader の MODEL 出力を直結しても結果が変わらない）
+- [ ] **chain**: 本ノードを 2 つ直列につなぎ別々の LoRA を指定 → エラーなく実行できる
+- [ ] **missing**: ワークフロー保存後に LoRA ファイルを退避して実行 → LoRA 名を示すエラーになる
+
 ## M. UI Phase 1.2.A 検証 (TextCatalog Coordinator 移行)
 
 ### M-1. TextCatalog clone smoke (workflows/text_catalog_clone_smoke.json)

@@ -71,3 +71,21 @@ app.registerExtension({
         }
     },
 });
+
+app.registerExtension({
+    name: "SAX.LoaderLoraClip",
+
+    async nodeCreated(node) {
+        if (node.comfyClass !== "SAX_Bridge_Loader_Lora_Clip") return;
+
+        const loraCombo = node.widgets?.find(w => w.name === "lora_name");
+        if (loraCombo) {
+            replaceComboWithFilePicker(loraCombo, {
+                title:       "Select LoRA",
+                placeholder: "Search LoRA name…",
+                className:   "__sax_lora_picker",
+                displayName: fileBasenameWithoutExt,
+            });
+        }
+    },
+});

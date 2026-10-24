@@ -67,6 +67,38 @@ class TestApplySingleLora:
         assert names == ["l.safetensors"]
 
 
+class TestApplyClipLora:
+    def test_none_is_noop_without_loading(self):
+        clip = MagicMock()
+        with patch("nodes.loader_common.comfy.sd.load_lora_for_models") as load:
+            assert loader_common.apply_clip_lora(clip, "None", 1.0, "L") is clip
+        load.assert_not_called()
+
+    def test_zero_strength_is_noop_without_loading(self):
+        clip = MagicMock()
+        with patch("nodes.loader_common.comfy.utils.load_torch_file") as read, \
+             patch("nodes.loader_common.comfy.sd.load_lora_for_models") as load:
+            assert loader_common.apply_clip_lora(clip, "l.safetensors", 0.0, "L") is clip
+        read.assert_not_called()
+        load.assert_not_called()
+
+    def test_patches_clip_only(self):
+        """model には None・強度 0 を渡し、CLIP にだけ strength を掛ける。"""
+        clip, patched_clip = MagicMock(), MagicMock()
+        with patch("nodes.loader_common.folder_paths.get_full_path", return_value="/m/l.safetensors"), \
+             patch("nodes.loader_common.comfy.utils.load_torch_file", return_value={"k": 1}), \
+             patch("nodes.loader_common.comfy.sd.load_lora_for_models",
+                   return_value=(None, patched_clip)) as load:
+            out = loader_common.apply_clip_lora(clip, "l.safetensors", 0.7, "L")
+        assert out is patched_clip
+        load.assert_called_once_with(None, clip, {"k": 1}, 0.0, 0.7)
+
+    def test_missing_file_raises_with_name(self):
+        with patch("nodes.loader_common.folder_paths.get_full_path", return_value=None), \
+             pytest.raises(ValueError, match="gone.safetensors"):
+            loader_common.apply_clip_lora(MagicMock(), "gone.safetensors", 1.0, "L")
+
+
 class TestEmptyLatent:
     @pytest.mark.parametrize("w,h,b", [(512, 512, 1), (768, 512, 2), (1024, 1024, 4)])
     def test_shape_and_device(self, w, h, b):

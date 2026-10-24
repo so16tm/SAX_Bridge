@@ -3,7 +3,7 @@
 import json
 import pytest
 from unittest.mock import MagicMock, patch
-from nodes.loader import SAX_Bridge_Loader_Lora
+from nodes.loader import SAX_Bridge_Loader_Lora, SAX_Bridge_Loader_Lora_Clip
 from nodes.io_types import _APPLIED_LORAS_KEY, _normalize_lora_name
 
 
@@ -286,3 +286,64 @@ class TestMalformedEntries:
             )
         assert fake.load_lora.call_count == 1
         assert fake.load_lora.call_args[0][2] == "ok.safetensors"
+
+
+class TestLoaderLoraClip:
+    """SAX_Bridge_Loader_Lora_Clip: CLIP だけに LoRA を適用する。"""
+
+    def test_clip_input_returns_patched_clip_and_no_pipe(self):
+        clip, patched = MagicMock(name="clip"), MagicMock(name="patched")
+        with patch("nodes.loader.apply_clip_lora", return_value=patched) as apply:
+            result = SAX_Bridge_Loader_Lora_Clip.execute(
+                clip=clip, lora_name="x.safetensors", strength_clip=0.8,
+            )
+        assert result.args == (None, patched)
+        apply.assert_called_once_with(clip, "x.safetensors", 0.8, "CLIP Lora Loader")
+
+    def test_pipe_input_replaces_only_clip(self):
+        pipe = _make_pipe(applied={"a"})
+        model, old_clip = pipe["model"], pipe["clip"]
+        patched = MagicMock(name="patched")
+        with patch("nodes.loader.apply_clip_lora", return_value=patched) as apply:
+            out_pipe, out_clip = SAX_Bridge_Loader_Lora_Clip.execute(
+                pipe=pipe, lora_name="x.safetensors", strength_clip=1.0,
+            ).args
+        apply.assert_called_once_with(old_clip, "x.safetensors", 1.0, "CLIP Lora Loader")
+        assert out_clip is patched
+        assert out_pipe is not pipe and out_pipe["clip"] is patched
+        assert out_pipe["model"] is model
+        assert out_pipe[_APPLIED_LORAS_KEY] == {"a"}
+        assert pipe["clip"] is old_clip  # 入力 pipe は変更しない
+
+    def test_clip_input_wins_over_pipe_clip(self):
+        pipe, explicit, patched = _make_pipe(), MagicMock(name="explicit"), MagicMock(name="patched")
+        with patch("nodes.loader.apply_clip_lora", return_value=patched) as apply:
+            out_pipe, out_clip = SAX_Bridge_Loader_Lora_Clip.execute(
+                pipe=pipe, clip=explicit, lora_name="x.safetensors", strength_clip=1.0,
+            ).args
+        assert apply.call_args.args[0] is explicit
+        assert out_pipe["clip"] is patched and out_clip is patched
+
+    def test_none_passes_clip_through(self):
+        pipe = _make_pipe()
+        with patch("nodes.loader_common.comfy.sd.load_lora_for_models") as load:
+            out_pipe, out_clip = SAX_Bridge_Loader_Lora_Clip.execute(
+                pipe=pipe, lora_name="None", strength_clip=1.0,
+            ).args
+        assert out_clip is pipe["clip"] and out_pipe["clip"] is pipe["clip"]
+        assert out_pipe is not pipe
+        load.assert_not_called()
+
+    def test_zero_strength_passes_clip_through(self):
+        pipe = _make_pipe()
+        with patch("nodes.loader_common.comfy.sd.load_lora_for_models") as load:
+            _, out_clip = SAX_Bridge_Loader_Lora_Clip.execute(
+                pipe=pipe, lora_name="x.safetensors", strength_clip=0.0,
+            ).args
+        assert out_clip is pipe["clip"]
+        load.assert_not_called()
+
+    @pytest.mark.parametrize("pipe", [None, {"model": object()}, {"clip": None}])
+    def test_no_clip_anywhere_raises(self, pipe):
+        with pytest.raises(ValueError, match="CLIP Lora Loader"):
+            SAX_Bridge_Loader_Lora_Clip.execute(pipe=pipe, lora_name="None", strength_clip=1.0)
