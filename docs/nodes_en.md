@@ -5,7 +5,7 @@
 [← Back to README](../README.md)
 
 > The node IDs, display names, categories and **Inputs** (widget) lists on this page are checked
-> against each node's `define_schema()` in CI by `tests/python/test_docs_schema_sync.py`.
+> against each node's `define_schema()` by `tests/python/test_docs_schema_sync.py`.
 > When you change the implementation, update this page and `docs/nodes_ja.md` as well.
 
 ---

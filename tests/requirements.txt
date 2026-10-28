@@ -2,12 +2,13 @@
 # ComfyUI 本体は tests/python/conftest.py がモックするため不要だが、
 # torch / numpy / Pillow はノード実装が実際に import するため本物が要る。
 #
-# CI では torch を CPU ビルドで先に入れる (PyPI の既定 wheel は CUDA 同梱で巨大なため):
-#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# 検査は scripts/check.sh で回す (tests/README.md 参照)。導入は
 #   pip install -r tests/requirements.txt
+# PyPI の既定 torch wheel は CUDA 同梱で巨大なため、download.pytorch.org が使える環境では先に CPU ビルドを入れてもよい:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
 #
 # aiohttp は HTTP ルート登録のテスト (web.RouteTableDef) が実物を使うため要る
-# (ComfyUI 本体が同梱しているが、CI には入っていない)。
+# (ComfyUI 本体が同梱しているが、素の Python 環境には入っていない)。
 #
 # ComfyUI の venv で動かす場合は torch/numpy/Pillow/aiohttp は既に入っているので
 # pytest だけが追加で入る。
