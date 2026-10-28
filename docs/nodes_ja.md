@@ -5,7 +5,7 @@
 [← README に戻る](../README_ja.md)
 
 > このページのノード ID・表示名・カテゴリ・**入力**（ウィジェット）一覧は、
-> `tests/python/test_docs_schema_sync.py` が各ノードの `define_schema()` と CI で突き合わせています。
+> `tests/python/test_docs_schema_sync.py` が各ノードの `define_schema()` と突き合わせています。
 > 実装を変えたらこのページと `docs/nodes_en.md` も合わせて更新してください。
 
 ---

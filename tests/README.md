@@ -69,18 +69,27 @@ UI 全面再設計 ([docs/plans/20260503-ui-architecture-overhaul.md](../../../d
 
 `legacy-fixture/` は Phase 2 (シリアライズ統合) の migration テスト入力データとして凍結。改変禁止。詳細は [legacy-fixture/README.md](workflows/legacy-fixture/README.md)。
 
-### CI
+### push 前のローカル検査
 
-Level 1 (pytest / JS テスト) と ruff は push・PR ごとに GitHub Actions
-([.github/workflows/ci.yml](../.github/workflows/ci.yml)) が自動実行する。Level 2 以降の手動テストは対象外。
+GitHub Actions の CI は無い。**PR を push する前に、必ずローカルで次を実行する。**
 
-| ジョブ | 内容 |
-|---|---|
-| `JS tests` | Node 20 / 22 / 24 で `node --test` |
-| `Python tests` | Python 3.11 / 3.12 で `pytest tests/python` (torch は CPU ビルド) |
-| `Ruff` | `ruff check .` |
+```bash
+scripts/check.sh
+```
 
-性能計測 (Level 1b) は所要時間に環境差が出るため CI では実行しない。
+`ruff check .` → `node --test` → `pytest tests/python -q` を順に実行し、最後に結果をまとめて出す
+(1 つ失敗しても残りは続行する)。Level 2 以降の手動テストと性能計測 (Level 1b) は対象外。
+
+push 時に自動で走らせたい場合は、clone ごとに一度だけ有効化する。
+
+```bash
+git config core.hooksPath .githooks   # .githooks/pre-push が scripts/check.sh を実行する
+git push --no-verify                  # どうしても飛ばすときだけ
+```
+
+テスト依存 (torch / numpy / Pillow / aiohttp / pytest) が無いとスクリプトは導入コマンドを示して止まる。
+`aiohttp` が無いと HTTP ルート登録のテストが失敗するので、`pip install -r tests/requirements.txt` で揃えること。
+クラウド環境は download.pytorch.org が使えないため、`requirements.txt` の通り PyPI から入れる (数分かかる)。
 
 ## ワークフロー一覧
 

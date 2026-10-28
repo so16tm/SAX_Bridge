@@ -16,3 +16,7 @@ testpaths = ["tests/python"]
 PublisherId = "so16tm"
 DisplayName = "SAX Bridge"
 Icon = "https://raw.githubusercontent.com/so16tm/SAX_Bridge/main/docs/images/icon.png"
+
+# ruff のバージョンで既定ルールが変わる (0.16 以降は既定が広い) ため、従来の既定 (0.15.8) に固定する。
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

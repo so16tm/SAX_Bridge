@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# push 前にローカル検査 (scripts/check.sh) を回す。有効化: git config core.hooksPath .githooks
+# どうしても飛ばすとき: git push --no-verify
+zero=0000000000000000000000000000000000000000
+only_delete=1
+while read -r _ local_sha _ _; do
+  [ "$local_sha" = "$zero" ] || only_delete=0
+done
+# ブランチ削除だけの push は検査対象が無い
+[ "$only_delete" -eq 1 ] && exit 0
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh"
