@@ -221,11 +221,16 @@ To update the tag dictionary manually, add [SAX Tag Dictionary](docs/nodes_en.md
 
 > sam3 is not required if you do not use SAX SAM3 nodes.
 
-Install sam3:
+Install sam3 into **the same Python that runs ComfyUI** (git is required; the exact interpreter is printed in ComfyUI's startup log as `Python executable`; for StabilityMatrix it is `<StabilityMatrix>\Data\Packages\ComfyUI\venv\Scripts\python.exe`):
 
 ```bash
-pip install git+https://github.com/facebookresearch/sam3.git
+python -m pip install --no-deps git+https://github.com/facebookresearch/sam3.git
+python -m pip install "setuptools<81" einops pycocotools psutil timm ftfy regex iopath tqdm huggingface_hub typing_extensions
 ```
+
+- `--no-deps` is deliberate: sam3 pins `numpy<2` (and `ftfy==6.1.1`), so a plain `pip install` downgrades numpy in the ComfyUI environment, which can break other custom nodes. The second line installs the runtime dependencies without that pin.
+- `setuptools<81` is needed because sam3 imports `pkg_resources`, which recent setuptools no longer ships. `einops`, `pycocotools` and `psutil` are imported by sam3 but not declared in its dependencies.
+- Restart ComfyUI afterwards. Checkpoints go in `models/sam3/` (the Hugging Face repo requires an access request).
 
 #### Windows: triton is required
 
