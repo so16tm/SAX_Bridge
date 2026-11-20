@@ -221,11 +221,16 @@ Autocomplete++ は Primitive Store の実行時 random seed や Pipe 内の seed
 
 > SAX SAM3 系ノードを使用しない場合、sam3 のインストールは不要です。
 
-sam3 のインストール：
+sam3 は **ComfyUI を実行している Python** にインストールします（git が必要。使用中のインタプリタは ComfyUI 起動ログの `Python executable` に出ます。StabilityMatrix なら `<StabilityMatrix>\Data\Packages\ComfyUI\venv\Scripts\python.exe`）：
 
 ```bash
-pip install git+https://github.com/facebookresearch/sam3.git
+python -m pip install --no-deps git+https://github.com/facebookresearch/sam3.git
+python -m pip install "setuptools<81" einops pycocotools psutil timm ftfy regex iopath tqdm huggingface_hub typing_extensions
 ```
+
+- `--no-deps` は意図的です。sam3 は `numpy<2`（と `ftfy==6.1.1`）を固定しているため、通常の `pip install` だと ComfyUI 環境の numpy がダウングレードされ、他のカスタムノードが壊れることがあります。2 行目で、この固定なしに実行時の依存を入れます。
+- sam3 は `pkg_resources` を import しますが、最近の setuptools には含まれないため `setuptools<81` が必要です。`einops`・`pycocotools`・`psutil` も sam3 が import しますが、sam3 の依存宣言には含まれていません。
+- インストール後は ComfyUI を再起動してください。チェックポイントは `models/sam3/` に置きます（Hugging Face 側でアクセス申請が必要）。
 
 #### Windows 環境では triton が必要
 

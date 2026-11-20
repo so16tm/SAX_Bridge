@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import os
+import sys
 from typing import Dict
 
 import numpy as np
@@ -160,7 +161,8 @@ def _sam3_unavailable_error() -> RuntimeError:
     # 元のImportErrorを含めて表示することで、triton未導入など間接的な依存失敗も切り分け可能にする
     return RuntimeError(
         f"[SAX_Bridge] Failed to load SAM3 module: {_SAM3_IMPORT_ERROR}. "
-        "See README (Dependencies > SAM3) for installation instructions, "
+        f"Install into the Python running ComfyUI ({sys.executable}); "
+        "see README (Dependencies > SAM3) for installation instructions, "
         "including Windows triton setup."
     )
 
