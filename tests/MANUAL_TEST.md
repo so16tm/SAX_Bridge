@@ -493,6 +493,7 @@
 - [ ] **model untouched**: MODEL 側の LoRA は変化しない（同じ Loader の MODEL 出力を直結しても結果が変わらない）
 - [ ] **chain**: 本ノードを 2 つ直列につなぎ別々の LoRA を指定 → エラーなく実行できる
 - [ ] **missing**: ワークフロー保存後に LoRA ファイルを退避して実行 → LoRA 名を示すエラーになる
+- [ ] **速度ログ（遅延調査）**: LoRA を当てて実行 → コンソールに `LoRA '...' registered on CLIP in …s` と、後段 SAX Prompt で `CLIP load_model with N patched keys took …s` が出る。極端に遅い場合は、どちらの行の秒数が大きいか（読み込み/パッチ登録か、エンコード時の再パッチか）と、毎回か初回のみかを記録する
 
 ## M. UI Phase 1.2.A 検証 (TextCatalog Coordinator 移行)
 

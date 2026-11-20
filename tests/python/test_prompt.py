@@ -183,6 +183,23 @@ def test_concat_applies_lora_and_keeps_dynamic_syntax_without_impact(mock_apply,
     assert mock_apply.call_args.args[2][0][1] == .5
 
 
+class TestLogPatchedLoad:
+    """パッチ済み CLIP のロード時間ログ（実機の遅延調査用）。"""
+
+    def test_logs_only_when_clip_has_patches(self, caplog):
+        from nodes.prompt import _log_patched_load
+
+        patched = MagicMock()
+        patched.patcher.patches = {"k1": 1, "k2": 2}
+        plain = MagicMock()
+        plain.patcher.patches = {}
+        with caplog.at_level("INFO", logger="SAX_Bridge"):
+            _log_patched_load(plain, 0.5)
+            assert "patched keys" not in caplog.text
+            _log_patched_load(patched, 1.25)
+        assert "2 patched keys took 1.250s" in caplog.text
+
+
 class TestEncodeWithBreak:
     """_encode_with_break の conditioning 構築を検証する。"""
 

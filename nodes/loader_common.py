@@ -6,6 +6,8 @@
 片方だけ直して食い違う事故を防ぐため、共通部分をここへ集約する。
 """
 
+import logging
+import time
 from typing import Any
 
 import comfy.samplers
@@ -14,6 +16,8 @@ import comfy.utils
 import folder_paths
 import torch
 from comfy_api.latest import io
+
+logger = logging.getLogger("SAX_Bridge")
 
 
 def sampling_inputs() -> list:
@@ -110,8 +114,16 @@ def apply_clip_lora(clip: Any, lora_name: str, strength: float, label: str) -> A
         return clip
 
     lora_path = resolve_path("loras", lora_name, f"{label}: LoRA")
+    started = time.perf_counter()
     lora = comfy.utils.load_torch_file(lora_path)
+    loaded = time.perf_counter()
     _, clip = comfy.sd.load_lora_for_models(None, clip, lora, 0.0, strength)
+    # 実機での遅延調査用: LoRA の読み込みとパッチ登録に掛かった時間を残す。
+    # 重みの実適用は次のエンコード時 (clip.load_model) に行われる。
+    logger.info(
+        "[SAX_Bridge] %s: LoRA '%s' strength=%s registered on CLIP in %.3fs (file read %.3fs)",
+        label, lora_name, strength, time.perf_counter() - loaded, loaded - started,
+    )
     return clip
 
 
